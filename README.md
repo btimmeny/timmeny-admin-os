@@ -28,12 +28,14 @@ Request:
   "list": "todo",
   "action_group": "Launch",
   "action_date": "2026-06-21",
-  "action": "Decision"
+  "action": "Decision",
+  "annual_objective": "Grow Revenue",
+  "initiative_project": "Partner Pipeline"
 }
 ```
 
 `list` is optional and defaults to `todo`. Use `gs` to create the item in the GS todo target.
-`action_group`, `action_date`, and `action` are optional Monday.com column values.
+`annual_objective`, `initiative_project`, `action_group`, `action_date`, and `action` are optional Monday.com column values.
 
 Response:
 
@@ -45,7 +47,9 @@ Response:
   "list": "todo",
   "action_group": "Launch",
   "action_date": "2026-06-21",
-  "action": "Decision"
+  "action": "Decision",
+  "annual_objective": "Grow Revenue",
+  "initiative_project": "Partner Pipeline"
 }
 ```
 
@@ -90,7 +94,12 @@ Response:
       "group_title": "To Do",
       "action_group": "Launch",
       "action_date": "2026-06-21",
-      "action": "Decision"
+      "action": "Decision",
+      "annual_objective": "Grow Revenue",
+      "initiative_project": "Partner Pipeline",
+      "status": "Not Yet Started",
+      "owner": "Ben",
+      "due_date": "2026-07-10"
     }
   ]
 }
@@ -105,13 +114,15 @@ Request:
 ```json
 {
   "list": "gs",
+  "annual_objective": "Grow Revenue",
+  "initiative_project": "Partner Pipeline",
   "action_group": "Partnerships",
   "action_date": "2026-06-21",
   "action": "Decision"
 }
 ```
 
-At least one of `action_group`, `action_date`, or `action` is required. The board must have columns named exactly `Action Group`, `Action Date`, and `Action` when those values are used.
+At least one of `annual_objective`, `initiative_project`, `action_group`, `action_date`, or `action` is required. The board must have columns named exactly `Annual Objective`, `Initiative / Project`, `Action Group`, `Action Date`, and `Action` when those values are used.
 When `action` is `Decision`, the service also writes `Not Yet Started` to the `Status` column.
 
 ### `POST /todos/bulk-action-metadata`
@@ -126,6 +137,8 @@ Request:
     {
       "item_id": "...",
       "list": "todo",
+      "annual_objective": "Grow Revenue",
+      "initiative_project": "Partner Pipeline",
       "action_group": "Launch"
     },
     {
@@ -154,6 +167,8 @@ Response:
       "action_group": "Launch",
       "action_date": null,
       "action": null,
+      "annual_objective": "Grow Revenue",
+      "initiative_project": "Partner Pipeline",
       "error": null
     }
   ]
@@ -175,10 +190,14 @@ Set these environment variables:
 
 The organize workflow also expects these Monday.com columns on each board:
 
+- `Annual Objective`: text, dropdown, or status column for strategic objective alignment.
+- `Initiative / Project`: text, dropdown, or status column for major initiative or project alignment.
 - `Action Group`: text column for GPT-selected themes.
 - `Action Date`: date column for decision/action timing.
 - `Action`: dropdown or status column for labels such as `Decision`.
 - `Status`: status column. Decision items are set to `Not Yet Started`.
+- `Owner`: people or text column returned during board reviews when present.
+- `Due Date`: date column returned during board reviews when present.
 
 Use `.env.example` as the local template.
 

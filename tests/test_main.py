@@ -80,6 +80,8 @@ def test_create_todo_creates_monday_item(monkeypatch):
         "action_group": None,
         "action_date": None,
         "action": None,
+        "annual_objective": None,
+        "initiative_project": None,
     }
     assert requests == [
         {
@@ -184,6 +186,8 @@ def test_create_todo_can_target_gs_list(monkeypatch):
         "action_group": None,
         "action_date": None,
         "action": None,
+        "annual_objective": None,
+        "initiative_project": None,
     }
     assert requests[0]["variables"] == {
         "board_id": "111222333",
@@ -376,6 +380,8 @@ def test_create_todo_can_set_action_metadata(monkeypatch):
         "action_group": "Launch",
         "action_date": "2026-06-21",
         "action": "Decision",
+        "annual_objective": None,
+        "initiative_project": None,
     }
     assert requests[0]["variables"] == {"board_id": "todo-board"}
     assert json.loads(requests[1]["variables"]["column_values"]) == {
@@ -466,6 +472,8 @@ def test_update_todo_action_metadata(monkeypatch):
         "action_group": "Partnerships",
         "action_date": "2026-06-21",
         "action": "Decision",
+        "annual_objective": None,
+        "initiative_project": None,
     }
     assert requests[1]["variables"]["board_id"] == "gs-board"
     assert requests[1]["variables"]["item_id"] == "existing-1"
@@ -738,6 +746,8 @@ def test_bulk_update_todo_action_metadata_updates_multiple_boards(monkeypatch):
                 "action_group": "Launch",
                 "action_date": None,
                 "action": None,
+                "annual_objective": None,
+                "initiative_project": None,
                 "error": None,
             },
             {
@@ -747,6 +757,8 @@ def test_bulk_update_todo_action_metadata_updates_multiple_boards(monkeypatch):
                 "action_group": "Partnerships",
                 "action_date": None,
                 "action": None,
+                "annual_objective": None,
+                "initiative_project": None,
                 "error": None,
             },
         ],
@@ -855,6 +867,8 @@ def test_bulk_update_todo_action_metadata_reports_partial_failures(monkeypatch):
                 "action_group": "Launch",
                 "action_date": None,
                 "action": None,
+                "annual_objective": None,
+                "initiative_project": None,
                 "error": None,
             },
             {
@@ -864,11 +878,110 @@ def test_bulk_update_todo_action_metadata_reports_partial_failures(monkeypatch):
                 "action_group": "Partnerships",
                 "action_date": None,
                 "action": None,
+                "annual_objective": None,
+                "initiative_project": None,
                 "error": 'Monday.com board is missing the "Action Group" column.',
             },
         ],
     }
     assert len(requests) == 3
+
+
+def test_bulk_update_todo_action_metadata_updates_gs_planning_fields(monkeypatch):
+    requests = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            requests.append(json)
+            request = httpx.Request("POST", url)
+            if "GetBoardColumns" in json["query"]:
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "boards": [
+                                {
+                                    "columns": [
+                                        {
+                                            "id": "objective_mkp",
+                                            "title": "Annual Objective",
+                                            "type": "dropdown",
+                                        },
+                                        {
+                                            "id": "initiative_mkp",
+                                            "title": "Initiative / Project",
+                                            "type": "text",
+                                        },
+                                        {
+                                            "id": "group_mkp",
+                                            "title": "Action Group",
+                                            "type": "text",
+                                        },
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "change_multiple_column_values": {
+                            "id": json["variables"]["item_id"]
+                        }
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.setenv("GS_TODO_BOARD_ID", "gs-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/todos/bulk-action-metadata",
+        json={
+            "updates": [
+                {
+                    "item_id": "gs-1",
+                    "list": "gs",
+                    "annual_objective": "Grow Revenue",
+                    "initiative_project": "Partner Pipeline",
+                    "action_group": "Partnerships",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0] == {
+        "success": True,
+        "item_id": "gs-1",
+        "list": "gs",
+        "action_group": "Partnerships",
+        "action_date": None,
+        "action": None,
+        "annual_objective": "Grow Revenue",
+        "initiative_project": "Partner Pipeline",
+        "error": None,
+    }
+    assert json.loads(requests[1]["variables"]["column_values"]) == {
+        "objective_mkp": {"labels": ["Grow Revenue"]},
+        "initiative_mkp": "Partner Pipeline",
+        "group_mkp": "Partnerships",
+    }
 
 
 def test_list_todos_returns_items_from_both_boards(monkeypatch):
@@ -963,6 +1076,11 @@ def test_list_todos_returns_items_from_both_boards(monkeypatch):
                 "action_group": "Launch",
                 "action_date": "2026-06-21",
                 "action": "Decision",
+                "annual_objective": None,
+                "initiative_project": None,
+                "status": None,
+                "owner": None,
+                "due_date": None,
             },
             {
                 "item_id": "2",
@@ -973,6 +1091,11 @@ def test_list_todos_returns_items_from_both_boards(monkeypatch):
                 "action_group": None,
                 "action_date": None,
                 "action": None,
+                "annual_objective": None,
+                "initiative_project": None,
+                "status": None,
+                "owner": None,
+                "due_date": None,
             },
         ],
     }
@@ -1043,6 +1166,11 @@ def test_list_todos_can_filter_to_gs(monkeypatch):
                 "action_group": None,
                 "action_date": None,
                 "action": None,
+                "annual_objective": None,
+                "initiative_project": None,
+                "status": None,
+                "owner": None,
+                "due_date": None,
             }
         ],
     }
@@ -1050,6 +1178,105 @@ def test_list_todos_can_filter_to_gs(monkeypatch):
     assert requests[0]["variables"] == {
         "board_id": "gs-board",
         "limit": 10,
+    }
+
+
+def test_list_todos_returns_gs_planning_context(monkeypatch):
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            request = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "boards": [
+                            {
+                                "columns": [],
+                                "items_page": {
+                                    "items": [
+                                        {
+                                            "id": "gs-1",
+                                            "name": "Follow up with partner",
+                                            "group": None,
+                                            "column_values": [
+                                                {
+                                                    "id": "status_mkp",
+                                                    "text": "Not Yet Started",
+                                                    "value": None,
+                                                    "column": {"title": "Status"},
+                                                },
+                                                {
+                                                    "id": "owner_mkp",
+                                                    "text": "Ben",
+                                                    "value": None,
+                                                    "column": {"title": "Owner"},
+                                                },
+                                                {
+                                                    "id": "due_mkp",
+                                                    "text": "2026-07-10",
+                                                    "value": None,
+                                                    "column": {"title": "Due Date"},
+                                                },
+                                                {
+                                                    "id": "objective_mkp",
+                                                    "text": "Grow Revenue",
+                                                    "value": None,
+                                                    "column": {"title": "Annual Objective"},
+                                                },
+                                                {
+                                                    "id": "initiative_mkp",
+                                                    "text": "Partner Pipeline",
+                                                    "value": None,
+                                                    "column": {"title": "Initiative / Project"},
+                                                },
+                                                {
+                                                    "id": "group_mkp",
+                                                    "text": "Partnerships",
+                                                    "value": None,
+                                                    "column": {"title": "Action Group"},
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.setenv("GS_TODO_BOARD_ID", "gs-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/todos?list=gs")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0] == {
+        "item_id": "gs-1",
+        "title": "Follow up with partner",
+        "list": "gs",
+        "group_id": None,
+        "group_title": None,
+        "action_group": "Partnerships",
+        "action_date": None,
+        "action": None,
+        "annual_objective": "Grow Revenue",
+        "initiative_project": "Partner Pipeline",
+        "status": "Not Yet Started",
+        "owner": "Ben",
+        "due_date": "2026-07-10",
     }
 
 

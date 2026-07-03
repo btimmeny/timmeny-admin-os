@@ -14,6 +14,10 @@ ACTION_GROUP_COLUMN_TITLE = "Action Group"
 ACTION_DATE_COLUMN_TITLE = "Action Date"
 ACTION_COLUMN_TITLE = "Action"
 STATUS_COLUMN_TITLE = "Status"
+OWNER_COLUMN_TITLE = "Owner"
+DUE_DATE_COLUMN_TITLE = "Due Date"
+ANNUAL_OBJECTIVE_COLUMN_TITLE = "Annual Objective"
+INITIATIVE_PROJECT_COLUMN_TITLE = "Initiative / Project"
 DECISION_ACTION = "Decision"
 DEFAULT_DECISION_STATUS = "Not Yet Started"
 DONE_STATUS_LABELS = {"done", "complete", "completed"}
@@ -36,8 +40,15 @@ class TodoActionMetadata(BaseModel):
     action_group: str | None = Field(default=None, max_length=255)
     action_date: date | None = None
     action: str | None = Field(default=None, max_length=255)
+    annual_objective: str | None = Field(default=None, max_length=255)
+    initiative_project: str | None = Field(default=None, max_length=255)
 
-    @field_validator("action_group", "action")
+    @field_validator(
+        "action_group",
+        "action",
+        "annual_objective",
+        "initiative_project",
+    )
     @classmethod
     def optional_strings_must_not_be_blank(cls, value: str | None) -> str | None:
         if value is None:
@@ -112,6 +123,9 @@ class TodoItem(TodoActionMetadata):
     list: TodoList
     group_id: str | None = None
     group_title: str | None = None
+    status: str | None = None
+    owner: str | None = None
+    due_date: str | None = None
 
 
 class TodoListResponse(BaseModel):
@@ -162,6 +176,7 @@ async def list_todos(
                 group_id=get_monday_item_group(item).get("id"),
                 group_title=get_monday_item_group(item).get("title"),
                 **get_monday_action_metadata(item),
+                **get_monday_planning_metadata(item),
             )
             for item in monday_items
         )
@@ -185,6 +200,8 @@ async def create_todo(
         action_group=payload.action_group,
         action_date=payload.action_date,
         action=payload.action,
+        annual_objective=payload.annual_objective,
+        initiative_project=payload.initiative_project,
     )
 
     item_id = await create_monday_item(
@@ -203,6 +220,8 @@ async def create_todo(
         action_group=payload.action_group,
         action_date=payload.action_date,
         action=payload.action,
+        annual_objective=payload.annual_objective,
+        initiative_project=payload.initiative_project,
     )
 
 
@@ -223,6 +242,8 @@ async def update_todo_action_metadata(
         action_group=payload.action_group,
         action_date=payload.action_date,
         action=payload.action,
+        annual_objective=payload.annual_objective,
+        initiative_project=payload.initiative_project,
     )
 
     if not column_values:
@@ -245,6 +266,8 @@ async def update_todo_action_metadata(
         action_group=payload.action_group,
         action_date=payload.action_date,
         action=payload.action,
+        annual_objective=payload.annual_objective,
+        initiative_project=payload.initiative_project,
     )
 
 
@@ -275,6 +298,8 @@ async def bulk_update_todo_action_metadata(
                 action_group=update.action_group,
                 action_date=update.action_date,
                 action=update.action,
+                annual_objective=update.annual_objective,
+                initiative_project=update.initiative_project,
             )
             if not column_values:
                 raise HTTPException(
@@ -296,6 +321,8 @@ async def bulk_update_todo_action_metadata(
                     action_group=update.action_group,
                     action_date=update.action_date,
                     action=update.action,
+                    annual_objective=update.annual_objective,
+                    initiative_project=update.initiative_project,
                 )
             )
         except HTTPException as exc:
@@ -307,6 +334,8 @@ async def bulk_update_todo_action_metadata(
                     action_group=update.action_group,
                     action_date=update.action_date,
                     action=update.action,
+                    annual_objective=update.annual_objective,
+                    initiative_project=update.initiative_project,
                     error=exc.detail,
                 )
             )
@@ -379,6 +408,8 @@ def get_monday_action_metadata(item: dict[str, Any]) -> dict[str, str | None]:
         "action_group": None,
         "action_date": None,
         "action": None,
+        "annual_objective": None,
+        "initiative_project": None,
     }
     column_values = item.get("column_values")
     if not isinstance(column_values, list):
@@ -402,8 +433,20 @@ def get_monday_action_metadata(item: dict[str, Any]) -> dict[str, str | None]:
             metadata["action_date"] = text
         elif title == ACTION_COLUMN_TITLE:
             metadata["action"] = text
+        elif title == ANNUAL_OBJECTIVE_COLUMN_TITLE:
+            metadata["annual_objective"] = text
+        elif title == INITIATIVE_PROJECT_COLUMN_TITLE:
+            metadata["initiative_project"] = text
 
     return metadata
+
+
+def get_monday_planning_metadata(item: dict[str, Any]) -> dict[str, str | None]:
+    return {
+        "status": get_monday_column_text(item, STATUS_COLUMN_TITLE),
+        "owner": get_monday_column_text(item, OWNER_COLUMN_TITLE),
+        "due_date": get_monday_column_text(item, DUE_DATE_COLUMN_TITLE),
+    }
 
 
 def is_done_monday_item(item: dict[str, Any]) -> bool:
@@ -608,11 +651,15 @@ async def build_action_column_values(
     action_group: str | None,
     action_date: date | None,
     action: str | None,
+    annual_objective: str | None,
+    initiative_project: str | None,
 ) -> dict[str, Any]:
     requested_columns = {
         ACTION_GROUP_COLUMN_TITLE: action_group,
         ACTION_DATE_COLUMN_TITLE: action_date,
         ACTION_COLUMN_TITLE: action,
+        ANNUAL_OBJECTIVE_COLUMN_TITLE: annual_objective,
+        INITIATIVE_PROJECT_COLUMN_TITLE: initiative_project,
         STATUS_COLUMN_TITLE: DEFAULT_DECISION_STATUS if is_decision_action(action) else None,
     }
     if all(value is None for value in requested_columns.values()):
@@ -624,6 +671,8 @@ async def build_action_column_values(
         action_group=action_group,
         action_date=action_date,
         action=action,
+        annual_objective=annual_objective,
+        initiative_project=initiative_project,
     )
 
 
@@ -632,6 +681,8 @@ def build_action_column_values_from_columns(
     action_group: str | None,
     action_date: date | None,
     action: str | None,
+    annual_objective: str | None,
+    initiative_project: str | None,
 ) -> dict[str, Any]:
     column_values: dict[str, Any] = {}
 
@@ -646,6 +697,20 @@ def build_action_column_values_from_columns(
     if action is not None:
         column = require_board_column(columns_by_title, ACTION_COLUMN_TITLE)
         column_values[column["id"]] = build_label_column_value(column, action)
+
+    if annual_objective is not None:
+        column = require_board_column(columns_by_title, ANNUAL_OBJECTIVE_COLUMN_TITLE)
+        column_values[column["id"]] = build_planning_column_value(
+            column,
+            annual_objective,
+        )
+
+    if initiative_project is not None:
+        column = require_board_column(columns_by_title, INITIATIVE_PROJECT_COLUMN_TITLE)
+        column_values[column["id"]] = build_planning_column_value(
+            column,
+            initiative_project,
+        )
 
     if is_decision_action(action):
         column = require_board_column(columns_by_title, STATUS_COLUMN_TITLE)
@@ -665,6 +730,12 @@ def build_label_column_value(column: dict[str, Any], label: str) -> dict[str, An
     if column.get("type") == "status":
         return {"label": label}
     return {"labels": [label]}
+
+
+def build_planning_column_value(column: dict[str, Any], value: str) -> str | dict[str, Any]:
+    if column.get("type") in {"dropdown", "status"}:
+        return build_label_column_value(column, value)
+    return value
 
 
 async def get_board_columns_by_title(

@@ -122,7 +122,7 @@ Request:
 }
 ```
 
-At least one of `annual_objective`, `initiative_project`, `action_group`, `action_date`, or `action` is required. The board must have columns named exactly `Annual Objective`, `Initiative / Project`, `Action Group`, `Action Date`, and `Action` when those values are used.
+At least one of `annual_objective`, `initiative_project`, `action_group`, `action_date`, or `action` is required. The board must have columns named exactly `Annual Objective`, `Initiative`, `Action Group`, `Action Date`, and `Action` when those values are used.
 When `action` is `Decision`, the service also writes `Not Yet Started` to the `Status` column.
 
 ### `POST /todos/bulk-action-metadata`
@@ -191,7 +191,7 @@ Set these environment variables:
 The organize workflow also expects these Monday.com columns on each board:
 
 - `Annual Objective`: text, dropdown, or status column for strategic objective alignment.
-- `Initiative / Project`: text, dropdown, or status column for major initiative or project alignment.
+- `Initiative`: text, dropdown, or status column for major initiative or project alignment.
 - `Action Group`: text column for GPT-selected themes.
 - `Action Date`: date column for decision/action timing.
 - `Action`: dropdown or status column for labels such as `Decision`.

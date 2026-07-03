@@ -10,7 +10,7 @@ paths:
     get:
       operationId: listTodos
       summary: List todo items
-      description: Lists open todo items from the regular To Do List board, the GS Initiatives & Action Items board, or both, including Status, Owner, Due Date, Annual Objective, Initiative / Project, Action Group, Action Date, and Action metadata when present. Items with Status values Done, Complete, or Completed are excluded unless include_done is true.
+      description: Lists open todo items from selected boards, including planning metadata when present. Done, Complete, and Completed items are excluded unless include_done is true.
       security:
         - ApiKeyAuth: []
       parameters:
@@ -91,7 +91,7 @@ paths:
     patch:
       operationId: updateTodoActionMetadata
       summary: Update todo action metadata
-      description: Updates planning metadata for an existing todo item, including Annual Objective, Initiative / Project, Action Group, Action Date, and/or Action.
+      description: Updates planning metadata for an existing todo item, including Annual Objective, Initiative, Action Group, Action Date, and/or Action.
       security:
         - ApiKeyAuth: []
       parameters:
@@ -128,7 +128,7 @@ paths:
     post:
       operationId: bulkUpdateTodoActionMetadata
       summary: Bulk update todo action metadata
-      description: Updates Annual Objective, Initiative / Project, Action Group, Action Date, and/or Action for multiple existing todo items in one request. Use this when applying planning or grouping changes to more than one item.
+      description: Updates Annual Objective, Initiative, Action Group, Action Date, and/or Action for multiple existing todo items in one request. Use this when applying planning or grouping changes to more than one item.
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -195,7 +195,7 @@ components:
             - string
             - "null"
           maxLength: 255
-          description: The major initiative or project to write into the Monday.com Initiative / Project column.
+          description: The major initiative or project to write into the Monday.com Initiative column.
     TodoCreateRequest:
       type: object
       additionalProperties: false

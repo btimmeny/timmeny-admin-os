@@ -918,7 +918,7 @@ def test_bulk_update_todo_action_metadata_updates_gs_planning_fields(monkeypatch
                                         },
                                         {
                                             "id": "initiative_mkp",
-                                            "title": "Initiative / Project",
+                                            "title": "Initiative",
                                             "type": "text",
                                         },
                                         {
@@ -1236,7 +1236,7 @@ def test_list_todos_returns_gs_planning_context(monkeypatch):
                                                     "id": "initiative_mkp",
                                                     "text": "Partner Pipeline",
                                                     "value": None,
-                                                    "column": {"title": "Initiative / Project"},
+                                                    "column": {"title": "Initiative"},
                                                 },
                                                 {
                                                     "id": "group_mkp",

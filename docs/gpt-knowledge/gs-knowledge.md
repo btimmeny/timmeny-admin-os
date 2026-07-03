@@ -30,11 +30,11 @@ Initial placeholders:
 
 - Confirm the active GS priorities for this planning period.
 - Identify blocked or ambiguous work that needs a decision.
-- Keep open action items aligned to Annual Objective, Initiative / Project, and Action Group.
+- Keep open action items aligned to Annual Objective, Initiative, and Action Group.
 
 ## Current Key Projects
 
-Use this section to define major initiatives or projects. These values should guide the `Initiative / Project` Monday.com field.
+Use this section to define major initiatives or projects. These values should guide the `Initiative` Monday.com field.
 
 Initial placeholders:
 
@@ -65,7 +65,7 @@ Initial processes:
 - Weekly Planning: review all open GS items, recommend metadata updates, apply confirmed bulk updates, refresh top priorities, and suggest knowledge additions.
 - Board Hygiene: completed items should not be recategorized unless explicitly requested.
 - Decision Capture: when ambiguity blocks progress, create a decision item with Action `Decision`, today's Action Date, a useful Action Group, and Status `Not Yet Started`.
-- Classification: infer Annual Objective, Initiative / Project, and Action Group from item title, existing metadata, knowledge context, and conversation history.
+- Classification: infer Annual Objective, Initiative, and Action Group from item title, existing metadata, knowledge context, and conversation history.
 
 ## Preferred Action Groups
 
@@ -91,7 +91,7 @@ Create a new Action Group only when none of these fit well.
 
 High confidence:
 
-- The title or existing metadata clearly maps to a known Annual Objective, Initiative / Project, and Action Group.
+- The title or existing metadata clearly maps to a known Annual Objective, Initiative, and Action Group.
 - The item uses names or language already captured in this knowledge file.
 - Similar items already share a clear classification pattern.
 
@@ -100,7 +100,7 @@ Low confidence:
 - The item is vague.
 - Multiple objectives or initiatives could apply.
 - The item references a person, project, partner, or process not yet captured here.
-- The update would create a new Annual Objective or Initiative / Project.
+- The update would create a new Annual Objective or Initiative.
 
 When confidence is high, recommend the update and apply it after user confirmation. When confidence is low, ask for clarification before updating.
 
@@ -133,8 +133,8 @@ Reason: Several open GS action items reference partner follow-up work.
 Use this workflow when asked to run GS weekly planning:
 
 1. Read all open GS action items with `listTodos` using list `gs`.
-2. Review Title, Status, Owner, Due Date, Annual Objective, Initiative / Project, and Action Group.
-3. Recommend updates to Annual Objective, Initiative / Project, and Action Group.
+2. Review Title, Status, Owner, Due Date, Annual Objective, Initiative, and Action Group.
+3. Recommend updates to Annual Objective, Initiative, and Action Group.
 4. Ask for confirmation before applying broad updates.
 5. Use `bulkUpdateTodoActionMetadata` after confirmation.
 6. Refresh the Top Priorities section by suggesting knowledge changes for the user to approve.

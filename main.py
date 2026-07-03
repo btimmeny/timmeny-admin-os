@@ -21,8 +21,10 @@ INITIATIVE_PROJECT_COLUMN_TITLE = "Initiative"
 DECISION_ACTION = "Decision"
 DEFAULT_DECISION_STATUS = "Not Yet Started"
 DONE_STATUS_LABELS = {"done", "complete", "completed"}
+MONDAY_ITEMS_PAGE_SIZE = 500
+GS_KEY_INITIATIVES_BOARD_ID_VARIABLE = "GS_KEY_INITIATIVES_BOARD_ID"
 
-app = FastAPI(title="Timmeny-ToDo-OS", version="0.1.0")
+app = FastAPI(title="Timmeny-ToDo-OS", version="0.3.0")
 
 
 class TodoList(StrEnum):
@@ -134,6 +136,22 @@ class TodoListResponse(BaseModel):
     items: list[TodoItem]
 
 
+class KeyInitiativeItem(TodoActionMetadata):
+    item_id: str
+    title: str
+    group_id: str | None = None
+    group_title: str | None = None
+    status: str | None = None
+    owner: str | None = None
+    due_date: str | None = None
+
+
+class KeyInitiativeListResponse(BaseModel):
+    success: bool
+    count: int
+    items: list[KeyInitiativeItem]
+
+
 class HealthResponse(BaseModel):
     status: str
 
@@ -146,7 +164,7 @@ async def health() -> HealthResponse:
 @app.get("/todos", response_model=TodoListResponse)
 async def list_todos(
     list_filter: TodoListFilter = Query(default=TodoListFilter.ALL, alias="list"),
-    limit: int = Query(default=25, ge=1, le=100),
+    limit: int = Query(default=MONDAY_ITEMS_PAGE_SIZE, ge=1, le=MONDAY_ITEMS_PAGE_SIZE),
     include_done: bool = Query(default=False),
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
@@ -182,6 +200,39 @@ async def list_todos(
         )
 
     return TodoListResponse(success=True, count=len(items), items=items)
+
+
+@app.get("/key-initiatives", response_model=KeyInitiativeListResponse)
+async def list_key_initiatives(
+    limit: int = Query(default=MONDAY_ITEMS_PAGE_SIZE, ge=1, le=MONDAY_ITEMS_PAGE_SIZE),
+    include_done: bool = Query(default=False),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> KeyInitiativeListResponse:
+    verify_api_key(x_api_key=x_api_key, authorization=authorization)
+
+    monday_token = get_monday_token()
+    board_id = get_required_env_var(GS_KEY_INITIATIVES_BOARD_ID_VARIABLE)
+    monday_items = await get_monday_items(
+        token=monday_token,
+        board_id=board_id,
+        limit=limit,
+    )
+    if not include_done:
+        monday_items = [item for item in monday_items if not is_done_monday_item(item)]
+
+    items = [
+        KeyInitiativeItem(
+            item_id=item["id"],
+            title=item["name"],
+            group_id=get_monday_item_group(item).get("id"),
+            group_title=get_monday_item_group(item).get("title"),
+            **get_monday_action_metadata(item),
+            **get_monday_planning_metadata(item),
+        )
+        for item in monday_items
+    ]
+    return KeyInitiativeListResponse(success=True, count=len(items), items=items)
 
 
 @app.post("/todos", response_model=TodoCreateResponse)
@@ -351,13 +402,17 @@ async def bulk_update_todo_action_metadata(
 
 
 def get_monday_token() -> str:
-    monday_token = os.getenv("MONDAY_API_TOKEN")
-    if not monday_token:
+    return get_required_env_var("MONDAY_API_TOKEN")
+
+
+def get_required_env_var(variable_name: str) -> str:
+    value = os.getenv(variable_name)
+    if not value:
         raise HTTPException(
             status_code=500,
-            detail="MONDAY_API_TOKEN environment variable is not configured.",
+            detail=f"{variable_name} environment variable is not configured.",
         )
-    return monday_token
+    return value
 
 
 def verify_api_key(
@@ -503,6 +558,7 @@ async def get_monday_items(token: str, board_id: str, limit: int) -> list[dict[s
           title
         }
         items_page(limit: $limit) {
+          cursor
           items {
             id
             name
@@ -527,7 +583,7 @@ async def get_monday_items(token: str, board_id: str, limit: int) -> list[dict[s
             "query": query,
             "variables": {
                 "board_id": board_id,
-                "limit": limit,
+                "limit": min(limit, MONDAY_ITEMS_PAGE_SIZE),
             },
         },
     )
@@ -545,7 +601,73 @@ async def get_monday_items(token: str, board_id: str, limit: int) -> list[dict[s
         for column in board.get("columns", [])
         if isinstance(column, dict) and column.get("id")
     }
-    items = board.get("items_page", {}).get("items", [])
+    items_page = board.get("items_page", {})
+    items = list(items_page.get("items", []))
+    attach_monday_column_metadata(items=items, columns_by_id=columns_by_id)
+
+    cursor = items_page.get("cursor")
+    while cursor and len(items) < limit:
+        next_items_page = await get_next_monday_items_page(
+            token=token,
+            cursor=cursor,
+            limit=min(MONDAY_ITEMS_PAGE_SIZE, limit - len(items)),
+        )
+        next_items = list(next_items_page.get("items", []))
+        attach_monday_column_metadata(items=next_items, columns_by_id=columns_by_id)
+        items.extend(next_items)
+        cursor = next_items_page.get("cursor")
+
+    return items[:limit]
+
+
+async def get_next_monday_items_page(
+    token: str,
+    cursor: str,
+    limit: int,
+) -> dict[str, Any]:
+    query = """
+    query GetNextTodoItems($cursor: String!, $limit: Int!) {
+      next_items_page(cursor: $cursor, limit: $limit) {
+        cursor
+        items {
+          id
+          name
+          group {
+            id
+            title
+          }
+          column_values {
+            id
+            text
+            value
+          }
+        }
+      }
+    }
+    """
+    response_body = await execute_monday_graphql(
+        token=token,
+        body={
+            "query": query,
+            "variables": {
+                "cursor": cursor,
+                "limit": limit,
+            },
+        },
+    )
+    items_page = response_body.get("data", {}).get("next_items_page")
+    if not isinstance(items_page, dict):
+        raise HTTPException(
+            status_code=502,
+            detail="Monday.com response did not include next item page data.",
+        )
+    return items_page
+
+
+def attach_monday_column_metadata(
+    items: list[dict[str, Any]],
+    columns_by_id: dict[str, dict[str, Any]],
+) -> None:
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -558,7 +680,6 @@ async def get_monday_items(token: str, board_id: str, limit: int) -> list[dict[s
             column = columns_by_id.get(column_value.get("id"))
             if column:
                 column_value["column"] = column
-    return items
 
 
 async def create_monday_item(

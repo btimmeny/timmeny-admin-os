@@ -60,10 +60,11 @@ Reads todo items from Monday.com.
 Query parameters:
 
 - `list`: `all`, `todo`, or `gs`. Defaults to `all`.
-- `limit`: maximum items to read from each selected board. Defaults to `25`, max `100`.
+- `limit`: maximum items to read from each selected board. Defaults to `500`, max `500`.
 - `include_done`: include items whose `Status` is `Done`, `Complete`, or `Completed`. Defaults to `false`.
 
 By default, completed items are excluded so grouping workflows only consider open work.
+Monday.com cursor pagination is used when the board has more items than one page.
 
 Example:
 
@@ -103,6 +104,22 @@ Response:
     }
   ]
 }
+```
+
+### `GET /key-initiatives`
+
+Reads open items from the GS `Key Initiatives` board. Use this as planning context before grouping or prioritizing GS todo items.
+
+Query parameters:
+
+- `limit`: maximum items to read. Defaults to `500`, max `500`.
+- `include_done`: include items whose `Status` is `Done`, `Complete`, or `Completed`. Defaults to `false`.
+
+Example:
+
+```bash
+curl https://timmeny-os-production.up.railway.app/key-initiatives \
+  -H "Authorization: Bearer $TIMMENY_OS_API_KEY"
 ```
 
 ### `PATCH /todos/{item_id}/action-metadata`
@@ -187,6 +204,7 @@ Set these environment variables:
 - `TODO_GROUP_ID`: optional Monday.com group id for regular todos.
 - `GS_TODO_BOARD_ID`: Monday.com board id for `GS | Initiatives & Action Items`.
 - `GS_TODO_GROUP_ID`: optional Monday.com group id for GS todos.
+- `GS_KEY_INITIATIVES_BOARD_ID`: Monday.com board id for `Key Initiatives`.
 
 The organize workflow also expects these Monday.com columns on each board:
 

@@ -1103,7 +1103,7 @@ def test_list_todos_returns_items_from_both_boards(monkeypatch):
         "todo-board",
         "gs-board",
     ]
-    assert [request["variables"]["limit"] for request in requests] == [25, 25]
+    assert [request["variables"]["limit"] for request in requests] == [500, 500]
 
 
 def test_list_todos_can_filter_to_gs(monkeypatch):
@@ -1179,6 +1179,95 @@ def test_list_todos_can_filter_to_gs(monkeypatch):
         "board_id": "gs-board",
         "limit": 10,
     }
+
+
+def test_list_todos_reads_next_monday_page(monkeypatch):
+    requests = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            requests.append(json)
+            request = httpx.Request("POST", url)
+            if "board_id" in json["variables"]:
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "boards": [
+                                {
+                                    "columns": [
+                                        {"id": "status_mkp", "title": "Status"},
+                                    ],
+                                    "items_page": {
+                                        "cursor": "next-page",
+                                        "items": [
+                                            {
+                                                "id": "1",
+                                                "name": "first item",
+                                                "group": None,
+                                                "column_values": [
+                                                    {
+                                                        "id": "status_mkp",
+                                                        "text": "Not Yet Started",
+                                                        "value": None,
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    },
+                                }
+                            ]
+                        }
+                    },
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "next_items_page": {
+                            "cursor": None,
+                            "items": [
+                                {
+                                    "id": "2",
+                                    "name": "second item",
+                                    "group": None,
+                                    "column_values": [
+                                        {
+                                            "id": "status_mkp",
+                                            "text": "Working on it",
+                                            "value": None,
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.setenv("TODO_BOARD_ID", "todo-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/todos?list=todo&limit=2")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 2
+    assert [item["item_id"] for item in response.json()["items"]] == ["1", "2"]
+    assert requests[0]["variables"] == {"board_id": "todo-board", "limit": 2}
+    assert requests[1]["variables"] == {"cursor": "next-page", "limit": 1}
 
 
 def test_list_todos_returns_gs_planning_context(monkeypatch):
@@ -1426,3 +1515,132 @@ def test_list_todos_requires_api_key_when_configured(monkeypatch):
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid or missing API key."}
+
+
+def test_list_key_initiatives_returns_open_items(monkeypatch):
+    requests = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            requests.append(json)
+            request = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "boards": [
+                            {
+                                "columns": [
+                                    {"id": "status_mkp", "title": "Status"},
+                                    {"id": "owner_mkp", "title": "Owner"},
+                                    {"id": "objective_mkp", "title": "Annual Objective"},
+                                    {"id": "initiative_mkp", "title": "Initiative"},
+                                ],
+                                "items_page": {
+                                    "cursor": None,
+                                    "items": [
+                                        {
+                                            "id": "ki-1",
+                                            "name": "Build partner pipeline",
+                                            "group": {
+                                                "id": "priority",
+                                                "title": "Priority",
+                                            },
+                                            "column_values": [
+                                                {
+                                                    "id": "status_mkp",
+                                                    "text": "Not Yet Started",
+                                                    "value": None,
+                                                },
+                                                {
+                                                    "id": "owner_mkp",
+                                                    "text": "Ben",
+                                                    "value": None,
+                                                },
+                                                {
+                                                    "id": "objective_mkp",
+                                                    "text": "Grow Revenue",
+                                                    "value": None,
+                                                },
+                                                {
+                                                    "id": "initiative_mkp",
+                                                    "text": "Partner Pipeline",
+                                                    "value": None,
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            "id": "ki-2",
+                                            "name": "Finished initiative",
+                                            "group": None,
+                                            "column_values": [
+                                                {
+                                                    "id": "status_mkp",
+                                                    "text": "Done",
+                                                    "value": None,
+                                                }
+                                            ],
+                                        },
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.setenv("GS_KEY_INITIATIVES_BOARD_ID", "key-initiatives-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/key-initiatives")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "count": 1,
+        "items": [
+            {
+                "item_id": "ki-1",
+                "title": "Build partner pipeline",
+                "group_id": "priority",
+                "group_title": "Priority",
+                "action_group": None,
+                "action_date": None,
+                "action": None,
+                "annual_objective": "Grow Revenue",
+                "initiative_project": "Partner Pipeline",
+                "status": "Not Yet Started",
+                "owner": "Ben",
+                "due_date": None,
+            }
+        ],
+    }
+    assert requests[0]["variables"] == {
+        "board_id": "key-initiatives-board",
+        "limit": 500,
+    }
+
+
+def test_list_key_initiatives_requires_board_id(monkeypatch):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.delenv("GS_KEY_INITIATIVES_BOARD_ID", raising=False)
+
+    response = client.get("/key-initiatives")
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "GS_KEY_INITIATIVES_BOARD_ID environment variable is not configured."
+    }

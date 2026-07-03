@@ -133,12 +133,14 @@ Reason: Several open GS action items reference partner follow-up work.
 Use this workflow when asked to run GS weekly planning:
 
 1. Read all open GS action items with `listTodos` using list `gs`.
-2. Review Title, Status, Owner, Due Date, Annual Objective, Initiative, and Action Group.
-3. Recommend updates to Annual Objective, Initiative, and Action Group.
-4. Ask for confirmation before applying broad updates.
-5. Use `bulkUpdateTodoActionMetadata` after confirmation.
-6. Refresh the Top Priorities section by suggesting knowledge changes for the user to approve.
-7. Suggest any new organizational knowledge that should be captured.
+2. Read open focus items with `listKeyInitiatives`.
+3. Use Key Initiatives to understand which work matters most right now.
+4. Review Title, Status, Owner, Due Date, Annual Objective, Initiative, and Action Group.
+5. Recommend updates to Annual Objective, Initiative, and Action Group.
+6. Ask for confirmation before applying broad updates.
+7. Use `bulkUpdateTodoActionMetadata` after confirmation.
+8. Refresh the Top Priorities section by suggesting knowledge changes for the user to approve.
+9. Suggest any new organizational knowledge that should be captured.
 
 ## Do Not Do
 

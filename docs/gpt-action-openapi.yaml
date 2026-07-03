@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny-ToDo-OS API
-  version: 0.2.0
+  version: 0.3.0
   description: Create, read, and organize todo items on the configured Timmeny-ToDo-OS Monday.com boards.
 servers:
   - url: https://timmeny-os-production.up.railway.app
@@ -31,8 +31,8 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 100
-            default: 25
+            maximum: 500
+            default: 500
           description: Maximum number of items to read from each selected board.
         - name: include_done
           in: query
@@ -81,6 +81,47 @@ paths:
           description: Missing or invalid API key.
         "422":
           description: Invalid request body.
+        "500":
+          description: Missing server configuration.
+        "502":
+          description: Monday.com request failed.
+        "504":
+          description: Monday.com request timed out.
+  /key-initiatives:
+    get:
+      operationId: listKeyInitiatives
+      summary: List key initiatives
+      description: Lists open GS Key Initiatives items with planning metadata. Done, Complete, and Completed items are excluded unless include_done is true.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 500
+          description: Maximum number of Key Initiatives items to read.
+        - name: include_done
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Set true only when the user explicitly asks to include completed or done items.
+      responses:
+        "200":
+          description: Key Initiatives items read successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KeyInitiativeListResponse"
+        "401":
+          description: Missing or invalid API key.
+        "422":
+          description: Invalid query parameters.
         "500":
           description: Missing server configuration.
         "502":
@@ -528,6 +569,76 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TodoItem"
+    KeyInitiativeItem:
+      type: object
+      required:
+        - item_id
+        - title
+      properties:
+        item_id:
+          type: string
+        title:
+          type: string
+        group_id:
+          type:
+            - string
+            - "null"
+        group_title:
+          type:
+            - string
+            - "null"
+        action_group:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        action_date:
+          type:
+            - string
+            - "null"
+          format: date
+        action:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        annual_objective:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        initiative_project:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        status:
+          type:
+            - string
+            - "null"
+        owner:
+          type:
+            - string
+            - "null"
+        due_date:
+          type:
+            - string
+            - "null"
+    KeyInitiativeListResponse:
+      type: object
+      required:
+        - success
+        - count
+        - items
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeyInitiativeItem"
   securitySchemes:
     ApiKeyAuth:
       type: http

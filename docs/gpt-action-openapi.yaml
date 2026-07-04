@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny-ToDo-OS API
-  version: 0.3.1
+  version: 0.4.0
   description: Create, read, and organize todo items on the configured Timmeny-ToDo-OS Monday.com boards.
 servers:
   - url: https://timmeny-os-production.up.railway.app
@@ -81,6 +81,41 @@ paths:
           description: Missing or invalid API key.
         "422":
           description: Invalid request body.
+        "500":
+          description: Missing server configuration.
+        "502":
+          description: Monday.com request failed.
+        "504":
+          description: Monday.com request timed out.
+  /todos/metadata:
+    get:
+      operationId: getTodoMetadata
+      summary: Get todo board metadata
+      description: Lists configured planning columns and allowed labels for a selected todo board.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: list
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - todo
+              - gs
+            default: gs
+          description: Use gs for GS action items or todo for the regular To Do List board.
+      responses:
+        "200":
+          description: Board metadata read successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodoMetadataResponse"
+        "401":
+          description: Missing or invalid API key.
+        "422":
+          description: Invalid query parameters.
         "500":
           description: Missing server configuration.
         "502":
@@ -569,6 +604,39 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/TodoItem"
+    TodoMetadataColumn:
+      type: object
+      required:
+        - id
+        - title
+        - type
+        - labels
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        type:
+          type: string
+        labels:
+          type: array
+          items:
+            type: string
+    TodoMetadataResponse:
+      type: object
+      required:
+        - success
+        - list
+        - columns
+      properties:
+        success:
+          type: boolean
+        list:
+          $ref: "#/components/schemas/TodoListName"
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodoMetadataColumn"
     KeyInitiativeItem:
       type: object
       required:

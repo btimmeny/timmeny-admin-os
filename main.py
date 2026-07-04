@@ -25,7 +25,7 @@ MONDAY_ITEMS_PAGE_SIZE = 500
 KEY_INITIATIVES_GROUP_TITLE = "Key Initiatives"
 GS_KEY_INITIATIVES_GROUP_ID_VARIABLE = "GS_KEY_INITIATIVES_GROUP_ID"
 
-app = FastAPI(title="Timmeny-ToDo-OS", version="0.3.1")
+app = FastAPI(title="Timmeny-ToDo-OS", version="0.4.0")
 
 
 class TodoList(StrEnum):
@@ -137,6 +137,19 @@ class TodoListResponse(BaseModel):
     items: list[TodoItem]
 
 
+class TodoMetadataColumn(BaseModel):
+    id: str
+    title: str
+    type: str
+    labels: list[str] = Field(default_factory=list)
+
+
+class TodoMetadataResponse(BaseModel):
+    success: bool
+    list: TodoList
+    columns: list[TodoMetadataColumn]
+
+
 class KeyInitiativeItem(TodoActionMetadata):
     item_id: str
     title: str
@@ -201,6 +214,43 @@ async def list_todos(
         )
 
     return TodoListResponse(success=True, count=len(items), items=items)
+
+
+@app.get("/todos/metadata", response_model=TodoMetadataResponse)
+async def get_todo_metadata(
+    todo_list: TodoList = Query(default=TodoList.GS, alias="list"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> TodoMetadataResponse:
+    verify_api_key(x_api_key=x_api_key, authorization=authorization)
+
+    monday_token = get_monday_token()
+    target = get_todo_target(todo_list)
+    columns_by_title = await get_board_columns_by_title(
+        token=monday_token,
+        board_id=target["board_id"],
+    )
+    planning_columns = [
+        ANNUAL_OBJECTIVE_COLUMN_TITLE,
+        INITIATIVE_PROJECT_COLUMN_TITLE,
+        ACTION_GROUP_COLUMN_TITLE,
+        ACTION_DATE_COLUMN_TITLE,
+        ACTION_COLUMN_TITLE,
+        STATUS_COLUMN_TITLE,
+        OWNER_COLUMN_TITLE,
+        DUE_DATE_COLUMN_TITLE,
+    ]
+    columns = [
+        TodoMetadataColumn(
+            id=column["id"],
+            title=column["title"],
+            type=column.get("type") or "",
+            labels=get_column_settings_labels(column),
+        )
+        for title in planning_columns
+        if (column := columns_by_title.get(title))
+    ]
+    return TodoMetadataResponse(success=True, list=todo_list, columns=columns)
 
 
 @app.get("/key-initiatives", response_model=KeyInitiativeListResponse)
@@ -884,6 +934,7 @@ async def get_board_columns_by_title(
           id
           title
           type
+          settings_str
         }
       }
     }
@@ -912,6 +963,36 @@ async def get_board_columns_by_title(
         for column in columns
         if isinstance(column, dict) and column.get("title") and column.get("id")
     }
+
+
+def get_column_settings_labels(column: dict[str, Any]) -> list[str]:
+    settings_str = column.get("settings_str")
+    if not isinstance(settings_str, str) or not settings_str.strip():
+        return []
+
+    try:
+        settings = json.loads(settings_str)
+    except json.JSONDecodeError:
+        return []
+
+    labels = settings.get("labels")
+    if isinstance(labels, dict):
+        return [
+            label
+            for label in labels.values()
+            if isinstance(label, str) and label.strip()
+        ]
+    if isinstance(labels, list):
+        parsed_labels: list[str] = []
+        for label in labels:
+            if isinstance(label, str) and label.strip():
+                parsed_labels.append(label)
+            elif isinstance(label, dict):
+                name = label.get("name") or label.get("label")
+                if isinstance(name, str) and name.strip():
+                    parsed_labels.append(name)
+        return parsed_labels
+    return []
 
 
 def require_board_column(

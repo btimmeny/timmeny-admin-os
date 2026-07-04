@@ -122,6 +122,21 @@ curl https://timmeny-os-production.up.railway.app/key-initiatives \
   -H "Authorization: Bearer $TIMMENY_OS_API_KEY"
 ```
 
+### `GET /todos/metadata`
+
+Reads the configured planning columns and allowed labels for a board. Use this before preparing updates to constrained Monday.com columns such as dropdown or status fields.
+
+Query parameters:
+
+- `list`: `todo` or `gs`. Defaults to `gs`.
+
+Example:
+
+```bash
+curl "https://timmeny-os-production.up.railway.app/todos/metadata?list=gs" \
+  -H "Authorization: Bearer $TIMMENY_OS_API_KEY"
+```
+
 ### `PATCH /todos/{item_id}/action-metadata`
 
 Updates the Monday.com action metadata columns for an existing todo item.

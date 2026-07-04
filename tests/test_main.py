@@ -1517,6 +1517,110 @@ def test_list_todos_requires_api_key_when_configured(monkeypatch):
     assert response.json() == {"detail": "Invalid or missing API key."}
 
 
+def test_get_todo_metadata_returns_configured_column_labels(monkeypatch):
+    requests = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            requests.append(json)
+            request = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "boards": [
+                            {
+                                "columns": [
+                                    {
+                                        "id": "objective_mkp",
+                                        "title": "Annual Objective",
+                                        "type": "dropdown",
+                                        "settings_str": __import__("json").dumps(
+                                            {
+                                                "labels": [
+                                                    {"id": 1, "name": "Developer Productivity"},
+                                                    {"id": 2, "name": "Risk Reduction"},
+                                                ]
+                                            }
+                                        ),
+                                    },
+                                    {
+                                        "id": "initiative_mkp",
+                                        "title": "Initiative",
+                                        "type": "status",
+                                        "settings_str": __import__("json").dumps(
+                                            {
+                                                "labels": {
+                                                    "0": "Evergreen Engineering",
+                                                    "1": "GSCode Platform",
+                                                }
+                                            }
+                                        ),
+                                    },
+                                    {
+                                        "id": "group_mkp",
+                                        "title": "Action Group",
+                                        "type": "text",
+                                        "settings_str": "{}",
+                                    },
+                                    {
+                                        "id": "ignored_mkp",
+                                        "title": "Unrelated",
+                                        "type": "text",
+                                        "settings_str": "{}",
+                                    },
+                                ]
+                            }
+                        ]
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.setenv("GS_TODO_BOARD_ID", "gs-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/todos/metadata?list=gs")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "list": "gs",
+        "columns": [
+            {
+                "id": "objective_mkp",
+                "title": "Annual Objective",
+                "type": "dropdown",
+                "labels": ["Developer Productivity", "Risk Reduction"],
+            },
+            {
+                "id": "initiative_mkp",
+                "title": "Initiative",
+                "type": "status",
+                "labels": ["Evergreen Engineering", "GSCode Platform"],
+            },
+            {
+                "id": "group_mkp",
+                "title": "Action Group",
+                "type": "text",
+                "labels": [],
+            },
+        ],
+    }
+    assert requests[0]["variables"] == {"board_id": "gs-board"}
+
+
 def test_list_key_initiatives_returns_open_items(monkeypatch):
     requests = []
 

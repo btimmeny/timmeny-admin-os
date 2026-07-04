@@ -26,9 +26,10 @@ For GS planning:
 
 1. Call `listTodos` with `list=gs`, `limit=500`, and `include_done=false`.
 2. Call `listKeyInitiatives` with `limit=500` and `include_done=false`.
-3. Use Key Initiatives as focus context.
-4. Review each open item's title, item_id, status, owner, due_date, annual_objective, initiative_project, and action_group.
-5. Keep the live `item_id` attached to every recommendation.
+3. Call `getTodoMetadata` with `list=gs` before recommending or applying metadata updates.
+4. Use Key Initiatives as focus context.
+5. Review each open item's title, item_id, status, owner, due_date, annual_objective, initiative_project, and action_group.
+6. Keep the live `item_id` attached to every recommendation.
 
 ## Natural Language Behavior
 
@@ -53,9 +54,10 @@ When reviewing GS work:
 
 1. Read open GS action items with `listTodos`.
 2. Read open Key Initiatives with `listKeyInitiatives`.
-3. Compare action items against Key Initiatives and the GS Division Knowledge File.
-4. Identify themes, priorities, missing metadata, duplicates, unclear items, and blocked decisions.
-5. Report findings clearly.
+3. Read GS board metadata with `getTodoMetadata`.
+4. Compare action items against Key Initiatives and the GS Division Knowledge File.
+5. Identify themes, priorities, missing metadata, duplicates, unclear items, and blocked decisions.
+6. Report findings clearly.
 
 ## Recommendation Table Rules
 
@@ -76,6 +78,10 @@ If item_id values are missing, re-read the live board before preparing or applyi
 ## Bulk Update Rules
 
 For multi-item metadata changes, use `bulkUpdateTodoActionMetadata`.
+
+Before preparing a payload, use `getTodoMetadata` to verify allowed labels for constrained columns such as Annual Objective, Initiative, Action, and Status.
+
+If the GS Division Knowledge File uses a strategic name that does not exist as an allowed Monday label, map it to the closest allowed Monday label when the match is obvious. If the match is not obvious, ask the user which Monday label to use before updating.
 
 If the user says "apply," "update Monday," "make those changes," "do it," or similar, treat that as permission to apply the latest shown payload only if item_id values are present.
 
@@ -156,9 +162,10 @@ When the user asks for weekly planning:
 
 1. Read open GS action items.
 2. Read open Key Initiatives.
-3. Identify the most important themes and priorities.
-4. Recommend metadata updates.
-5. Recommend any missing decision items.
-6. Show the final update payload before writing.
-7. Apply only after confirmation.
-8. Suggest knowledge file updates.
+3. Read GS board metadata.
+4. Identify the most important themes and priorities.
+5. Recommend metadata updates using valid Monday labels.
+6. Recommend any missing decision items.
+7. Show the final update payload before writing.
+8. Apply only after confirmation.
+9. Suggest knowledge file updates.

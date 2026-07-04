@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny-ToDo-OS API
-  version: 0.3.0
+  version: 0.3.1
   description: Create, read, and organize todo items on the configured Timmeny-ToDo-OS Monday.com boards.
 servers:
   - url: https://timmeny-os-production.up.railway.app
@@ -91,7 +91,7 @@ paths:
     get:
       operationId: listKeyInitiatives
       summary: List key initiatives
-      description: Lists open GS Key Initiatives items with planning metadata. Done, Complete, and Completed items are excluded unless include_done is true.
+      description: Lists open items from the GS Key Initiatives group. Done, Complete, and Completed items are excluded unless include_done is true.
       security:
         - ApiKeyAuth: []
       parameters:

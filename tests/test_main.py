@@ -1552,8 +1552,8 @@ def test_list_key_initiatives_returns_open_items(monkeypatch):
                                             "id": "ki-1",
                                             "name": "Build partner pipeline",
                                             "group": {
-                                                "id": "priority",
-                                                "title": "Priority",
+                                                "id": "key-initiatives",
+                                                "title": "Key Initiatives",
                                             },
                                             "column_values": [
                                                 {
@@ -1581,7 +1581,10 @@ def test_list_key_initiatives_returns_open_items(monkeypatch):
                                         {
                                             "id": "ki-2",
                                             "name": "Finished initiative",
-                                            "group": None,
+                                            "group": {
+                                                "id": "key-initiatives",
+                                                "title": "Key Initiatives",
+                                            },
                                             "column_values": [
                                                 {
                                                     "id": "status_mkp",
@@ -1589,6 +1592,15 @@ def test_list_key_initiatives_returns_open_items(monkeypatch):
                                                     "value": None,
                                                 }
                                             ],
+                                        },
+                                        {
+                                            "id": "gs-1",
+                                            "name": "Regular action item",
+                                            "group": {
+                                                "id": "action-items",
+                                                "title": "Action Items",
+                                            },
+                                            "column_values": [],
                                         },
                                     ],
                                 },
@@ -1601,7 +1613,8 @@ def test_list_key_initiatives_returns_open_items(monkeypatch):
 
     monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
     monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
-    monkeypatch.setenv("GS_KEY_INITIATIVES_BOARD_ID", "key-initiatives-board")
+    monkeypatch.delenv("GS_KEY_INITIATIVES_GROUP_ID", raising=False)
+    monkeypatch.setenv("GS_TODO_BOARD_ID", "gs-board")
     monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
 
     response = client.get("/key-initiatives")
@@ -1614,8 +1627,8 @@ def test_list_key_initiatives_returns_open_items(monkeypatch):
             {
                 "item_id": "ki-1",
                 "title": "Build partner pipeline",
-                "group_id": "priority",
-                "group_title": "Priority",
+                "group_id": "key-initiatives",
+                "group_title": "Key Initiatives",
                 "action_group": None,
                 "action_date": None,
                 "action": None,
@@ -1628,19 +1641,82 @@ def test_list_key_initiatives_returns_open_items(monkeypatch):
         ],
     }
     assert requests[0]["variables"] == {
-        "board_id": "key-initiatives-board",
+        "board_id": "gs-board",
         "limit": 500,
     }
 
 
-def test_list_key_initiatives_requires_board_id(monkeypatch):
+def test_list_key_initiatives_can_filter_by_configured_group_id(monkeypatch):
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            request = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "boards": [
+                            {
+                                "columns": [],
+                                "items_page": {
+                                    "cursor": None,
+                                    "items": [
+                                        {
+                                            "id": "ki-1",
+                                            "name": "Configured group item",
+                                            "group": {
+                                                "id": "custom-group",
+                                                "title": "Different Title",
+                                            },
+                                            "column_values": [],
+                                        },
+                                        {
+                                            "id": "ki-2",
+                                            "name": "Title match only",
+                                            "group": {
+                                                "id": "key-initiatives",
+                                                "title": "Key Initiatives",
+                                            },
+                                            "column_values": [],
+                                        },
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                },
+                request=request,
+            )
+
     monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
     monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
-    monkeypatch.delenv("GS_KEY_INITIATIVES_BOARD_ID", raising=False)
+    monkeypatch.setenv("GS_TODO_BOARD_ID", "gs-board")
+    monkeypatch.setenv("GS_KEY_INITIATIVES_GROUP_ID", "custom-group")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/key-initiatives")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["items"][0]["item_id"] == "ki-1"
+
+
+def test_list_key_initiatives_requires_gs_board_id(monkeypatch):
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.delenv("GS_TODO_BOARD_ID", raising=False)
 
     response = client.get("/key-initiatives")
 
     assert response.status_code == 500
     assert response.json() == {
-        "detail": "GS_KEY_INITIATIVES_BOARD_ID environment variable is not configured."
+        "detail": "GS_TODO_BOARD_ID environment variable is not configured."
     }

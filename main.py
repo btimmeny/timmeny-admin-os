@@ -22,9 +22,10 @@ DECISION_ACTION = "Decision"
 DEFAULT_DECISION_STATUS = "Not Yet Started"
 DONE_STATUS_LABELS = {"done", "complete", "completed"}
 MONDAY_ITEMS_PAGE_SIZE = 500
-GS_KEY_INITIATIVES_BOARD_ID_VARIABLE = "GS_KEY_INITIATIVES_BOARD_ID"
+KEY_INITIATIVES_GROUP_TITLE = "Key Initiatives"
+GS_KEY_INITIATIVES_GROUP_ID_VARIABLE = "GS_KEY_INITIATIVES_GROUP_ID"
 
-app = FastAPI(title="Timmeny-ToDo-OS", version="0.3.0")
+app = FastAPI(title="Timmeny-ToDo-OS", version="0.3.1")
 
 
 class TodoList(StrEnum):
@@ -212,12 +213,13 @@ async def list_key_initiatives(
     verify_api_key(x_api_key=x_api_key, authorization=authorization)
 
     monday_token = get_monday_token()
-    board_id = get_required_env_var(GS_KEY_INITIATIVES_BOARD_ID_VARIABLE)
+    target = get_todo_target(TodoList.GS)
     monday_items = await get_monday_items(
         token=monday_token,
-        board_id=board_id,
+        board_id=target["board_id"],
         limit=limit,
     )
+    monday_items = [item for item in monday_items if is_key_initiatives_item(item)]
     if not include_done:
         monday_items = [item for item in monday_items if not is_done_monday_item(item)]
 
@@ -509,6 +511,18 @@ def is_done_monday_item(item: dict[str, Any]) -> bool:
     if status is None:
         return False
     return status.strip().casefold() in DONE_STATUS_LABELS
+
+
+def is_key_initiatives_item(item: dict[str, Any]) -> bool:
+    group = get_monday_item_group(item)
+    configured_group_id = os.getenv(GS_KEY_INITIATIVES_GROUP_ID_VARIABLE)
+    if configured_group_id:
+        return group.get("id") == configured_group_id
+
+    group_title = group.get("title")
+    if not isinstance(group_title, str):
+        return False
+    return group_title.strip().casefold() == KEY_INITIATIVES_GROUP_TITLE.casefold()
 
 
 def get_monday_column_text(item: dict[str, Any], column_title: str) -> str | None:

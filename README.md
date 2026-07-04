@@ -108,7 +108,7 @@ Response:
 
 ### `GET /key-initiatives`
 
-Reads open items from the GS `Key Initiatives` board. Use this as planning context before grouping or prioritizing GS todo items.
+Reads open items from the `Key Initiatives` group inside the GS board. Use this as planning context before grouping or prioritizing GS todo items.
 
 Query parameters:
 
@@ -204,7 +204,7 @@ Set these environment variables:
 - `TODO_GROUP_ID`: optional Monday.com group id for regular todos.
 - `GS_TODO_BOARD_ID`: Monday.com board id for `GS | Initiatives & Action Items`.
 - `GS_TODO_GROUP_ID`: optional Monday.com group id for GS todos.
-- `GS_KEY_INITIATIVES_BOARD_ID`: Monday.com board id for `Key Initiatives`.
+- `GS_KEY_INITIATIVES_GROUP_ID`: optional Monday.com group id for `Key Initiatives`. If omitted, the service matches a group named `Key Initiatives`.
 
 The organize workflow also expects these Monday.com columns on each board:
 

@@ -1,114 +1,181 @@
-# Timmeny-GS-ToDo-OS Knowledge
+# GS Division Knowledge File
 
 Last updated: 2026-07-03
 
 ## Purpose
 
-This file is the persistent organizational context for the GS GPT. It should help the GPT understand why work matters, how action items connect to strategic priorities, and what context should guide classification.
+This file captures durable GS division context. It helps interpret live Monday.com action items, connect work to strategic priorities, and preserve planning context across conversations.
 
-Monday.com remains the execution system. This knowledge file is the lightweight planning memory that helps keep Monday.com organized with minimal manual maintenance.
+Monday.com is the source of truth for live action items and Key Initiatives. This knowledge file is context for understanding the work; it is not a replacement for reading the live board.
 
 ## Annual Objectives
 
-Use this section to define the strategic objectives that GS work should map to.
+### 1. Improve Developer Productivity
 
-Initial placeholders:
+Enable engineers to move faster by improving the developer experience through better tooling, automation, and reusable engineering practices.
 
-- Grow Revenue
-- Strengthen Partnerships
-- Improve Operations
-- Build Scalable Systems
-- Clarify Strategy
+Current initiatives:
 
-When classifying Monday.com items, choose the Annual Objective that best represents the strategic outcome the work supports. If confidence is low, recommend the likely option and ask for confirmation before updating.
+- Graph + Code Review Integration
+- Spring Boot Playbook Upgrades
+- GSCode platform improvements, as they continue to be defined
+
+### 2. Reduce Engineering Risk
+
+Reduce technical debt and engineering risk by improving code quality, security posture, and engineering governance.
+
+Current initiatives:
+
+- Solve CLM/CVE Findings
+- Solve SonarQube Findings
+- Solve Code Review Findings
+- Katana Code Segment Risks
+- IAM / Mythos Pilot
+
+### 3. Accelerate Cloud Adoption
+
+Help application teams modernize through secure cloud migration and cloud-native engineering practices.
+
+Current initiatives:
+
+- Aries to Cloud
+- Permit-to-Cloud
+- Controls Management within Specification
+
+### 4. Build Engineering Capability
+
+Increase engineering maturity through playbooks, enablement, and repeatable practices.
+
+Current initiatives:
+
+- Tech Risk Skills Launch, covering approximately 25 repositories
+- Spring Boot Playbook Upgrades
+- Repository onboarding and enablement
 
 ## Top Priorities
 
-Use this section for the current highest-priority GS work. Refresh during weekly planning.
+These represent the work currently receiving the greatest attention.
 
-Initial placeholders:
-
-- Confirm the active GS priorities for this planning period.
-- Identify blocked or ambiguous work that needs a decision.
-- Keep open action items aligned to Annual Objective, Initiative, and Action Group.
+- Spring Boot Playbook Upgrades
+- Graph + Code Review Integration
+- IAM / Mythos Pilot
+- Solve CLM/CVE Findings
+- Permit-to-Cloud
+- Tech Risk Skills Launch
+- Controls Management within Specification
 
 ## Current Key Projects
 
-Use this section to define major initiatives or projects. These values should guide the `Initiative` Monday.com field.
+### Evergreen Engineering
 
-Initial placeholders:
+A continuous engineering modernization effort focused on improving engineering health across repositories.
 
-- Partner Pipeline
-- Client Delivery
-- Operating System
-- Launch Planning
-- Strategic Planning
+Current work includes:
 
-When classifying items, prefer existing project names from this section. Suggest a new project name only when the item clearly does not fit the existing list.
+- Spring Boot upgrades
+- CVE remediation
+- SonarQube findings
+- Code review findings
 
-## People & Key Stakeholders
+### GSCode Platform
 
-Use this section to capture people, companies, partners, clients, or internal roles that matter to GS work.
+Developer platform focused on improving engineering productivity and workflow automation.
 
-Initial placeholders:
+Current work:
 
-- Ben: primary operator and decision owner.
+- Graph integration
+- Code review integration
 
-Suggested additions should include why the person or organization matters and which initiative or objective they relate to.
+### Cloud Modernization
+
+Helping engineering teams migrate applications securely to the cloud.
+
+Current work:
+
+- Aries to Cloud
+- Permit-to-Cloud
+
+### Engineering Governance
+
+Improving engineering controls while enabling teams to move faster.
+
+Current work:
+
+- Controls Management
+- IAM / Mythos Pilot
+
+### Tech Risk Enablement
+
+Driving engineering adoption through skills development and repository onboarding.
+
+Current work:
+
+- Tech Risk Skills Launch
+- Repository onboarding
+
+## People & Key Players
+
+### Jay Kelath
+
+Partner on the Tech Risk Skills initiative. Currently leading or supporting onboarding across approximately 25 repositories.
+
+### Engineering Teams
+
+Primary consumers of GS platforms, tooling, modernization initiatives, playbooks, and enablement work.
+
+### Tech Risk
+
+Key partner organization focused on reducing engineering risk through governance, tooling, and enablement.
 
 ## Key Organizational Processes
 
-Use this section to capture recurring GS operating patterns.
+### Repository Modernization
 
-Initial processes:
+Improve existing repositories through standardized engineering improvements including Spring Boot upgrades, dependency management, code quality improvements, and security remediation.
 
-- Weekly Planning: review all open GS items, recommend metadata updates, apply confirmed bulk updates, refresh top priorities, and suggest knowledge additions.
-- Board Hygiene: completed items should not be recategorized unless explicitly requested.
-- Decision Capture: when ambiguity blocks progress, create a decision item with Action `Decision`, today's Action Date, a useful Action Group, and Status `Not Yet Started`.
-- Classification: infer Annual Objective, Initiative, and Action Group from item title, existing metadata, knowledge context, and conversation history.
+### Engineering Risk Remediation
 
-## Preferred Action Groups
+Continuous identification and remediation of:
 
-Use short tactical group names that make the board easy to scan.
+- CVEs
+- SonarQube findings
+- Code review findings
+- Code segment risks
 
-Preferred groups:
+### Cloud Enablement
 
-- Partnerships
-- Follow Up
-- Operations
-- Launch
-- Clients
-- Content
-- Admin
-- Strategy
-- Sales
-- Product
-- Finance
+Support engineering teams through cloud migration initiatives, cloud controls, and permit-to-cloud processes.
 
-Create a new Action Group only when none of these fit well.
+### Engineering Enablement
 
-## Classification Confidence
+Develop reusable playbooks, skills programs, and onboarding approaches to improve engineering maturity across teams.
 
-High confidence:
+## Things We Already Know
 
-- The title or existing metadata clearly maps to a known Annual Objective, Initiative, and Action Group.
-- The item uses names or language already captured in this knowledge file.
-- Similar items already share a clear classification pattern.
+GS work is generally centered around four themes:
 
-Low confidence:
+- Developer Productivity
+- Engineering Risk Reduction
+- Cloud Modernization
+- Engineering Enablement
 
-- The item is vague.
-- Multiple objectives or initiatives could apply.
-- The item references a person, project, partner, or process not yet captured here.
-- The update would create a new Annual Objective or Initiative.
+Most initiatives on the board fit naturally into one of these categories.
 
-When confidence is high, recommend the update and apply it after user confirmation. When confidence is low, ask for clarification before updating.
+## Classification Guidance
+
+Use `Annual Objective` for the strategic outcome the work supports.
+
+Use `Initiative` for the major project or initiative the work belongs to.
+
+Use `Action Group` for the tactical grouping that makes related action items easier to scan and manage.
+
+Prefer the objectives, projects, initiatives, people, and processes already captured in this file when they fit the work.
+
+Suggest a new objective, initiative, stakeholder, process, or recurring classification pattern only when the current knowledge clearly does not fit.
 
 ## Knowledge Update Workflow
 
-The GPT should proactively identify knowledge worth preserving, but should not modify this file automatically.
-
-Suggest additions when it notices:
+Suggest additions when new durable context appears, such as:
 
 - New stakeholders
 - New initiatives
@@ -124,28 +191,6 @@ Example:
 ```text
 Suggested knowledge update:
 Section: Current Key Projects
-Add: Partner Pipeline - Tracks partner intros, follow-ups, and relationship-building work tied to growth.
-Reason: Several open GS action items reference partner follow-up work.
+Add: Evergreen Engineering - Continuous modernization work across repositories, including dependency upgrades, CVE remediation, SonarQube findings, and code review findings.
+Reason: Multiple live action items map to ongoing repository modernization work.
 ```
-
-## Weekly Planning Workflow
-
-Use this workflow when asked to run GS weekly planning:
-
-1. Read all open GS action items with `listTodos` using list `gs`.
-2. Read open focus items with `listKeyInitiatives`.
-3. Use Key Initiatives to understand which work matters most right now.
-4. Review Title, Status, Owner, Due Date, Annual Objective, Initiative, and Action Group.
-5. Recommend updates to Annual Objective, Initiative, and Action Group.
-6. Ask for confirmation before applying broad updates.
-7. Use `bulkUpdateTodoActionMetadata` after confirmation.
-8. Refresh the Top Priorities section by suggesting knowledge changes for the user to approve.
-9. Suggest any new organizational knowledge that should be captured.
-
-## Do Not Do
-
-- Do not update completed/done items unless explicitly asked.
-- Do not invent strategic objectives when an existing objective fits.
-- Do not create overly narrow Action Groups.
-- Do not modify this knowledge file without confirmation.
-- Do not treat Monday.com as the source of strategic truth; use Monday.com for execution and this file for durable context.

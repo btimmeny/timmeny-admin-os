@@ -124,7 +124,7 @@ curl https://timmeny-os-production.up.railway.app/key-initiatives \
 
 ### `GET /todos/metadata`
 
-Reads the configured planning columns and allowed labels for a board. Use this before preparing updates to constrained Monday.com columns such as dropdown or status fields.
+Reads the configured planning columns, allowed labels, and observed live values for a board. Use this before preparing updates to constrained Monday.com columns such as dropdown or status fields.
 
 Query parameters:
 

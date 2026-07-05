@@ -1533,6 +1533,73 @@ def test_get_todo_metadata_returns_configured_column_labels(monkeypatch):
         async def post(self, url, json, headers):
             requests.append(json)
             request = httpx.Request("POST", url)
+            if "GetTodoItems" in json["query"]:
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "boards": [
+                                {
+                                    "columns": [
+                                        {"id": "objective_mkp", "title": "Annual Objective"},
+                                        {"id": "initiative_mkp", "title": "Initiative"},
+                                        {"id": "group_mkp", "title": "Action Group"},
+                                    ],
+                                    "items_page": {
+                                        "cursor": None,
+                                        "items": [
+                                            {
+                                                "id": "1",
+                                                "name": "item",
+                                                "group": None,
+                                                "column_values": [
+                                                    {
+                                                        "id": "objective_mkp",
+                                                        "text": "Developer Productivity",
+                                                        "value": None,
+                                                    },
+                                                    {
+                                                        "id": "initiative_mkp",
+                                                        "text": "GSCode Platform",
+                                                        "value": None,
+                                                    },
+                                                    {
+                                                        "id": "group_mkp",
+                                                        "text": "Platform",
+                                                        "value": None,
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                "id": "2",
+                                                "name": "item",
+                                                "group": None,
+                                                "column_values": [
+                                                    {
+                                                        "id": "objective_mkp",
+                                                        "text": "developer productivity",
+                                                        "value": None,
+                                                    },
+                                                    {
+                                                        "id": "initiative_mkp",
+                                                        "text": "Evergreen Engineering",
+                                                        "value": None,
+                                                    },
+                                                    {
+                                                        "id": "group_mkp",
+                                                        "text": "Risk",
+                                                        "value": None,
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                }
+                            ]
+                        }
+                    },
+                    request=request,
+                )
             return httpx.Response(
                 200,
                 json={
@@ -1560,8 +1627,8 @@ def test_get_todo_metadata_returns_configured_column_labels(monkeypatch):
                                         "settings_str": __import__("json").dumps(
                                             {
                                                 "labels": {
-                                                    "0": "Evergreen Engineering",
-                                                    "1": "GSCode Platform",
+                                                    "0": {"label": "Evergreen Engineering"},
+                                                    "1": {"label": "GSCode Platform"},
                                                 }
                                             }
                                         ),
@@ -1603,18 +1670,21 @@ def test_get_todo_metadata_returns_configured_column_labels(monkeypatch):
                 "title": "Annual Objective",
                 "type": "dropdown",
                 "labels": ["Developer Productivity", "Risk Reduction"],
+                "observed_values": ["Developer Productivity"],
             },
             {
                 "id": "initiative_mkp",
                 "title": "Initiative",
                 "type": "status",
                 "labels": ["Evergreen Engineering", "GSCode Platform"],
+                "observed_values": ["GSCode Platform", "Evergreen Engineering"],
             },
             {
                 "id": "group_mkp",
                 "title": "Action Group",
                 "type": "text",
                 "labels": [],
+                "observed_values": ["Platform", "Risk"],
             },
         ],
     }

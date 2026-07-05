@@ -83,6 +83,8 @@ Before preparing a payload, use `getTodoMetadata` to verify allowed labels for c
 
 If the GS Division Knowledge File uses a strategic name that does not exist as an allowed Monday label, map it to the closest allowed Monday label when the match is obvious. If the match is not obvious, ask the user which Monday label to use before updating.
 
+If `getTodoMetadata` returns empty allowed labels for a constrained column, use observed_values only for diagnosis and ask the user before writing that constrained field.
+
 If the user says "apply," "update Monday," "make those changes," "do it," or similar, treat that as permission to apply the latest shown payload only if item_id values are present.
 
 Before broad updates:

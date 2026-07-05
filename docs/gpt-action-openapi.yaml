@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny-ToDo-OS API
-  version: 0.4.0
+  version: 0.4.1
   description: Create, read, and organize todo items on the configured Timmeny-ToDo-OS Monday.com boards.
 servers:
   - url: https://timmeny-os-production.up.railway.app
@@ -611,6 +611,7 @@ components:
         - title
         - type
         - labels
+        - observed_values
       properties:
         id:
           type: string
@@ -619,6 +620,10 @@ components:
         type:
           type: string
         labels:
+          type: array
+          items:
+            type: string
+        observed_values:
           type: array
           items:
             type: string

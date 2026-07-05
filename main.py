@@ -25,7 +25,7 @@ MONDAY_ITEMS_PAGE_SIZE = 500
 KEY_INITIATIVES_GROUP_TITLE = "Key Initiatives"
 GS_KEY_INITIATIVES_GROUP_ID_VARIABLE = "GS_KEY_INITIATIVES_GROUP_ID"
 
-app = FastAPI(title="Timmeny-ToDo-OS", version="0.4.0")
+app = FastAPI(title="Timmeny-ToDo-OS", version="0.4.1")
 
 
 class TodoList(StrEnum):
@@ -142,6 +142,7 @@ class TodoMetadataColumn(BaseModel):
     title: str
     type: str
     labels: list[str] = Field(default_factory=list)
+    observed_values: list[str] = Field(default_factory=list)
 
 
 class TodoMetadataResponse(BaseModel):
@@ -230,6 +231,11 @@ async def get_todo_metadata(
         token=monday_token,
         board_id=target["board_id"],
     )
+    monday_items = await get_monday_items(
+        token=monday_token,
+        board_id=target["board_id"],
+        limit=MONDAY_ITEMS_PAGE_SIZE,
+    )
     planning_columns = [
         ANNUAL_OBJECTIVE_COLUMN_TITLE,
         INITIATIVE_PROJECT_COLUMN_TITLE,
@@ -246,6 +252,7 @@ async def get_todo_metadata(
             title=column["title"],
             type=column.get("type") or "",
             labels=get_column_settings_labels(column),
+            observed_values=get_observed_column_values(monday_items, title),
         )
         for title in planning_columns
         if (column := columns_by_title.get(title))
@@ -977,22 +984,52 @@ def get_column_settings_labels(column: dict[str, Any]) -> list[str]:
 
     labels = settings.get("labels")
     if isinstance(labels, dict):
-        return [
-            label
-            for label in labels.values()
-            if isinstance(label, str) and label.strip()
-        ]
+        return dedupe_preserving_order(
+            parse_column_label(label) for label in labels.values()
+        )
     if isinstance(labels, list):
-        parsed_labels: list[str] = []
-        for label in labels:
-            if isinstance(label, str) and label.strip():
-                parsed_labels.append(label)
-            elif isinstance(label, dict):
-                name = label.get("name") or label.get("label")
-                if isinstance(name, str) and name.strip():
-                    parsed_labels.append(name)
-        return parsed_labels
+        return dedupe_preserving_order(parse_column_label(label) for label in labels)
     return []
+
+
+def parse_column_label(label: Any) -> str | None:
+    if isinstance(label, str):
+        stripped_label = label.strip()
+        return stripped_label or None
+    if not isinstance(label, dict):
+        return None
+
+    for key in ("name", "label", "title", "text"):
+        value = label.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def get_observed_column_values(
+    items: list[dict[str, Any]],
+    column_title: str,
+) -> list[str]:
+    return dedupe_preserving_order(
+        get_monday_column_text(item, column_title) for item in items
+    )
+
+
+def dedupe_preserving_order(values: Any) -> list[str]:
+    deduped_values: list[str] = []
+    seen_values: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        stripped_value = value.strip()
+        if not stripped_value:
+            continue
+        normalized_value = stripped_value.casefold()
+        if normalized_value in seen_values:
+            continue
+        seen_values.add(normalized_value)
+        deduped_values.append(stripped_value)
+    return deduped_values
 
 
 def require_board_column(

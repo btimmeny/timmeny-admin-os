@@ -106,6 +106,18 @@ class TodoBulkActionMetadataRequest(BaseModel):
     updates: list[TodoBulkActionMetadataUpdate] = Field(..., min_length=1, max_length=100)
 
 
+class TodoBulkActionMetadataJsonRequest(BaseModel):
+    updates_json: str = Field(..., min_length=1)
+
+    @field_validator("updates_json")
+    @classmethod
+    def updates_json_must_not_be_blank(cls, value: str) -> str:
+        stripped_value = value.strip()
+        if not stripped_value:
+            raise ValueError("updates_json must not be blank")
+        return stripped_value
+
+
 class TodoBulkActionMetadataResult(TodoActionMetadata):
     success: bool
     item_id: str
@@ -390,6 +402,36 @@ async def bulk_update_todo_action_metadata(
 ) -> TodoBulkActionMetadataResponse:
     verify_api_key(x_api_key=x_api_key, authorization=authorization)
 
+    return await perform_bulk_update_todo_action_metadata(payload)
+
+
+@app.post("/todos/bulk-action-metadata-json", response_model=TodoBulkActionMetadataResponse)
+async def bulk_update_todo_action_metadata_json(
+    payload: TodoBulkActionMetadataJsonRequest,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> TodoBulkActionMetadataResponse:
+    verify_api_key(x_api_key=x_api_key, authorization=authorization)
+
+    try:
+        updates = json.loads(payload.updates_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="updates_json must be valid JSON.") from exc
+
+    if not isinstance(updates, list):
+        raise HTTPException(status_code=422, detail="updates_json must be a JSON array.")
+
+    try:
+        bulk_payload = TodoBulkActionMetadataRequest.model_validate({"updates": updates})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return await perform_bulk_update_todo_action_metadata(bulk_payload)
+
+
+async def perform_bulk_update_todo_action_metadata(
+    payload: TodoBulkActionMetadataRequest,
+) -> TodoBulkActionMetadataResponse:
     monday_token = get_monday_token()
     columns_by_board_id: dict[str, dict[str, dict[str, Any]]] = {}
     results: list[TodoBulkActionMetadataResult] = []

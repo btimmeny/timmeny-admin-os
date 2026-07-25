@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
-  title: Timmeny-ToDo-OS API
+  title: timmeny-admin-os API
   version: 0.4.1
-  description: Create, read, and organize todo items on the configured Timmeny-ToDo-OS Monday.com boards.
+  description: Create, read, and organize todo items through the timmeny-admin-os Monday.com capability.
 servers:
-  - url: https://timmeny-os-production.up.railway.app
+  - url: https://timmeny-admin-os-production.up.railway.app
 paths:
   /todos:
     get:

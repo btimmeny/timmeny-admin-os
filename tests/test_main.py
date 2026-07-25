@@ -1820,6 +1820,85 @@ def test_list_key_initiatives_returns_open_items(monkeypatch):
     }
 
 
+def test_list_key_initiatives_applies_limit_after_group_filter(monkeypatch):
+    requests = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            requests.append(json)
+            request = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "boards": [
+                            {
+                                "columns": [],
+                                "items_page": {
+                                    "cursor": None,
+                                    "items": [
+                                        {
+                                            "id": "gs-1",
+                                            "name": "Regular action item",
+                                            "group": {
+                                                "id": "action-items",
+                                                "title": "Action Items",
+                                            },
+                                            "column_values": [],
+                                        },
+                                        {
+                                            "id": "ki-1",
+                                            "name": "First key initiative",
+                                            "group": {
+                                                "id": "key-initiatives",
+                                                "title": "Key Initiatives",
+                                            },
+                                            "column_values": [],
+                                        },
+                                        {
+                                            "id": "ki-2",
+                                            "name": "Second key initiative",
+                                            "group": {
+                                                "id": "key-initiatives",
+                                                "title": "Key Initiatives",
+                                            },
+                                            "column_values": [],
+                                        },
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.delenv("GS_KEY_INITIATIVES_GROUP_ID", raising=False)
+    monkeypatch.setenv("GS_TODO_BOARD_ID", "gs-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/key-initiatives?limit=1")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 1
+    assert response.json()["items"][0]["item_id"] == "ki-1"
+    assert requests[0]["variables"] == {
+        "board_id": "gs-board",
+        "limit": 500,
+    }
+
+
 def test_list_key_initiatives_can_filter_by_configured_group_id(monkeypatch):
     class FakeAsyncClient:
         def __init__(self, timeout):

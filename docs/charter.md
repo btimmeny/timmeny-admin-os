@@ -2,25 +2,29 @@
 
 ## Purpose
 
-Timmeny-ToDo-OS is a personal operating system for todo and action-item capture: a practical layer for routing tasks into the right Monday.com boards.
+`timmeny-admin-os` is a personal admin operating system for Brian Timmeny's work and personal workflows.
 
-The first job of this repository is to make the system explicit. Before adding complexity, it should capture the operating principles, name the workflows that matter, and define simple interfaces between people, tools, and agents.
+The first job of this repository is to make the system explicit. A private custom GPT is the conversational interface. The Railway-hosted API owns integrations, background processing, schedules, and approval controls. External systems remain the source of truth for their domains.
+
+Monday.com is the source of truth for commitments. Gmail is the source of communication. GPT supplies reasoning in both interactive and background workflows.
 
 ## Scope
 
 Early scope includes:
 
-- Personal knowledge and decision records
-- Repeatable project workflows
-- Automation recipes with clear ownership
-- Agent prompts and task handoff patterns
-- Local scripts or services that support those workflows
+- Monday.com todo and action-item capture
+- GS planning, grouping, prioritization, and metadata updates
+- GPT Action schemas and instructions
+- Lightweight knowledge files that guide reasoning
+- Explicit approval controls before broad writes
+- Future Gmail-based communication review and extraction workflows
 
 Out of scope for the initial foundation:
 
 - A full desktop operating system
 - Heavy platform architecture before concrete workflows exist
 - Hidden automations that cannot explain what they changed
+- Automatic creation of commitments from email without user review
 
 ## Design Bias
 
@@ -34,7 +38,8 @@ Every automation should answer three questions:
 
 ## First Milestones
 
-1. Capture the core workflows.
-2. Define the repository layout.
-3. Add one complete workflow from trigger to output.
-4. Document how to run, review, and revise that workflow.
+1. Keep the Monday todo API stable and documented.
+2. Define the Brian admin architecture.
+3. Preserve GPT instructions and knowledge files in the repo.
+4. Add Gmail review workflows behind approval controls.
+5. Introduce background schedules only after interactive flows are trusted.

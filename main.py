@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import Body, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -104,18 +104,6 @@ class TodoBulkActionMetadataUpdate(TodoUpdateActionMetadataRequest):
 
 class TodoBulkActionMetadataRequest(BaseModel):
     updates: list[TodoBulkActionMetadataUpdate] = Field(..., min_length=1, max_length=100)
-
-
-class TodoBulkActionMetadataJsonRequest(BaseModel):
-    updates_json: str = Field(..., min_length=1)
-
-    @field_validator("updates_json")
-    @classmethod
-    def updates_json_must_not_be_blank(cls, value: str) -> str:
-        stripped_value = value.strip()
-        if not stripped_value:
-            raise ValueError("updates_json must not be blank")
-        return stripped_value
 
 
 class TodoBulkActionMetadataResult(TodoActionMetadata):
@@ -407,26 +395,64 @@ async def bulk_update_todo_action_metadata(
 
 @app.post("/todos/bulk-action-metadata-json", response_model=TodoBulkActionMetadataResponse)
 async def bulk_update_todo_action_metadata_json(
-    payload: TodoBulkActionMetadataJsonRequest,
+    payload: Any = Body(...),
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> TodoBulkActionMetadataResponse:
     verify_api_key(x_api_key=x_api_key, authorization=authorization)
 
+    updates = parse_bulk_update_payload(payload)
+    bulk_payload = validate_bulk_updates(updates)
+    return await perform_bulk_update_todo_action_metadata(bulk_payload)
+
+
+def parse_bulk_update_payload(payload: Any) -> list[Any]:
+    if isinstance(payload, list):
+        return payload
+
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="Bulk update payload must be an object or array.",
+        )
+
+    if "updates" in payload:
+        updates = payload["updates"]
+        if not isinstance(updates, list):
+            raise HTTPException(status_code=422, detail="updates must be an array.")
+        return updates
+
+    if "updates_json" not in payload:
+        raise HTTPException(
+            status_code=422,
+            detail="Bulk update payload must include updates or updates_json.",
+        )
+
+    updates_json = payload["updates_json"]
+    if isinstance(updates_json, list):
+        return updates_json
+
+    if not isinstance(updates_json, str):
+        raise HTTPException(
+            status_code=422,
+            detail="updates_json must be a JSON string or array.",
+        )
+
     try:
-        updates = json.loads(payload.updates_json)
+        updates = json.loads(updates_json)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=422, detail="updates_json must be valid JSON.") from exc
 
     if not isinstance(updates, list):
         raise HTTPException(status_code=422, detail="updates_json must be a JSON array.")
+    return updates
 
+
+def validate_bulk_updates(updates: list[Any]) -> TodoBulkActionMetadataRequest:
     try:
-        bulk_payload = TodoBulkActionMetadataRequest.model_validate({"updates": updates})
+        return TodoBulkActionMetadataRequest.model_validate({"updates": updates})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    return await perform_bulk_update_todo_action_metadata(bulk_payload)
 
 
 async def perform_bulk_update_todo_action_metadata(

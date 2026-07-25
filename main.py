@@ -274,11 +274,12 @@ async def list_key_initiatives(
     monday_items = await get_monday_items(
         token=monday_token,
         board_id=target["board_id"],
-        limit=limit,
+        limit=MONDAY_ITEMS_PAGE_SIZE,
     )
     monday_items = [item for item in monday_items if is_key_initiatives_item(item)]
     if not include_done:
         monday_items = [item for item in monday_items if not is_done_monday_item(item)]
+    monday_items = monday_items[:limit]
 
     items = [
         KeyInitiativeItem(

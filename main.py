@@ -25,7 +25,7 @@ MONDAY_ITEMS_PAGE_SIZE = 500
 KEY_INITIATIVES_GROUP_TITLE = "Key Initiatives"
 GS_KEY_INITIATIVES_GROUP_ID_VARIABLE = "GS_KEY_INITIATIVES_GROUP_ID"
 
-app = FastAPI(title="Timmeny-ToDo-OS", version="0.4.1")
+app = FastAPI(title="timmeny-admin-os", version="0.4.1")
 
 
 class TodoList(StrEnum):

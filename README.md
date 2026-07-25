@@ -1,8 +1,25 @@
-# Timmeny-ToDo-OS
+# timmeny-admin-os
 
-A personal todo operating system for capturing tasks and action items into the right Monday.com boards.
+An admin operating system for Brian Timmeny's personal and work workflows.
 
-This repository starts as a lightweight FastAPI service for the Timmeny-ToDo-OS workflow, plus a place to define the principles, interfaces, and routines that make the system useful before hardening more todo workflows.
+`timmeny-admin-os` is a Railway-hosted FastAPI service used by private custom GPTs. It owns the integrations, approval controls, and durable workflow rules that sit between conversational interfaces and systems of record.
+
+The first working capability is Monday.com todo and action-item management. Monday.com is the source of truth for commitments. Gmail will become the source of communication when email workflows are added.
+
+## Architecture
+
+```text
+Private custom GPTs
+        |
+        v
+timmeny-admin-os API on Railway
+        |
+        +-- Monday.com commitments and planning metadata
+        +-- Gmail communication workflows, planned
+        +-- Approval controls, schedules, and background processing
+```
+
+The GPT supplies reasoning and conversation. `timmeny-admin-os` supplies controlled execution.
 
 ## API
 
@@ -69,14 +86,14 @@ Monday.com cursor pagination is used when the board has more items than one page
 Example:
 
 ```bash
-curl https://timmeny-os-production.up.railway.app/todos?list=all \
+curl https://timmeny-admin-os-production.up.railway.app/todos?list=all \
   -H "Authorization: Bearer $TIMMENY_OS_API_KEY"
 ```
 
 Include completed items only when needed:
 
 ```bash
-curl "https://timmeny-os-production.up.railway.app/todos?list=all&include_done=true" \
+curl "https://timmeny-admin-os-production.up.railway.app/todos?list=all&include_done=true" \
   -H "Authorization: Bearer $TIMMENY_OS_API_KEY"
 ```
 
@@ -118,7 +135,7 @@ Query parameters:
 Example:
 
 ```bash
-curl https://timmeny-os-production.up.railway.app/key-initiatives \
+curl https://timmeny-admin-os-production.up.railway.app/key-initiatives \
   -H "Authorization: Bearer $TIMMENY_OS_API_KEY"
 ```
 
@@ -133,7 +150,7 @@ Query parameters:
 Example:
 
 ```bash
-curl "https://timmeny-os-production.up.railway.app/todos/metadata?list=gs" \
+curl "https://timmeny-admin-os-production.up.railway.app/todos/metadata?list=gs" \
   -H "Authorization: Bearer $TIMMENY_OS_API_KEY"
 ```
 
@@ -264,51 +281,78 @@ uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
 
 Add `MONDAY_API_TOKEN` and `TODO_BOARD_ID` as Railway environment variables before calling `POST /todos`.
 
+### Railway Rename Checklist
+
+Use this when renaming the deployed service:
+
+1. Rename the Railway project to `timmeny-admin-os`.
+2. Rename the Railway service to `timmeny-admin-os`.
+3. In service networking, generate or attach the public domain:
+
+```text
+https://timmeny-admin-os-production.up.railway.app
+```
+
+4. Confirm existing variables are still present:
+   - `MONDAY_API_TOKEN`
+   - `TIMMENY_OS_API_KEY`
+   - `TODO_BOARD_ID`
+   - `GS_TODO_BOARD_ID`
+   - optional group ids
+5. Redeploy the latest GitHub commit.
+6. Rename the custom GPT to `Timmeny Admin OS`.
+7. Update the GPT Action schema server URL to the new Railway domain.
+8. Test `/health`, then test a read-only action before any write.
+
 Production health check:
 
 ```bash
-curl https://timmeny-os-production.up.railway.app/health
+curl https://timmeny-admin-os-production.up.railway.app/health
 ```
 
 Production todo test:
 
 ```bash
-curl -X POST https://timmeny-os-production.up.railway.app/todos -H "Content-Type: application/json" -H "X-API-Key: $TIMMENY_OS_API_KEY" -d '{"title":"TEST - Railway Deploy"}'
+curl -X POST https://timmeny-admin-os-production.up.railway.app/todos -H "Content-Type: application/json" -H "X-API-Key: $TIMMENY_OS_API_KEY" -d '{"title":"TEST - Railway Deploy"}'
 ```
 
 Production GS todo test:
 
 ```bash
-curl -X POST https://timmeny-os-production.up.railway.app/todos -H "Content-Type: application/json" -H "X-API-Key: $TIMMENY_OS_API_KEY" -d '{"title":"TEST - GS Railway Deploy","list":"gs"}'
+curl -X POST https://timmeny-admin-os-production.up.railway.app/todos -H "Content-Type: application/json" -H "X-API-Key: $TIMMENY_OS_API_KEY" -d '{"title":"TEST - GS Railway Deploy","list":"gs"}'
 ```
 
 Production decision todo test:
 
 ```bash
-curl -X POST https://timmeny-os-production.up.railway.app/todos -H "Content-Type: application/json" -H "Authorization: Bearer $TIMMENY_OS_API_KEY" -d '{"title":"Decide launch owner","list":"todo","action_group":"Launch","action_date":"2026-06-21","action":"Decision"}'
+curl -X POST https://timmeny-admin-os-production.up.railway.app/todos -H "Content-Type: application/json" -H "Authorization: Bearer $TIMMENY_OS_API_KEY" -d '{"title":"Decide launch owner","list":"todo","action_group":"Launch","action_date":"2026-06-21","action":"Decision"}'
 ```
 
 Production bulk grouping test:
 
 ```bash
-curl -X POST https://timmeny-os-production.up.railway.app/todos/bulk-action-metadata -H "Content-Type: application/json" -H "Authorization: Bearer $TIMMENY_OS_API_KEY" -d '{"updates":[{"item_id":"ITEM_ID_1","list":"todo","action_group":"Launch"},{"item_id":"ITEM_ID_2","list":"gs","action_group":"Partnerships"}]}'
+curl -X POST https://timmeny-admin-os-production.up.railway.app/todos/bulk-action-metadata -H "Content-Type: application/json" -H "Authorization: Bearer $TIMMENY_OS_API_KEY" -d '{"updates":[{"item_id":"ITEM_ID_1","list":"todo","action_group":"Launch"},{"item_id":"ITEM_ID_2","list":"gs","action_group":"Partnerships"}]}'
 ```
 
 ## Naming
 
-Product/app name: `Timmeny-ToDo-OS`
+Product/app name: `timmeny-admin-os`
+
+Current capability name: `Timmeny ToDo`
+
+Primary GPT name: `Timmeny Admin OS`
 
 Current production URL:
 
 ```text
-https://timmeny-os-production.up.railway.app
+https://timmeny-admin-os-production.up.railway.app
 ```
 
-The URL can be renamed later in Railway after the service/domain rename is complete.
+The URL can be renamed later in Railway after the service/domain rename is complete. Endpoint paths should stay stable until the GPT Action schema and deployed service are updated together.
 
 ## Intent
 
-Timmeny-ToDo-OS should make task capture easy to trust and easy to improve. The system should favor durable structure over clever one-offs, clear records over mystery state, and small useful loops over sprawling machinery.
+`timmeny-admin-os` should make administrative workflows easy to trust and easy to improve. The system should favor durable structure over clever one-offs, clear records over mystery state, and small useful loops over sprawling machinery.
 
 ## Principles
 
@@ -327,9 +371,10 @@ Timmeny-ToDo-OS should make task capture easy to trust and easy to improve. The 
 - `docs/gpt-action-openapi.yaml` defines the GPT Action schema.
 - `tests/` covers the current API surface.
 - `docs/charter.md` defines the initial scope, values, and near-term direction.
+- `docs/architecture.md` describes the target operating model.
 
 ## Next Steps
 
-- Sketch the main workflows this system should support.
-- Decide what belongs in code, docs, prompts, automations, or external tools.
-- Add the next workflow only after the todo endpoint is working end to end.
+- Keep the current Monday todo capability stable.
+- Add Gmail as the next integration behind explicit review and approval controls.
+- Split large code paths into modules as the API grows beyond the first capability.

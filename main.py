@@ -185,6 +185,12 @@ class KeyInitiativeListResponse(BaseModel):
     items: list[KeyInitiativeItem]
 
 
+class GptReadResponse(BaseModel):
+    success: bool
+    count: int
+    result_text: str
+
+
 class HealthResponse(BaseModel):
     status: str
 
@@ -204,6 +210,41 @@ async def list_todos(
 ) -> TodoListResponse:
     verify_api_key(x_api_key=x_api_key, authorization=authorization)
 
+    items = await get_todo_items(
+        list_filter=list_filter,
+        limit=limit,
+        include_done=include_done,
+    )
+    return TodoListResponse(success=True, count=len(items), items=items)
+
+
+@app.get("/todos/read-simple", response_model=GptReadResponse)
+async def list_todos_simple(
+    list_filter: TodoListFilter = Query(default=TodoListFilter.ALL, alias="list"),
+    limit: int = Query(default=MONDAY_ITEMS_PAGE_SIZE, ge=1, le=MONDAY_ITEMS_PAGE_SIZE),
+    include_done: bool = Query(default=False),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> GptReadResponse:
+    verify_api_key(x_api_key=x_api_key, authorization=authorization)
+
+    items = await get_todo_items(
+        list_filter=list_filter,
+        limit=limit,
+        include_done=include_done,
+    )
+    return GptReadResponse(
+        success=True,
+        count=len(items),
+        result_text=format_todo_items_for_gpt(items),
+    )
+
+
+async def get_todo_items(
+    list_filter: TodoListFilter,
+    limit: int,
+    include_done: bool,
+) -> list[TodoItem]:
     monday_token = get_monday_token()
     todo_lists = get_todo_lists_for_filter(list_filter)
     items: list[TodoItem] = []
@@ -232,7 +273,7 @@ async def list_todos(
             for item in monday_items
         )
 
-    return TodoListResponse(success=True, count=len(items), items=items)
+    return items
 
 
 @app.get("/todos/metadata", response_model=TodoMetadataResponse)
@@ -243,6 +284,27 @@ async def get_todo_metadata(
 ) -> TodoMetadataResponse:
     verify_api_key(x_api_key=x_api_key, authorization=authorization)
 
+    columns = await get_todo_metadata_columns(todo_list=todo_list)
+    return TodoMetadataResponse(success=True, list=todo_list, columns=columns)
+
+
+@app.get("/todos/metadata/read-simple", response_model=GptReadResponse)
+async def get_todo_metadata_simple(
+    todo_list: TodoList = Query(default=TodoList.GS, alias="list"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> GptReadResponse:
+    verify_api_key(x_api_key=x_api_key, authorization=authorization)
+
+    columns = await get_todo_metadata_columns(todo_list=todo_list)
+    return GptReadResponse(
+        success=True,
+        count=len(columns),
+        result_text=format_todo_metadata_for_gpt(columns),
+    )
+
+
+async def get_todo_metadata_columns(todo_list: TodoList) -> list[TodoMetadataColumn]:
     monday_token = get_monday_token()
     target = get_todo_target(todo_list)
     columns_by_title = await get_board_columns_by_title(
@@ -275,7 +337,7 @@ async def get_todo_metadata(
         for title in planning_columns
         if (column := columns_by_title.get(title))
     ]
-    return TodoMetadataResponse(success=True, list=todo_list, columns=columns)
+    return columns
 
 
 @app.get("/key-initiatives", response_model=KeyInitiativeListResponse)
@@ -287,6 +349,31 @@ async def list_key_initiatives(
 ) -> KeyInitiativeListResponse:
     verify_api_key(x_api_key=x_api_key, authorization=authorization)
 
+    items = await get_key_initiative_items(limit=limit, include_done=include_done)
+    return KeyInitiativeListResponse(success=True, count=len(items), items=items)
+
+
+@app.get("/key-initiatives/read-simple", response_model=GptReadResponse)
+async def list_key_initiatives_simple(
+    limit: int = Query(default=MONDAY_ITEMS_PAGE_SIZE, ge=1, le=MONDAY_ITEMS_PAGE_SIZE),
+    include_done: bool = Query(default=False),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> GptReadResponse:
+    verify_api_key(x_api_key=x_api_key, authorization=authorization)
+
+    items = await get_key_initiative_items(limit=limit, include_done=include_done)
+    return GptReadResponse(
+        success=True,
+        count=len(items),
+        result_text=format_todo_items_for_gpt(items),
+    )
+
+
+async def get_key_initiative_items(
+    limit: int,
+    include_done: bool,
+) -> list[KeyInitiativeItem]:
     monday_token = get_monday_token()
     target = get_todo_target(TodoList.GS)
     monday_items = await get_monday_items(
@@ -310,7 +397,7 @@ async def list_key_initiatives(
         )
         for item in monday_items
     ]
-    return KeyInitiativeListResponse(success=True, count=len(items), items=items)
+    return items
 
 
 @app.post("/todos", response_model=TodoCreateResponse)
@@ -492,6 +579,54 @@ def validate_bulk_updates(updates: list[Any]) -> TodoBulkActionMetadataRequest:
         return TodoBulkActionMetadataRequest.model_validate({"updates": updates})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def format_todo_items_for_gpt(items: list[TodoItem] | list[KeyInitiativeItem]) -> str:
+    if not items:
+        return "No items found."
+
+    lines = []
+    for item in items:
+        parts = [
+            f"item_id={item.item_id}",
+            f"title={item.title}",
+            f"list={getattr(item, 'list', 'gs')}",
+            f"group={format_optional_value(item.group_title)}",
+            f"status={format_optional_value(item.status)}",
+            f"owner={format_optional_value(item.owner)}",
+            f"due_date={format_optional_value(item.due_date)}",
+            f"action={format_optional_value(item.action)}",
+            f"action_date={format_optional_value(item.action_date)}",
+            f"action_group={format_optional_value(item.action_group)}",
+            f"annual_objective={format_optional_value(item.annual_objective)}",
+            f"initiative={format_optional_value(item.initiative_project)}",
+        ]
+        lines.append(" | ".join(parts))
+    return "\n".join(lines)
+
+
+def format_todo_metadata_for_gpt(columns: list[TodoMetadataColumn]) -> str:
+    if not columns:
+        return "No metadata columns found."
+
+    lines = []
+    for column in columns:
+        labels = ", ".join(column.labels) if column.labels else "none"
+        observed_values = (
+            ", ".join(column.observed_values) if column.observed_values else "none"
+        )
+        lines.append(
+            f"id={column.id} | title={column.title} | type={column.type} | "
+            f"labels={labels} | observed_values={observed_values}"
+        )
+    return "\n".join(lines)
+
+
+def format_optional_value(value: Any) -> str:
+    if value is None:
+        return "none"
+    value_text = str(value).strip()
+    return value_text or "none"
 
 
 async def perform_bulk_update_todo_action_metadata(

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: timmeny-admin-os API
-  version: 0.5.2
-  description: Read, create, and update Timmeny Admin OS todo data.
+  version: 0.6.0
+  description: GPT-safe API for reading, creating, and updating Timmeny Admin OS todos.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
 paths:
@@ -18,16 +18,13 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                properties:
-                  status:
-                    type: string
-  /todos:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /todos/read-simple:
     get:
       operationId: listTodos
-      summary: List todo items
-      description: Lists open todo items from selected boards.
+      summary: List todo items as GPT-safe text
+      description: Returns selected todo items as compact text with item IDs and metadata.
       security:
         - ApiKeyAuth: []
       parameters:
@@ -61,7 +58,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TodoListResponse"
+                $ref: "#/components/schemas/GptReadResponse"
+
+  /todos:
     post:
       operationId: createTodo
       summary: Create a todo item
@@ -88,26 +87,15 @@ paths:
                     - gs
                   default: todo
                 action_group:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 action_date:
-                  type:
-                    - string
-                    - "null"
-                  format: date
+                  type: string
                 action:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 annual_objective:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 initiative_project:
-                  type:
-                    - string
-                    - "null"
+                  type: string
       responses:
         "200":
           description: Todo item created successfully.
@@ -115,10 +103,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TodoWriteResponse"
-  /todos/metadata:
+
+  /todos/metadata/read-simple:
     get:
       operationId: getTodoMetadata
-      summary: Get todo board metadata
+      summary: Get todo board metadata as GPT-safe text
+      description: Returns configured Monday columns as compact text.
       security:
         - ApiKeyAuth: []
       parameters:
@@ -137,12 +127,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TodoMetadataResponse"
-  /key-initiatives:
+                $ref: "#/components/schemas/GptReadResponse"
+
+  /key-initiatives/read-simple:
     get:
       operationId: listKeyInitiatives
-      summary: List key initiatives
-      description: Lists open items from the GS Key Initiatives group.
+      summary: List Key Initiatives as GPT-safe text
+      description: Returns open items from the GS Key Initiatives group as compact text.
       security:
         - ApiKeyAuth: []
       parameters:
@@ -166,7 +157,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KeyInitiativeListResponse"
+                $ref: "#/components/schemas/GptReadResponse"
+
   /todos/{item_id}/action-metadata:
     patch:
       operationId: updateTodoActionMetadata
@@ -195,26 +187,15 @@ paths:
                     - todo
                     - gs
                 action_group:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 action_date:
-                  type:
-                    - string
-                    - "null"
-                  format: date
+                  type: string
                 action:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 annual_objective:
-                  type:
-                    - string
-                    - "null"
+                  type: string
                 initiative_project:
-                  type:
-                    - string
-                    - "null"
+                  type: string
       responses:
         "200":
           description: Todo action metadata updated successfully.
@@ -222,6 +203,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TodoWriteResponse"
+
   /todos/bulk-action-metadata-simple:
     post:
       operationId: bulkUpdateTodoActionMetadata
@@ -248,17 +230,28 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
-                properties:
-                  success:
-                    type: boolean
-                  updated_count:
-                    type: integer
-                  failed_count:
-                    type: integer
+                $ref: "#/components/schemas/BulkUpdateResponse"
+
 components:
   schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        status:
+          type: string
+
+    GptReadResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        success:
+          type: boolean
+        count:
+          type: integer
+        result_text:
+          type: string
+
     TodoWriteResponse:
       type: object
       additionalProperties: true
@@ -272,127 +265,27 @@ components:
         list:
           type: string
         action_group:
-          type:
-            - string
-            - "null"
+          type: string
         action_date:
-          type:
-            - string
-            - "null"
+          type: string
         action:
-          type:
-            - string
-            - "null"
+          type: string
         annual_objective:
-          type:
-            - string
-            - "null"
+          type: string
         initiative_project:
-          type:
-            - string
-            - "null"
-    TodoItem:
-      type: object
-      additionalProperties: true
-      properties:
-        item_id:
           type: string
-        title:
-          type: string
-        list:
-          type: string
-        group_id:
-          type:
-            - string
-            - "null"
-        group_title:
-          type:
-            - string
-            - "null"
-        action_group:
-          type:
-            - string
-            - "null"
-        action_date:
-          type:
-            - string
-            - "null"
-        action:
-          type:
-            - string
-            - "null"
-        annual_objective:
-          type:
-            - string
-            - "null"
-        initiative_project:
-          type:
-            - string
-            - "null"
-        status:
-          type:
-            - string
-            - "null"
-        owner:
-          type:
-            - string
-            - "null"
-        due_date:
-          type:
-            - string
-            - "null"
-    TodoListResponse:
+
+    BulkUpdateResponse:
       type: object
       additionalProperties: true
       properties:
         success:
           type: boolean
-        count:
+        updated_count:
           type: integer
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/TodoItem"
-    TodoMetadataResponse:
-      type: object
-      additionalProperties: true
-      properties:
-        success:
-          type: boolean
-        list:
-          type: string
-        columns:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-            properties:
-              id:
-                type: string
-              title:
-                type: string
-              type:
-                type: string
-              labels:
-                type: array
-                items:
-                  type: string
-              observed_values:
-                type: array
-                items:
-                  type: string
-    KeyInitiativeListResponse:
-      type: object
-      additionalProperties: true
-      properties:
-        success:
-          type: boolean
-        count:
+        failed_count:
           type: integer
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/TodoItem"
+
   securitySchemes:
     ApiKeyAuth:
       type: http

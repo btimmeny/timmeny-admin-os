@@ -1016,6 +1016,85 @@ def test_bulk_update_todo_action_metadata_json_requires_valid_json(monkeypatch):
     assert response.json() == {"detail": "updates_json must be valid JSON."}
 
 
+def test_bulk_update_todo_action_metadata_simple_returns_flat_response(monkeypatch):
+    requests = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            requests.append(json)
+            request = httpx.Request("POST", url)
+            if "GetBoardColumns" in json["query"]:
+                return httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "boards": [
+                                {
+                                    "columns": [
+                                        {
+                                            "id": "text_mkp",
+                                            "title": "Action Group",
+                                            "type": "text",
+                                        },
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "change_multiple_column_values": {
+                            "id": json["variables"]["item_id"]
+                        }
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.setenv("TODO_BOARD_ID", "todo-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.post(
+        "/todos/bulk-action-metadata-simple",
+        json={
+            "updates_json": json.dumps(
+                [
+                    {
+                        "item_id": "todo-1",
+                        "list": "todo",
+                        "action_group": "Launch",
+                    }
+                ]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "updated_count": 1,
+        "failed_count": 0,
+    }
+    assert json.loads(requests[1]["variables"]["column_values"]) == {
+        "text_mkp": "Launch",
+    }
+
+
 def test_bulk_update_todo_action_metadata_reports_partial_failures(monkeypatch):
     requests = []
 

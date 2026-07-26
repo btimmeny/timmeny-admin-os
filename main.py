@@ -120,6 +120,24 @@ class TodoBulkActionMetadataResponse(BaseModel):
     results: list[TodoBulkActionMetadataResult]
 
 
+class TodoBulkActionMetadataSimpleRequest(BaseModel):
+    updates_json: str = Field(..., min_length=1)
+
+    @field_validator("updates_json")
+    @classmethod
+    def updates_json_must_not_be_blank(cls, value: str) -> str:
+        stripped_value = value.strip()
+        if not stripped_value:
+            raise ValueError("updates_json must not be blank")
+        return stripped_value
+
+
+class TodoBulkActionMetadataSimpleResponse(BaseModel):
+    success: bool
+    updated_count: int
+    failed_count: int
+
+
 class TodoItem(TodoActionMetadata):
     item_id: str
     title: str
@@ -404,6 +422,27 @@ async def bulk_update_todo_action_metadata_json(
     updates = parse_bulk_update_payload(payload)
     bulk_payload = validate_bulk_updates(updates)
     return await perform_bulk_update_todo_action_metadata(bulk_payload)
+
+
+@app.post(
+    "/todos/bulk-action-metadata-simple",
+    response_model=TodoBulkActionMetadataSimpleResponse,
+)
+async def bulk_update_todo_action_metadata_simple(
+    payload: TodoBulkActionMetadataSimpleRequest,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> TodoBulkActionMetadataSimpleResponse:
+    verify_api_key(x_api_key=x_api_key, authorization=authorization)
+
+    updates = parse_bulk_update_payload({"updates_json": payload.updates_json})
+    bulk_payload = validate_bulk_updates(updates)
+    result = await perform_bulk_update_todo_action_metadata(bulk_payload)
+    return TodoBulkActionMetadataSimpleResponse(
+        success=result.success,
+        updated_count=result.updated_count,
+        failed_count=result.failed_count,
+    )
 
 
 def parse_bulk_update_payload(payload: Any) -> list[Any]:

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: timmeny-admin-os API
-  version: 0.5.1
+  version: 0.5.2
   description: Read, create, and update Timmeny Admin OS todo data.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
@@ -222,11 +222,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TodoWriteResponse"
-  /todos/bulk-action-metadata-json:
+  /todos/bulk-action-metadata-simple:
     post:
       operationId: bulkUpdateTodoActionMetadata
       summary: Bulk update todo action metadata
-      description: Updates many todo items. Prefer updates as an array. The API also accepts updates_json as a JSON string array.
+      description: Updates many todo items. Send updates_json as a JSON string array.
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -235,45 +235,13 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              additionalProperties: false
+              required:
+                - updates_json
               properties:
-                updates:
-                  type: array
-                  items:
-                    type: object
-                    additionalProperties: true
-                    properties:
-                      item_id:
-                        type: string
-                      list:
-                        type: string
-                        enum:
-                          - todo
-                          - gs
-                      action_group:
-                        type:
-                          - string
-                          - "null"
-                      action_date:
-                        type:
-                          - string
-                          - "null"
-                        format: date
-                      action:
-                        type:
-                          - string
-                          - "null"
-                      annual_objective:
-                        type:
-                          - string
-                          - "null"
-                      initiative_project:
-                        type:
-                          - string
-                          - "null"
                 updates_json:
                   type: string
-                  description: Optional JSON string array of update objects.
+                  description: JSON string array of update objects with item_id, list, and metadata fields.
       responses:
         "200":
           description: Bulk update completed.

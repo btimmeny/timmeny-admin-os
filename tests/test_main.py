@@ -1499,6 +1499,76 @@ def test_list_todos_can_filter_to_gs(monkeypatch):
     }
 
 
+def test_list_todos_simple_returns_gpt_friendly_text(monkeypatch):
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, json, headers):
+            request = httpx.Request("POST", url)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "boards": [
+                            {
+                                "items_page": {
+                                    "items": [
+                                        {
+                                            "id": "2",
+                                            "name": "gs item",
+                                            "group": {
+                                                "id": "topics",
+                                                "title": "To Do",
+                                            },
+                                            "column_values": [
+                                                {
+                                                    "text": "GSCode Core Platform",
+                                                    "column": {
+                                                        "title": "Action Group",
+                                                    },
+                                                },
+                                                {
+                                                    "text": "Not Started",
+                                                    "column": {"title": "Status"},
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                }
+                            }
+                        ]
+                    }
+                },
+                request=request,
+            )
+
+    monkeypatch.setenv("MONDAY_API_TOKEN", "test-token")
+    monkeypatch.delenv("TIMMENY_OS_API_KEY", raising=False)
+    monkeypatch.setenv("GS_TODO_BOARD_ID", "gs-board")
+    monkeypatch.setattr(main.httpx, "AsyncClient", FakeAsyncClient)
+
+    response = client.get("/todos/read-simple?list=gs&limit=10")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "count": 1,
+        "result_text": (
+            "item_id=2 | title=gs item | list=gs | group=To Do | "
+            "status=Not Started | owner=none | due_date=none | action=none | "
+            "action_date=none | action_group=GSCode Core Platform | "
+            "annual_objective=none | initiative=none"
+        ),
+    }
+
+
 def test_list_todos_reads_next_monday_page(monkeypatch):
     requests = []
 

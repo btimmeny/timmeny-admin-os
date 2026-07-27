@@ -1,0 +1,18 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+assumptions: []
+
+# Example shape:
+# - id: assumption-example
+#   statement: Example hypothesis about the operating model
+#   status: testing
+#   evidence_ids: []
+#   examples: []
+#   implications:
+#     monday: []
+#     postgres: []
+#     architecture: []
+#   model_status: prototype
+#   last_verified: null

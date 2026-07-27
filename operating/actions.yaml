@@ -1,0 +1,23 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+actions: []
+
+# Example shape:
+# - id: action-example
+#   title: Example action
+#   status: open
+#   action_type: one_time
+#   outcome_id: null
+#   obligation_id: null
+#   entity_ids: []
+#   decision_ids: []
+#   evidence_ids: []
+#   due_date: null
+#   source:
+#     system: manual
+#     external_id: null
+#   authoritative_system: monday
+#   model_status: prototype
+#   last_verified: null

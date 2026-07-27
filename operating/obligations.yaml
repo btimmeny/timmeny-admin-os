@@ -1,0 +1,27 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+obligations: []
+
+# Example shape:
+# - id: obligation-example
+#   title: Example recurring responsibility
+#   life_area_id: finance
+#   status: active
+#   subject_entity_id: null
+#   provider_entity_id: null
+#   relationship_ids: []
+#   recurrence:
+#     frequency: monthly
+#     interval: 1
+#     preferred_day: null
+#     due_day: null
+#   activation:
+#     effective_from: null
+#     condition: null
+#   termination:
+#     effective_to: null
+#     condition: null
+#   model_status: prototype
+#   last_verified: null

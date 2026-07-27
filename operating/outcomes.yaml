@@ -1,0 +1,19 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+outcomes: []
+
+# Example shape:
+# - id: outcome-example
+#   title: Example outcome
+#   type: goal
+#   life_area_id: career
+#   parent_outcome_id: null
+#   status: active
+#   horizon: long_term
+#   start_date: null
+#   target_date: null
+#   completion_criteria: null
+#   model_status: prototype
+#   last_verified: null

@@ -1,0 +1,15 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+entities: []
+
+# Example shape:
+# - id: entity-example
+#   name: Example entity
+#   type: person
+#   status: active
+#   aliases: []
+#   external_references: []
+#   model_status: prototype
+#   last_verified: null

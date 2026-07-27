@@ -1,0 +1,19 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+decisions: []
+
+# Example shape:
+# - id: decision-example
+#   title: Example decision
+#   status: open
+#   outcome_id: null
+#   entity_ids: []
+#   options: []
+#   selected_option: null
+#   rationale: null
+#   decided_at: null
+#   evidence_ids: []
+#   model_status: prototype
+#   last_verified: null

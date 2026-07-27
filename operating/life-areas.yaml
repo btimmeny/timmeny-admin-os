@@ -1,0 +1,26 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+life_areas:
+  - id: career
+    name: Career
+    status: active
+  - id: marriage
+    name: Marriage
+    status: active
+  - id: family-children
+    name: Family — Children
+    status: active
+  - id: family-extended
+    name: Family — Extended Family
+    status: active
+  - id: health
+    name: Health
+    status: active
+  - id: finance
+    name: Finance
+    status: active
+  - id: travel-vacations
+    name: Travel & Vacations
+    status: active

@@ -1,0 +1,20 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+evidence: []
+
+# Example shape:
+# - id: evidence-example
+#   type: email
+#   title: Example evidence
+#   source_system: gmail
+#   external_id: null
+#   occurred_at: null
+#   entity_ids: []
+#   outcome_ids: []
+#   action_ids: []
+#   decision_ids: []
+#   summary: null
+#   model_status: prototype
+#   last_verified: null

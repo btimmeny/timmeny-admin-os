@@ -1,0 +1,17 @@
+schema_version: 0.1
+lifecycle: prototype
+last_updated: 2026-07-26
+
+relationships: []
+
+# Example shape:
+# - id: relationship-example
+#   type: ownership
+#   source_id: entity-household-example
+#   target_id: entity-property-example
+#   status: active
+#   effective_from: null
+#   effective_to: null
+#   end_reason: null
+#   model_status: prototype
+#   last_verified: null

@@ -1,8 +1,10 @@
+import base64
 import hashlib
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from email.message import EmailMessage
 from email.utils import getaddresses
 from typing import Any, AsyncIterator, Sequence
 
@@ -21,6 +23,7 @@ REQUEST_TIMEOUT_SECONDS = 20.0
 TOKEN_EXPIRY_MARGIN_SECONDS = 60
 MAX_SNIPPET_LENGTH = 500
 MAX_PARTICIPANTS = 25
+MAX_DRAFTS_SCANNED = 100
 PARTICIPANT_HEADERS = ("From", "To", "Cc")
 METADATA_HEADERS = ("Subject", "From", "To", "Cc", "Date")
 
@@ -33,6 +36,29 @@ class GmailError(RuntimeError):
 
 class GmailAuthError(GmailError):
     """Raised when the stored refresh token no longer works."""
+
+
+class GmailNotFound(GmailError):
+    """Raised when Gmail says a thread, draft, or message does not exist.
+
+    Separate from other failures so that absence can be treated as an answer:
+    a draft that is gone has been sent or deleted, which is not the same as
+    Gmail being unreachable.
+    """
+
+
+@dataclass(frozen=True)
+class GmailDraft:
+    """A draft Admin OS wrote, as Gmail reports it back.
+
+    `message_id` is the draft's underlying message: sending is addressed by
+    draft id, but the message id is what proves the draft that was approved is
+    the draft that went out.
+    """
+
+    draft_id: str
+    message_id: str | None
+    thread_id: str | None
 
 
 @dataclass(frozen=True)
@@ -126,6 +152,23 @@ class GmailClient:
             raise GmailAuthError("Gmail rejected the access token.")
         return read_json(response, "Gmail")
 
+    async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """The only method that changes anything in the mailbox.
+
+        Whether a write is permitted at all is decided before this is reached:
+        the client enforces no policy, so the kill switch and the capability's
+        permissions cannot be bypassed by calling it directly.
+        """
+        access_token = await self.get_access_token()
+        response = await self._http_client.post(
+            f"{GMAIL_API_BASE_URL}{path}",
+            json=payload,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if response.status_code == 401:
+            raise GmailAuthError("Gmail rejected the access token.")
+        return read_json(response, "Gmail")
+
     async def resolve_label_id(self, label_name: str) -> str | None:
         """Return the id of a label, matched case-insensitively by name."""
         payload = await self.request("/labels")
@@ -175,6 +218,78 @@ class GmailClient:
         )
         return build_thread(thread_id, payload)
 
+    async def modify_thread(
+        self,
+        thread_id: str,
+        add_label_ids: Sequence[str] = (),
+        remove_label_ids: Sequence[str] = (),
+    ) -> GmailThread:
+        """Add and remove labels on every message in a thread.
+
+        Naturally idempotent: Gmail treats adding a label a message already
+        carries, or removing one it does not, as a no-op.
+        """
+        await self.post(
+            f"/threads/{thread_id}/modify",
+            {
+                "addLabelIds": list(add_label_ids),
+                "removeLabelIds": list(remove_label_ids),
+            },
+        )
+        return await self.fetch_thread(thread_id)
+
+    async def create_draft(
+        self,
+        thread_id: str,
+        to: Sequence[str],
+        subject: str,
+        body: str,
+        cc: Sequence[str] = (),
+    ) -> GmailDraft:
+        """Create a reply draft on a thread. Never sends it."""
+        payload = await self.post(
+            "/drafts",
+            {"message": {"threadId": thread_id, "raw": encode_message(to, subject, body, cc)}},
+        )
+        draft = build_draft(payload)
+        if draft is None:
+            raise GmailError("Gmail accepted the draft but did not say which draft it is.")
+        return draft
+
+    async def fetch_draft(self, draft_id: str) -> GmailDraft | None:
+        """Read a draft back, or return None if it no longer exists."""
+        try:
+            payload = await self.request(f"/drafts/{draft_id}", params={"format": "metadata"})
+        except GmailNotFound:
+            return None
+        return build_draft(payload)
+
+    async def find_draft_for_thread(self, thread_id: str) -> GmailDraft | None:
+        """Find an existing draft on a thread.
+
+        Gmail has no idempotency token for draft creation, so this is what a
+        retry uses to adopt the draft a timed-out attempt already created
+        instead of writing a second one.
+        """
+        payload = await self.request("/drafts", params={"maxResults": MAX_DRAFTS_SCANNED})
+        for entry in payload.get("drafts") or []:
+            if not isinstance(entry, dict):
+                continue
+            draft = build_draft(entry)
+            if draft is not None and draft.thread_id == thread_id:
+                return draft
+            if draft is not None and draft.thread_id is None:
+                detailed = await self.fetch_draft(draft.draft_id)
+                if detailed is not None and detailed.thread_id == thread_id:
+                    return detailed
+        return None
+
+    async def send_draft(self, draft_id: str) -> str | None:
+        """Send an existing draft, returning the id of the sent message."""
+        payload = await self.post("/drafts/send", {"id": draft_id})
+        message_id = payload.get("id")
+        return message_id if isinstance(message_id, str) else None
+
 
 @asynccontextmanager
 async def open_gmail_client(credentials: GmailCredentials) -> AsyncIterator[GmailClient]:
@@ -183,6 +298,8 @@ async def open_gmail_client(credentials: GmailCredentials) -> AsyncIterator[Gmai
 
 
 def read_json(response: httpx.Response, source: str) -> dict[str, Any]:
+    if response.status_code == 404:
+        raise GmailNotFound(f"{source} says that does not exist.")
     if response.status_code >= 400:
         raise GmailError(f"{source} returned HTTP {response.status_code}.")
     try:
@@ -192,6 +309,37 @@ def read_json(response: httpx.Response, source: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise GmailError(f"{source} returned an unexpected response shape.")
     return payload
+
+
+def encode_message(
+    to: Sequence[str],
+    subject: str,
+    body: str,
+    cc: Sequence[str] = (),
+) -> str:
+    message = EmailMessage()
+    message["To"] = ", ".join(to)
+    if cc:
+        message["Cc"] = ", ".join(cc)
+    message["Subject"] = subject
+    message.set_content(body)
+    return base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+
+def build_draft(payload: dict[str, Any]) -> GmailDraft | None:
+    draft_id = payload.get("id")
+    if not isinstance(draft_id, str):
+        return None
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return GmailDraft(draft_id=draft_id, message_id=None, thread_id=None)
+    message_id = message.get("id")
+    thread_id = message.get("threadId")
+    return GmailDraft(
+        draft_id=draft_id,
+        message_id=message_id if isinstance(message_id, str) else None,
+        thread_id=thread_id if isinstance(thread_id, str) else None,
+    )
 
 
 def build_thread(thread_id: str, payload: dict[str, Any]) -> GmailThread:

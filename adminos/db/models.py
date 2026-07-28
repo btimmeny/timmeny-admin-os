@@ -21,7 +21,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
-JsonObject = dict[str, str | int | float | bool | None]
+JsonValue = str | int | float | bool | None | list[str] | list[int]
+JsonObject = dict[str, JsonValue]
 ID_LENGTH = 36
 SHORT_TEXT_LENGTH = 255
 DIGEST_LENGTH = 64
@@ -322,6 +323,139 @@ class ReviewDecision(Base):
     learning_scope: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_column()
+
+
+class ReviewAction(Base):
+    """One external effect authorised by one decision, and its whole lifecycle.
+
+    An action is the only thing that touches Gmail or Monday. It moves
+    approved -> prepared -> executed -> verified -> completed, or fails, and
+    `idempotency_key` is what stops a retry performing the same write twice.
+    """
+
+    __tablename__ = "review_actions"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_review_action_idempotency"),
+        Index("ix_review_actions_run_state", "run_id", "state"),
+        Index("ix_review_actions_item", "item_id"),
+    )
+
+    id: Mapped[str] = id_column()
+    run_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_items.id", ondelete="CASCADE"), nullable=False
+    )
+    capability_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    action_kind: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    params: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    prepared_params: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    idempotency_key: Mapped[str] = mapped_column(String(DIGEST_LENGTH), nullable=False)
+    target_thread_id: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    external_kind: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    external_ref: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    approval_kind: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    approved_by: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    rule_id: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    verification: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
+    prepared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ActionEvent(Base):
+    """Append-only audit of everything that happened to one action."""
+
+    __tablename__ = "action_events"
+    __table_args__ = (
+        UniqueConstraint("action_id", "sequence", name="uq_action_event_sequence"),
+    )
+
+    id: Mapped[str] = id_column()
+    action_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_actions.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    state_after: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    detail: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    external_ref: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    created_at: Mapped[datetime] = created_at_column()
+
+
+class LearningEvent(Base):
+    """A correction worth learning from, recorded as data rather than a rule.
+
+    Written whenever a decision departs from what was recommended. It is
+    evidence for a rule someone may later propose; it never becomes one by
+    itself.
+    """
+
+    __tablename__ = "learning_events"
+    __table_args__ = (Index("ix_learning_events_capability", "capability_key", "kind"),)
+
+    id: Mapped[str] = id_column()
+    capability_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    run_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="SET NULL")
+    )
+    item_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_items.id", ondelete="SET NULL")
+    )
+    decision_id: Mapped[str | None] = mapped_column(String(ID_LENGTH))
+    kind: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    recommended: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    chosen: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    recommendation_source: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    rule_id: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    model_version: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    signals: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    note: Mapped[str | None] = mapped_column(Text)
+    candidate_rule_id: Mapped[str | None] = mapped_column(String(ID_LENGTH))
+    created_at: Mapped[datetime] = created_at_column()
+
+
+class CandidateRule(Base):
+    """A rule the system has noticed, or a human has written, and its standing.
+
+    States run observed -> proposed -> confirmed -> automatable -> retired. Only
+    `confirmed` and `automatable` affect recommendations, and only
+    `automatable` may act without asking first.
+    """
+
+    __tablename__ = "candidate_rules"
+    __table_args__ = (
+        Index("ix_candidate_rules_capability_state", "capability_key", "state"),
+    )
+
+    id: Mapped[str] = id_column()
+    capability_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    match_conditions: Mapped[JsonObject] = mapped_column("match", JSON_TYPE, nullable=False)
+    action: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    observed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    policy_version: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    proposed_by: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    proposed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_by: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    automatable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
 
 
 class Decision(Base):

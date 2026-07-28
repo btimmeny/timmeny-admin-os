@@ -11,6 +11,7 @@ from adminos.capabilities.config import CapabilityConfig  # noqa: E402
 
 
 DEFAULT_ACTIONS = ["gmail.label", "gmail.archive", "gmail.draft_reply", "monday.create_task"]
+DEFAULT_EXECUTION = ["gmail.label", "gmail.archive", "gmail.draft_reply"]
 DEFAULT_STEPS = [
     "collect_evidence",
     "recommend",
@@ -38,6 +39,7 @@ def build_capability(
             "categories": ["obligation", "other"],
         },
         "allowed_actions": list(DEFAULT_ACTIONS),
+        "execution": {"permitted_actions": list(DEFAULT_EXECUTION)},
     }
     definition.update(overrides)
     return CapabilityConfig.model_validate(definition)

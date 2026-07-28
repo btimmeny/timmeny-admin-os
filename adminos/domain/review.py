@@ -23,13 +23,23 @@ from adminos.db.models import (
     ReviewItem,
     ReviewRun,
 )
+from adminos.domain.decisions import (
+    HUMAN_ACTOR,
+    RULE_ACTOR_PREFIX,
+    DecisionKind,
+    ItemState,
+)
+from adminos.domain.learning import record_learning
+from adminos.domain.rules import LearnedRule, read_active_rules
 from adminos.logging import get_logger
 
 
-HUMAN_ACTOR = "human"
 POLICY_SOURCE = "policy"
 DEFAULT_SOURCE = "default"
 AI_SOURCE = "ai"
+LEARNED_SOURCE = "learned_rule"
+
+__all__ = ["DecisionKind", "HUMAN_ACTOR", "ItemState", "RULE_ACTOR_PREFIX"]
 
 logger = get_logger(__name__)
 
@@ -59,22 +69,6 @@ class GroupState(StrEnum):
     COMPLETED = "completed"
 
 
-class ItemState(StrEnum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    EXECUTED = "executed"
-    FAILED = "failed"
-    DISMISSED = "dismissed"
-    DEFERRED = "deferred"
-
-
-class DecisionKind(StrEnum):
-    APPROVE = "approve"
-    OVERRIDE = "override"
-    DISMISS = "dismiss"
-    DEFER = "defer"
-
-
 TERMINAL_ITEM_STATES = {ItemState.DISMISSED, ItemState.EXECUTED}
 """States that settle a thread for good.
 
@@ -95,6 +89,7 @@ class PolicyOutcome:
     source: str
     rule_id: str | None
     objective_keys: list[str]
+    automatable: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,7 +168,14 @@ def start_or_resume_review(
 
     for capability in loaded.enabled():
         group = get_or_create_group(session, run, capability)
-        populate_group(session, run, group, capability, moment)
+        populate_group(
+            session,
+            run,
+            group,
+            capability,
+            moment,
+            read_active_rules(session, capability),
+        )
 
     session.flush()
     return refresh_states(session, loaded, run)
@@ -211,6 +213,7 @@ def populate_group(
     group: ReviewGroup,
     capability: CapabilityConfig,
     now: datetime,
+    learned_rules: Sequence[LearnedRule] = (),
 ) -> int:
     """Add this capability's outstanding evidence to the group. Returns the count.
 
@@ -235,32 +238,34 @@ def populate_group(
         if evidence.content_hash is not None and settled.get(evidence.id) == evidence.content_hash:
             continue
 
-        outcome = evaluate_policy(capability, evidence, now)
-        session.add(
-            ReviewItem(
-                run_id=run.id,
-                group_id=group.id,
-                evidence_id=evidence.id,
-                source_thread_id=evidence.source_thread_id,
-                evidence_hash=evidence.content_hash,
-                subject=evidence.subject,
-                participants=evidence.participants,
-                received_at=evidence.received_at,
-                state=ItemState.PENDING,
-                recommendation=outcome.recommendation,
-                recommendation_source=outcome.source,
-                recommendation_confidence=outcome.confidence,
-                recommendation_rationale=outcome.rationale,
-                policy_version=capability.recommendation_policy.version,
-                rule_id=outcome.rule_id,
-                objective_keys=outcome.objective_keys,
-                provenance={
-                    "capability": capability.key,
-                    "policy_version": capability.recommendation_policy.version,
-                    "source_system": evidence.source_system,
-                },
-            )
+        outcome = evaluate_policy(capability, evidence, now, learned_rules)
+        item = ReviewItem(
+            run_id=run.id,
+            group_id=group.id,
+            evidence_id=evidence.id,
+            source_thread_id=evidence.source_thread_id,
+            evidence_hash=evidence.content_hash,
+            subject=evidence.subject,
+            participants=evidence.participants,
+            received_at=evidence.received_at,
+            state=ItemState.PENDING,
+            recommendation=outcome.recommendation,
+            recommendation_source=outcome.source,
+            recommendation_confidence=outcome.confidence,
+            recommendation_rationale=outcome.rationale,
+            policy_version=capability.recommendation_policy.version,
+            rule_id=outcome.rule_id,
+            objective_keys=outcome.objective_keys,
+            provenance={
+                "capability": capability.key,
+                "policy_version": capability.recommendation_policy.version,
+                "source_system": evidence.source_system,
+            },
         )
+        session.add(item)
+        if outcome.automatable and outcome.rule_id is not None:
+            session.flush()
+            authorise_by_rule(session, capability, run, item, outcome, now)
         added += 1
 
     if added:
@@ -306,18 +311,72 @@ def read_settled_hashes(session: Session, capability_key: str) -> dict[str, str]
     return settled
 
 
+def authorise_by_rule(
+    session: Session,
+    capability: CapabilityConfig,
+    run: ReviewRun,
+    item: ReviewItem,
+    outcome: PolicyOutcome,
+    now: datetime,
+) -> None:
+    """Approve an item because a promoted rule says so, and record who did.
+
+    This is the only approval nobody was asked for, and the path to it is
+    narrow: the rule must have been separately promoted to `automatable`, and
+    executing it still has to pass the capability's execution permission and
+    the global kill switch.
+    """
+    action = ActionKind(outcome.recommendation)
+    item.state = ItemState.APPROVED
+    item.approved_action = action.value
+    item.approved_params = {}
+    item.decided_at = now
+
+    session.add(
+        ReviewDecision(
+            run_id=run.id,
+            item_id=item.id,
+            capability_key=capability.key,
+            decision=DecisionKind.APPROVE.value,
+            action=action.value,
+            action_params=None,
+            followed_recommendation=True,
+            recommendation=item.recommendation,
+            actor=f"{RULE_ACTOR_PREFIX}{outcome.rule_id}",
+            batch_id=None,
+            learning_scope=capability.learning.scope,
+            note=f"Approved by automatable rule {outcome.rule_id}.",
+        )
+    )
+    session.flush()
+
+
 def evaluate_policy(
     capability: CapabilityConfig,
     evidence: Evidence,
     now: datetime,
+    learned_rules: Sequence[LearnedRule] = (),
 ) -> PolicyOutcome:
     """Apply the capability's rules to one thread. First match wins.
 
-    Deterministic by construction: the rules read only retained metadata, and
-    an unmatched thread falls to the configured default rather than a guess.
+    Confirmed learned rules are tried before the shipped ones, because a
+    learned rule exists only where someone corrected the shipped behaviour. An
+    unmatched thread falls to the configured default rather than a guess.
     """
     policy = capability.recommendation_policy
     if capability.playbook.allows(PlaybookStep.RECOMMEND):
+        for learned in learned_rules:
+            if not matches(learned.match, evidence, now):
+                continue
+            return PolicyOutcome(
+                recommendation=learned.action.value,
+                confidence=learned.confidence,
+                rationale=learned.rationale,
+                source=LEARNED_SOURCE,
+                rule_id=learned.id,
+                objective_keys=list(capability.objectives.default_keys),
+                automatable=learned.automatable,
+            )
         for rule in policy.rules:
             if not matches(rule.when, evidence, now):
                 continue
@@ -483,23 +542,23 @@ def record_decision(
 
     item.decided_at = moment
 
-    session.add(
-        ReviewDecision(
-            run_id=run.id,
-            item_id=item.id,
-            capability_key=capability.key,
-            decision=decision.value,
-            action=chosen.value if chosen else None,
-            action_params=action_params if capability.learning.record_decisions else None,
-            followed_recommendation=followed_recommendation(item, decision, chosen),
-            recommendation=item.recommendation,
-            actor=actor,
-            batch_id=batch_id,
-            learning_scope=capability.learning.scope,
-            note=note if capability.learning.record_decisions else None,
-        )
+    record = ReviewDecision(
+        run_id=run.id,
+        item_id=item.id,
+        capability_key=capability.key,
+        decision=decision.value,
+        action=chosen.value if chosen else None,
+        action_params=action_params if capability.learning.record_decisions else None,
+        followed_recommendation=followed_recommendation(item, decision, chosen),
+        recommendation=item.recommendation,
+        actor=actor,
+        batch_id=batch_id,
+        learning_scope=capability.learning.scope,
+        note=note if capability.learning.record_decisions else None,
     )
+    session.add(record)
     session.flush()
+    record_learning(session, capability, run, item, record, now=moment)
     return item
 
 

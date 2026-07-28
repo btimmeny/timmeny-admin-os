@@ -4,27 +4,31 @@
 # rule is named. Code reads capabilities generically: adding a capability, or
 # changing what one may do, is an edit here, not a branch in a function.
 #
+# Two separate grants govern an action. `allowed_actions` is what may be
+# approved and recorded; `execution.permitted_actions` is what may actually
+# reach the mailbox. `GMAIL_WRITE_ENABLED` sits over both as a kill switch.
+#
 # Bump `version` whenever a capability's behaviour changes. Every review run
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-07-28.3"
+version: "2026-07-29.1"
 channel: email
 
 capabilities:
-  - key: career_advisor_calls
-    name: Career - Advisory/Expert Calls
+  - key: admin
+    name: Admin
     enabled: true
     position: 10
     description: >-
-      Requests for advisory or expert calls. Time-boxed, reputational, and
-      usually answered rather than filed.
+      Administrative mail: notifications, receipts, and digests. Mostly
+      disposable, which is why archiving is permitted here and trashing is not.
     gmail:
       labels:
-        - Career - Advisory/Expert Calls
+        - Admin
       require_inbox: true
     playbook:
-      id: respond_or_schedule
+      id: triage_and_clear
       steps:
         - collect_evidence
         - recommend
@@ -33,27 +37,56 @@ capabilities:
         - execute_approved
         - verify
     recommendation_policy:
-      version: career.v1
+      version: admin.v2
       default: needs_review
       categories:
-        - call_request
-        - scheduling
-        - follow_up
+        - receipt
+        - confirmation
+        - notice
         - newsletter
         - other
       allow_ai_recommendation: true
       min_ai_confidence: 0.8
-      rules: []
+      rules:
+        # Deliberately narrow: each rule names a sender the mailbox actually
+        # receives, and recommends only archiving. Nothing here decides on its
+        # own — an archive recommendation still waits for a decision.
+        - id: usps_informed_delivery_digest
+          when:
+            participant_domains:
+              - email.informeddelivery.usps.com
+            subject_contains:
+              - Daily Digest
+          recommend: gmail.archive
+          confidence: 0.95
+          rationale: >-
+            A USPS Informed Delivery digest is a daily notice with nothing to
+            act on once it has been seen.
+        - id: github_notification_gone_stale
+          when:
+            participants:
+              - notifications@github.com
+            older_than_days: 7
+          recommend: gmail.archive
+          confidence: 0.85
+          rationale: >-
+            A GitHub notification older than a week has been overtaken by the
+            pull request it describes.
     allowed_actions:
       - gmail.label
       - gmail.archive
       - gmail.draft_reply
-      - gmail.send_draft
       - monday.create_task
     approval:
       auto_approve: []
       min_confidence_for_auto: 1.0
       allow_bulk_decisions: true
+    execution:
+      permitted_actions:
+        - gmail.label
+        - gmail.archive
+        - gmail.draft_reply
+      require_verification: true
     completion:
       require_all_items_decided: true
       require_executed_actions: true
@@ -61,9 +94,11 @@ capabilities:
       scope: capability
       record_decisions: true
       record_message_content: false
+      allow_rule_learning: true
+      allow_automatable_rules: true
     objectives:
       default_keys:
-        - career_network
+        - operational_hygiene
       require_alignment: false
 
   - key: financial_taxes
@@ -107,6 +142,11 @@ capabilities:
       auto_approve: []
       min_confidence_for_auto: 1.0
       allow_bulk_decisions: true
+    execution:
+      permitted_actions:
+        - gmail.label
+        - gmail.draft_reply
+      require_verification: true
     completion:
       require_all_items_decided: true
       require_executed_actions: true
@@ -114,24 +154,26 @@ capabilities:
       scope: capability
       record_decisions: true
       record_message_content: false
+      allow_rule_learning: true
+      allow_automatable_rules: false
     objectives:
       default_keys:
         - financial_compliance
       require_alignment: false
 
-  - key: admin
-    name: Admin
+  - key: career_advisor_calls
+    name: Career - Advisory/Expert Calls
     enabled: true
     position: 30
     description: >-
-      Administrative mail: confirmations, receipts, and notices. Mostly
-      disposable, which is why archiving is permitted here and trashing is not.
+      Requests for advisory or expert calls. Time-boxed, reputational, and
+      usually answered rather than filed.
     gmail:
       labels:
-        - Admin
+        - Career - Advisory/Expert Calls
       require_inbox: true
     playbook:
-      id: triage_and_clear
+      id: respond_or_schedule
       steps:
         - collect_evidence
         - recommend
@@ -140,12 +182,12 @@ capabilities:
         - execute_approved
         - verify
     recommendation_policy:
-      version: admin.v1
+      version: career.v1
       default: needs_review
       categories:
-        - receipt
-        - confirmation
-        - notice
+        - call_request
+        - scheduling
+        - follow_up
         - newsletter
         - other
       allow_ai_recommendation: true
@@ -155,11 +197,18 @@ capabilities:
       - gmail.label
       - gmail.archive
       - gmail.draft_reply
+      - gmail.send_draft
       - monday.create_task
     approval:
       auto_approve: []
       min_confidence_for_auto: 1.0
       allow_bulk_decisions: true
+    execution:
+      permitted_actions:
+        - gmail.label
+        - gmail.draft_reply
+        - gmail.send_draft
+      require_verification: true
     completion:
       require_all_items_decided: true
       require_executed_actions: true
@@ -167,7 +216,9 @@ capabilities:
       scope: capability
       record_decisions: true
       record_message_content: false
+      allow_rule_learning: true
+      allow_automatable_rules: false
     objectives:
       default_keys:
-        - operational_hygiene
+        - career_network
       require_alignment: false

@@ -12,8 +12,138 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-07-29.1"
+version: "2026-07-30.1"
 channel: email
+
+# Presentation contracts. A screen decides what a review looks like — the
+# columns, their order, the wording, the sort, and the decisions offered — so
+# that nothing downstream has to invent a layout. Screens are versioned: change
+# what is shown by editing a screen; change it incompatibly by adding a `-v2`
+# and pointing a capability at it.
+#
+# The three screens share one column set today through a YAML anchor. Writing
+# the columns out in one of them is how it stops sharing.
+screens:
+  - id: admin-review-v1
+    kind: table
+    title: Admin — today's review
+    columns: &review_columns
+      - label: "#"
+        source: index
+        align: right
+      - label: Group
+        source: group
+      - label: What it is
+        source: what_it_is
+        max_chars: 80
+      - label: Key Facts
+        source: key_facts
+        max_chars: 60
+      - label: Recommended Action
+        source: recommended_action
+      - label: Why
+        source: why
+        max_chars: 120
+      - label: Confidence
+        source: confidence
+        format: percent
+        align: right
+      - label: Decision
+        source: decision
+    sort:
+      - source: received
+        direction: desc
+    actions:
+      - id: approve
+        label: Do what is recommended
+        decision: approve
+      - id: archive
+        label: Archive it
+        decision: override
+        action: gmail.archive
+      - id: draft_reply
+        label: Draft a reply
+        decision: override
+        action: gmail.draft_reply
+      - id: make_task
+        label: Make it a Monday task
+        decision: override
+        action: monday.create_task
+      - id: dismiss
+        label: Leave it alone
+        decision: dismiss
+      - id: defer
+        label: Not today
+        decision: defer
+      - id: archive_all
+        label: Archive all of these
+        decision: override
+        action: gmail.archive
+        scope: group
+    footer: >-
+      {pending} of {total} still need you. Answer with the row number and what
+      to do with it.
+    empty_text: Nothing administrative is waiting.
+
+  - id: tax-review-v1
+    kind: table
+    title: Financial/Taxes — today's review
+    columns: *review_columns
+    sort:
+      - source: received
+        direction: desc
+    actions:
+      - id: approve
+        label: Do what is recommended
+        decision: approve
+      - id: draft_reply
+        label: Draft a reply
+        decision: override
+        action: gmail.draft_reply
+      - id: make_task
+        label: Make it a Monday task
+        decision: override
+        action: monday.create_task
+      - id: dismiss
+        label: Leave it alone
+        decision: dismiss
+      - id: defer
+        label: Not today
+        decision: defer
+    footer: >-
+      {pending} of {total} still need you. Nothing here is archived or answered
+      unless you say so.
+    empty_text: No tax or financial mail is waiting.
+
+  - id: advisor-review-v1
+    kind: table
+    title: Advisory & expert calls — today's review
+    columns: *review_columns
+    sort:
+      - source: received
+        direction: desc
+    actions:
+      - id: approve
+        label: Do what is recommended
+        decision: approve
+      - id: draft_reply
+        label: Draft a reply
+        decision: override
+        action: gmail.draft_reply
+      - id: make_task
+        label: Make it a Monday task
+        decision: override
+        action: monday.create_task
+      - id: dismiss
+        label: Leave it alone
+        decision: dismiss
+      - id: defer
+        label: Not today
+        decision: defer
+    footer: >-
+      {pending} of {total} still need you. A reply is drafted for approval here,
+      never sent by agreeing to it.
+    empty_text: No call requests are waiting.
 
 capabilities:
   - key: admin
@@ -27,6 +157,8 @@ capabilities:
       labels:
         - Admin
       require_inbox: true
+    presentation:
+      screen: admin-review-v1
     playbook:
       id: triage_and_clear
       steps:
@@ -112,6 +244,8 @@ capabilities:
       labels:
         - Financial/Taxes
       require_inbox: true
+    presentation:
+      screen: tax-review-v1
     playbook:
       id: evidence_to_obligation
       steps:
@@ -172,6 +306,8 @@ capabilities:
       labels:
         - Career - Advisory/Expert Calls
       require_inbox: true
+    presentation:
+      screen: advisor-review-v1
     playbook:
       id: respond_or_schedule
       steps:

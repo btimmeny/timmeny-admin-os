@@ -9,6 +9,7 @@ import yaml
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from adminos.capabilities.screens import ScreenConfig
 from adminos.config import get_capabilities_path
 from adminos.logging import get_logger
 
@@ -180,6 +181,17 @@ class LearningRules(StrictModel):
         return self
 
 
+class PresentationRules(StrictModel):
+    """Which presentation contract renders this capability's review.
+
+    Named rather than inlined so two capabilities may share a screen while it
+    is young, and diverge by pointing at their own version later without any
+    code change.
+    """
+
+    screen: str
+
+
 class ObjectiveRules(StrictModel):
     default_keys: list[str] = []
     require_alignment: bool = False
@@ -202,6 +214,7 @@ class CapabilityConfig(StrictModel):
     description: str | None = None
     gmail: GmailScope
     playbook: Playbook
+    presentation: PresentationRules
     recommendation_policy: RecommendationPolicy
     allowed_actions: list[ActionKind] = []
     approval: ApprovalRules = ApprovalRules()
@@ -267,6 +280,7 @@ class CapabilityConfig(StrictModel):
 class CapabilitySet(StrictModel):
     version: str
     channel: str = "email"
+    screens: list[ScreenConfig] = Field(min_length=1)
     capabilities: list[CapabilityConfig] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -277,6 +291,57 @@ class CapabilitySet(StrictModel):
         positions = [capability.position for capability in self.capabilities]
         if len(set(positions)) != len(positions):
             raise ValueError("Capability positions must be unique; they order the review.")
+        screen_ids = [screen.id for screen in self.screens]
+        if len(set(screen_ids)) != len(screen_ids):
+            raise ValueError("Screen ids must be unique; they version the presentation.")
+        return self
+
+    @model_validator(mode="after")
+    def check_screens_match_their_capabilities(self) -> Self:
+        """A screen may not offer what its capability is not allowed to do.
+
+        Otherwise the contract would advertise a button that the decision
+        endpoint refuses, and the reader would learn what is permitted by being
+        told no.
+        """
+        by_id = {screen.id: screen for screen in self.screens}
+        for screen in self.screens:
+            for label_key in screen.action_labels:
+                if label_key not in RECOMMENDATION_VALUES:
+                    raise ValueError(
+                        f"Screen {screen.id!r} labels {label_key!r}, which is not a "
+                        "recommendable outcome."
+                    )
+
+        for capability in self.capabilities:
+            screen = by_id.get(capability.presentation.screen)
+            if screen is None:
+                known = ", ".join(sorted(by_id)) or "none"
+                raise ValueError(
+                    f"{capability.key!r} renders with screen "
+                    f"{capability.presentation.screen!r}, which is not defined. "
+                    f"Known screens: {known}."
+                )
+            for offered in screen.actions:
+                if offered.action is None:
+                    continue
+                if offered.action not in ACTION_VALUES:
+                    raise ValueError(
+                        f"Screen {screen.id!r} offers {offered.action!r}, which is not "
+                        "an action."
+                    )
+                if not capability.permits(ActionKind(offered.action)):
+                    raise ValueError(
+                        f"Screen {screen.id!r} offers {offered.action!r} to "
+                        f"{capability.key!r}, which is not allowed to do it."
+                    )
+            if not capability.approval.allow_bulk_decisions and any(
+                offered.scope == "group" for offered in screen.actions
+            ):
+                raise ValueError(
+                    f"Screen {screen.id!r} offers a whole-group decision to "
+                    f"{capability.key!r}, which does not take bulk decisions."
+                )
         return self
 
 
@@ -293,6 +358,7 @@ class LoadedCapabilities:
     digest: str
     channel: str
     capabilities: tuple[CapabilityConfig, ...]
+    screens: tuple[ScreenConfig, ...] = ()
 
     def enabled(self) -> tuple[CapabilityConfig, ...]:
         return tuple(
@@ -307,6 +373,15 @@ class LoadedCapabilities:
             if capability.key == key:
                 return capability
         raise UnknownCapability(f"No capability named {key!r} is configured.")
+
+    def screen_for(self, capability: CapabilityConfig) -> ScreenConfig:
+        """The presentation contract this capability is rendered with."""
+        for screen in self.screens:
+            if screen.id == capability.presentation.screen:
+                return screen
+        raise UnknownCapability(
+            f"No screen named {capability.presentation.screen!r} is configured."
+        )
 
 
 _cache: dict[Path, tuple[float, LoadedCapabilities]] = {}
@@ -365,6 +440,7 @@ def parse_capabilities(raw: bytes) -> LoadedCapabilities:
         digest=hashlib.sha256(raw).hexdigest(),
         channel=parsed.channel,
         capabilities=tuple(parsed.capabilities),
+        screens=tuple(parsed.screens),
     )
 
 

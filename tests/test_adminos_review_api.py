@@ -474,3 +474,81 @@ def test_a_group_read_back_reports_its_current_state(
 
     assert group["state"] == "completed"
     assert group["counts"]["dismissed"] == 1
+
+
+def test_every_review_response_carries_its_presentation_contract(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The screen travels with the data, so nothing downstream invents a layout."""
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+
+    body = start(client)
+    screen = body["current_group"]["screen"]
+
+    assert body["screen_id"] == "test-review-v1"
+    assert body["current_group"]["screen_id"] == "test-review-v1"
+    assert screen["title"] == "Test review"
+    assert [column["label"] for column in screen["columns"]] == [
+        "#",
+        "What it is",
+        "Recommended Action",
+        "Confidence",
+        "Decision",
+    ]
+    assert len(screen["rows"][0]["cells"]) == len(screen["columns"])
+    assert screen["footer"] == "1 of 1 still need you."
+
+
+def test_a_row_says_which_decisions_it_would_accept(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+
+    row = start(client)["current_group"]["screen"]["rows"][0]
+
+    assert row["actions"] == ["approve", "dismiss", "defer"]
+    assert row["cells"][2] == "Create a Monday task"
+
+
+def test_the_contract_names_the_call_a_decision_should_make(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Following the contract is enough: the renderer needs no route knowledge."""
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    body = start(client)
+    screen = body["current_group"]["screen"]
+    row = screen["rows"][0]
+    dismiss = next(action for action in screen["actions"] if action["id"] == "dismiss")
+
+    response = client.request(
+        dismiss["method"],
+        dismiss["path"].format(item_id=row["item_id"]),
+        headers=AUTH,
+        json=dismiss["body"],
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["decided"][0]["state"] == "dismissed"
+
+
+def test_a_decision_response_returns_the_next_screen(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(
+        monkeypatch,
+        taxes=[thread("t1", "KPMG Activities")],
+        admin=[thread("t2", "Newsletter: weekly")],
+    )
+    body = start(client)
+    item_id = body["current_group"]["items"][0]["item_id"]
+
+    decided = client.post(
+        f"/review/runs/{body['run_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    ).json()
+
+    assert decided["run"]["current_group"]["capability_key"] == "admin"
+    assert decided["run"]["current_group"]["screen"]["rows"][0]["cells"][1] == (
+        "Newsletter: weekly"
+    )

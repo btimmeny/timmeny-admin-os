@@ -466,10 +466,11 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
   "state": "in_progress",
   "config_version": "2026-07-28.1",
   "config_digest": "…",
+  "screen_id": "tax-review-v1",
   "groups": [
     {"capability_key": "financial_taxes", "state": "pending", "counts": {"total": 3, "pending": 3}}
   ],
-  "current_group": { "…": "the first group still needing a decision, with its items" },
+  "current_group": { "…": "the first group still needing a decision, with its screen and items" },
   "warnings": []
 }
 ```
@@ -515,6 +516,83 @@ Records the model's reading of a thread: a category the capability recognises, a
 ```
 
 A suggestion is adopted as the item's recommendation only when it clears the capability's `min_ai_confidence`; below that it is recorded as unadopted, with the reason. A suggestion the capability is not allowed to act on is refused. An assessment never decides, approves, or executes anything.
+
+## Presentation
+
+Every review response carries the screen that renders it. Admin OS decides the columns, their order, the wording, the formatting, and which decisions are on offer; a client prints what it is given. See [ADR-0011](docs/adr/ADR-0011-presentation-contracts.md) for why, and [Daily Review GPT Instructions](docs/gpt-instructions/daily-review-gpt-instructions.md) for what that asks of the GPT.
+
+```json
+{
+  "screen_id": "admin-review-v1",
+  "screen": {
+    "screen_id": "admin-review-v1",
+    "kind": "table",
+    "title": "Admin — today's review",
+    "columns": [
+      {"key": "index", "label": "#", "align": "right", "format": "number"},
+      {"key": "group", "label": "Group", "align": "left", "format": "text"},
+      {"key": "what_it_is", "label": "What it is", "align": "left", "format": "text"},
+      {"key": "key_facts", "label": "Key Facts", "align": "left", "format": "text"},
+      {"key": "recommended_action", "label": "Recommended Action", "align": "left", "format": "text"},
+      {"key": "why", "label": "Why", "align": "left", "format": "text"},
+      {"key": "confidence", "label": "Confidence", "align": "right", "format": "percent"},
+      {"key": "decision", "label": "Decision", "align": "left", "format": "text"}
+    ],
+    "rows": [
+      {
+        "item_id": "…",
+        "thread_id": "…",
+        "cells": [
+          "1", "Admin", "Daily Digest for July 27",
+          "usps@email.informeddelivery.usps.com · 3 days ago",
+          "Archive it", "A digest has nothing to act on once it has been seen.",
+          "95%", "Pending"
+        ],
+        "actions": ["approve", "archive", "dismiss", "defer"]
+      }
+    ],
+    "actions": [
+      {
+        "id": "approve",
+        "label": "Do what is recommended",
+        "decision": "approve",
+        "action": null,
+        "scope": "item",
+        "method": "POST",
+        "path": "/review/runs/…/items/{item_id}/decision",
+        "body": {"decision": "approve"}
+      }
+    ],
+    "footer": "1 of 1 still need you. Answer with the row number and what to do with it.",
+    "empty_text": "Nothing in Admin needs you today."
+  }
+}
+```
+
+`cells` are finished strings in `columns` order — a renderer prints them and adds nothing. Percentages, relative dates, truncation, the wording of an action, and what an absent value looks like (`—`) are all decided here.
+
+Each offered action carries the exact request that records it, already filled in with the run and the capability, so a renderer needs no knowledge of the routes. Item-scoped paths contain `{item_id}`; a row's own `actions` list names the ids **that row** would accept, asked of the same check the decision endpoint runs. An item with nothing recommended does not offer `approve`; a settled item offers nothing.
+
+Screens are versioned by id and configured next to the capabilities they render, so a layout change is a reviewable edit rather than a change of prompt:
+
+```yaml
+screens:
+  - id: admin-review-v1
+    title: Admin — today's review
+    columns:
+      - {label: "#", source: index, align: right}
+      - {label: Confidence, source: confidence, format: percent, align: right}
+    sort:
+      - {source: received, direction: desc}
+    actions:
+      - {id: approve, label: Do what is recommended, decision: approve}
+      - {id: archive, label: Archive it, decision: override, action: gmail.archive}
+    footer: "{pending} of {total} still need you."
+```
+
+A column names a `source` from a closed set, and a format its value type allows: a percentage of a subject line is a configuration error, not a blank cell. So is ordering by a value with no order, an unknown footer substitution, an override that names no action, a capability pointing at a screen that does not exist, a screen offering an action the capability is not allowed, or a whole-group decision offered where `allow_bulk_decisions` is false.
+
+Three screens ship — `admin-review-v1`, `tax-review-v1`, `advisor-review-v1` — one per capability. They share a column set today; giving one its own is an edit to that screen. A compatible change edits a screen in place; an incompatible one is a new `-v2` with the capability pointed at it.
 
 ## Actions
 
@@ -597,6 +675,8 @@ Capabilities are data, in `config/capabilities.yaml` — not branches in code. A
   gmail:
     labels: [Financial/Taxes]
     require_inbox: true
+  presentation:
+    screen: tax-review-v1
   playbook:
     id: evidence_to_obligation
     steps: [collect_evidence, recommend, await_decision, prepare_actions, execute_approved, verify]
@@ -633,6 +713,7 @@ The file is validated on load and rejected outright — with `503` rather than a
 - No capability is granted `gmail.trash`, and there is no code to perform it.
 - `learning.record_message_content: true` is refused: message content is never retained ([ADR-0003](docs/adr/ADR-0003-gmail-access-and-retention.md)).
 - Two capabilities may not share a position, since position is what orders the review.
+- A capability may not name a screen that is not defined, and a screen may not offer more than the capability permits ([Presentation](#presentation)).
 
 Rules read only retained metadata — subject, participants, dates — never message content, because there is none to read. The first matching rule wins; unmatched mail falls to `needs_review`.
 

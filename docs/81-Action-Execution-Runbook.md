@@ -211,40 +211,46 @@ Even a promoted rule only *approves*. Its approvals appear as ordinary actions w
 
 ## What has been run, and where
 
-Verified against production (`0003_daily_review`, read-only, nothing changed):
+Verified against production after deployment. Nothing was written to Gmail or Monday: the board still holds zero `Admin OS ID` values, and the one rule created was retired immediately and matches an address that does not exist.
 
 ```text
-GET /health                 200 {"status":"ok"}
-GET /admin/db-status        200 {"status":"ok","revision":"0003_daily_review"}
-GET /admin/gmail/status     200 configured:true, write_enabled:false
-GET /review/runs/…/actions  404   <- this increment is not deployed yet
-GET /learning/rules         404
+GET  /admin/db-status                    200  revision 0004_action_lifecycle
+GET  /admin/capabilities                 200  2026-07-29.1, admin → financial_taxes → career_advisor_calls
+GET  /admin/gmail/status                 200  all three labels found, write_enabled:false
+POST /review/start                       200  resumed today's run
+GET  /review/runs/{run}/actions          200  no actions, gmail_write_enabled:false
+POST /review/runs/{run}/actions/prepare  200  nothing approved, nothing written
+POST /review/runs/{run}/actions/execute  400  confirm=true required
+POST …/execute {"confirm":true}          409  Gmail writes are disabled
+POST …/items/{item}/send-draft           400  confirm=true and the exact draft ids required
+POST /learning/rules                     201  proposed, active:false
+POST /learning/rules/{id}/promote        409  a 'proposed' rule cannot become 'automatable'
+POST /learning/rules/{id}/retire         200  retired, no further states
+GET  /learning/events                    200  empty; no decisions taken yet
+any route without a key                  401
 ```
 
-Verified against this branch running locally, with a real database and Gmail deliberately unconfigured:
+Also verified against this branch running locally, with a real database and Gmail deliberately unconfigured, for the paths that cannot be exercised safely in production:
 
 ```text
-POST /review/start                     200  run opened, three groups in Admin-first order
-POST /learning/rules                   201  proposed, active:false
+POST /review/start                     200  new run, three groups in Admin-first order
 GET  /learning/rules/{id}              200  exact match conditions returned
-POST /learning/rules/{id}/promote      409  a 'proposed' rule cannot become 'automatable'
 POST /learning/rules/{id}/confirm      200  confirmed, active:true, automatable:false
 POST /learning/rules/{id}/promote      400  needs confirm=true
-POST /learning/rules/{id}/retire       200  retired, active:false
+POST /learning/rules/{id}/promote      200  automatable, may_execute_without_approval:true
 POST /learning/rules (empty match)     422  refused
-POST /review/runs/{run}/actions/prepare 200 nothing approved, nothing written
-POST /review/runs/{run}/actions/execute 400 confirm=true required
 POST …/execute {"confirm":true}        503  Gmail not configured
-POST …/execute {"confirm":true}        409  Gmail writes are disabled   (credentials present)
-every route without a key              401
 ```
 
 The paths that write to Gmail are covered by tests against a fake mailbox, not by this runbook. They are deliberately unexercised in production until `GMAIL_WRITE_ENABLED` is turned on under supervision.
 
-## After deploying
+## Turning writes on for the first time
 
-1. `GET /admin/db-status` → `0004_action_lifecycle`.
-2. `GET /admin/capabilities` → `admin`, `financial_taxes`, `career_advisor_calls`, in that order.
-3. `POST /review/start` → Admin group first, and USPS or stale-GitHub mail carrying a `gmail.archive` recommendation rather than `needs_review`.
-4. Leave `GMAIL_WRITE_ENABLED=false`, prepare one archive, and read `prepared_params` to confirm the plan names the thread you expect.
-5. Only then turn writes on, execute that single action by id, and check the thread in Gmail.
+The deployment itself is verified above; what follows is the first real write.
+
+1. Wait for a run created *after* the deployment. A run resumed across a configuration change keeps the recommendations its items were given, so an item opened under `admin.v1` stays `needs_review` even where an `admin.v2` rule would now match it. The group reports the `policy_version` it was populated under, which is how to tell.
+2. Approve exactly one archive, prepare it, and read `prepared_params`. Confirm it names the thread you expect and removes only `INBOX`.
+3. Set `GMAIL_WRITE_ENABLED=true` in Railway and redeploy.
+4. Execute that one action by id — `{"confirm":true,"action_ids":["…"]}` — not the whole run.
+5. Check the thread in Gmail, and check the action reports `completed` with its verification detail.
+6. Leave the switch on only while watching. Setting it back to `false` stops everything already approved.

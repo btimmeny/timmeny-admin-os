@@ -1,7 +1,7 @@
 # 00 — Timmeny Admin OS Documentation
 
 **Status:** Active  
-**Version:** 1.1  
+**Version:** 1.2  
 **Stability:** High  
 **Purpose:** Provides the reading order, current documentation status, and navigation for the Timmeny Admin OS architecture library.
 
@@ -16,11 +16,12 @@ The documentation is ordered from most enduring to most changeable:
 5. [50 — Architecture](./50-Architecture.md) — how the system is organized
 6. [60 — Domain Model](./60-Domain-Model.md) — the canonical business language
 7. [70 — Implementation Strategy](./70-Implementation-Strategy.md) — how capabilities are built incrementally
-8. [75 — First Vertical Slice](./75-First-Vertical-Slice.md) — the current bounded implementation contract
-9. [80 — Monday.com Architecture](./80-Monday-Architecture.md) — the execution-system implementation design
-10. [85 — Operating Model](./85-Operating-Model.md) — the current operating-object specification
-11. [90 — Roadmap](./90-Roadmap.md) — the current sequence of work
-12. [95 — Governance](./95-Governance.md) — how operational learning changes the model and architecture
+8. [75 — First Vertical Slice](./75-First-Vertical-Slice.md) — the current bounded implementation contract and achieved increments
+9. [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md) — the next repeatable morning-review capability
+10. [80 — Monday.com Architecture](./80-Monday-Architecture.md) — the execution-system implementation design
+11. [85 — Operating Model](./85-Operating-Model.md) — the current operating-object specification
+12. [90 — Roadmap](./90-Roadmap.md) — the current sequence of work
+13. [95 — Governance](./95-Governance.md) — how operational learning changes the model and architecture
 
 Supporting material:
 
@@ -44,6 +45,7 @@ Lower-numbered documents are more foundational and should change less frequently
 | Domain Model | Medium |
 | Implementation Strategy | Medium to low |
 | First Vertical Slice | Low |
+| Capability specifications | Low |
 | Monday.com Architecture | Low |
 | Operating Model | Medium to low |
 | Roadmap | Low |
@@ -57,11 +59,12 @@ Lower-numbered documents are more foundational and should change less frequently
 - Architecture is discovered through use rather than invented in isolation.
 - Documents should reference one another instead of duplicating content.
 - Significant decisions are recorded as ADRs.
+- Capability documents define bounded business behavior for implementation.
 - Only documents affected by a decision should be updated.
 - The library should remain concise and usable through progressive disclosure.
 
 ## Current State
 
-[ADR-0001](./adr/ADR-0001-admin-os-coordination-layer.md) establishes the current architectural boundary: ChatGPT is the reasoning layer; Timmeny Admin OS is the coordination layer; Monday.com owns task execution; PostgreSQL persists canonical operational state; Gmail owns communication; and Calendar owns scheduling.
+[ADR-0001](./adr/ADR-0001-admin-os-coordination-layer.md) establishes the architectural boundary: ChatGPT is the reasoning layer; Timmeny Admin OS is the coordination layer; Monday.com owns task execution; PostgreSQL persists canonical operational state; Gmail owns communication; and Calendar owns scheduling.
 
-Implementation should now begin with the repository assessment and bounded workflow in [75 — First Vertical Slice](./75-First-Vertical-Slice.md).
+The repository now has working Gmail evidence intake, an explicit classification and review boundary, Monday board reads and duplicate checks, and approval-gated verified Monday task creation. The next bounded capability is [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md), governed by [ADR-0007](./adr/ADR-0007-deterministic-labeling-and-grouped-review.md).

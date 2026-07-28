@@ -22,13 +22,15 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0004 — Classification Boundary and Review State](./ADR-0004-classification-boundary-and-review.md)
 - [ADR-0005 — Duplicate Review Before Monday Writes](./ADR-0005-duplicate-review-before-monday-writes.md)
 - [ADR-0006 — Approval Gate and Verified Monday Writes](./ADR-0006-approval-gate-and-verified-writes.md)
+- [ADR-0007 — Deterministic Labeling and Grouped Review](./ADR-0007-deterministic-labeling-and-grouped-review.md)
 
 ## Candidate Decisions
 
 Create an ADR only when the decision materially constrains architecture or implementation. Current candidates include:
 
-- PostgreSQL persistence and audit model
 - Executive Review API contract
 - sync scheduling and trigger model
+- learning-event and preference-promotion persistence
+- granular Gmail write policies beyond the current global switch
 
 Operational discoveries remain under `operating/` until they justify an architectural decision.

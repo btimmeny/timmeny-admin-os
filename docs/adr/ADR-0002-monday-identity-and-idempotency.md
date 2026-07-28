@@ -18,7 +18,7 @@ Titles cannot be used for recovery. Titles are labels chosen by classification, 
 
 **Board.** The first vertical slice targets the existing **To Do List** board (`TODO_BOARD_ID`, `8962223984`). The GS board is untouched by the slice.
 
-**Mapping column.** A text column titled **`Admin OS ID`** is added to that board. It holds an opaque Admin OS identifier and is never interpreted by a human workflow.
+**Mapping column.** A text column titled **`Admin OS ID`** is added to that board. It holds an opaque Admin OS identifier and is never interpreted by a human workflow. It exists as of 2026-07-28 with column id `text_mm5prcay`; the id is discovered at runtime by title, not hard-coded.
 
 **Write protocol.** Every Monday create in a workflow follows reserve → recover → write → verify → activate:
 
@@ -50,6 +50,7 @@ The mapping row is reserved and committed *before* the external write, so a cras
 - Every workflow create costs one extra Monday read (the recovery scan) and one extra read (verification). Both are bounded and acceptable at this volume.
 - `external_mappings` rows can accumulate in `pending` when a run is abandoned. A `pending` row older than a threshold is surfaced by the Executive Review as an unresolved workflow rather than being cleaned up silently.
 - The board's column set becomes part of the deployment contract. A missing `Admin OS ID` column must fail loudly, consistent with the existing `require_board_column` behavior.
+- The board's `Status` column offers exactly `Not Yet Started`, `In Progress`, and `Done`, so completion is unambiguously `Done`. The existing `DONE_STATUS_LABELS` also accepts `complete` and `completed`, which simply never occur on this board; it is left alone.
 - `ADMIN_OS_ID_COLUMN_TITLE` becomes a configuration value so the column can be renamed without a code change.
 
 ## Affected Documents

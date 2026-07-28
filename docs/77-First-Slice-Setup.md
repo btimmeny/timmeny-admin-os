@@ -11,14 +11,11 @@ Three tasks: a Monday board column, a Railway Postgres database, and a Google OA
 
 ## 1. Monday.com — add the `Admin OS ID` column
 
-On the **To Do List** board (`8962223984`):
+**Done.** The **To Do List** board (`8962223984`) has a text column titled `Admin OS ID` (id `text_mm5prcay`), and its `Status` column offers `Not Yet Started`, `In Progress`, and `Done` — so completion is unambiguously `Done`.
 
-1. Add a new column, type **Text**, titled exactly `Admin OS ID`.
-2. Hide it from the default view. Nothing should ever type into it by hand.
+Keep the column hidden from the default view. Nothing should ever type into it by hand.
 
 Why it exists: Monday's API has no idempotency token, so Admin OS writes its own identifier into the item and searches for it before retrying a create. Without it, a crash between the Monday write and the local commit duplicates the task. See [ADR-0002](./adr/ADR-0002-monday-identity-and-idempotency.md).
-
-Also confirm the exact labels configured on the board's `Status` column. The service currently treats only `done`, `complete`, and `completed` (case-insensitive) as finished, and completion is what gates archiving an email.
 
 ---
 
@@ -125,8 +122,8 @@ Treat the refresh token as a mailbox credential: it grants read, label, and arch
 
 ## Verification checklist
 
-- [ ] `Admin OS ID` text column exists on the To Do List board and is hidden from the default view
-- [ ] The board's `Status` done-labels are confirmed
+- [x] `Admin OS ID` text column exists on the To Do List board and is hidden from the default view
+- [x] The board's `Status` done-labels are confirmed: completion is `Done`
 - [ ] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
 - [ ] Consent screen publishing status reads **In production**
 - [ ] Only `gmail.modify` is granted — check https://myaccount.google.com/permissions

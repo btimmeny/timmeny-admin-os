@@ -24,12 +24,13 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0006 — Approval Gate and Verified Monday Writes](./ADR-0006-approval-gate-and-verified-writes.md)
 - [ADR-0007 — Deterministic Labeling and Grouped Review](./ADR-0007-deterministic-labeling-and-grouped-review.md)
 - [ADR-0008 — Label-Scoped Daily Action Loop](./ADR-0008-label-scoped-daily-action-loop.md)
+- [ADR-0009 — Capability Configuration and the Persisted Review State Machine](./ADR-0009-review-engine-implementation.md)
 
 ## Candidate Decisions
 
 Create an ADR only when the decision materially constrains architecture or implementation. Current candidates include:
 
-- detailed Executive Review API persistence contract;
+- Gmail action execution, permissions, and read-back verification;
 - sync scheduling and trigger model;
 - learning-event and preference-promotion persistence;
 - granular Gmail write policies beyond the current global switch;

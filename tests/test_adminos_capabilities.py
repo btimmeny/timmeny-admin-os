@@ -1,0 +1,236 @@
+import os
+from pathlib import Path
+
+import pytest
+
+from adminos.capabilities.config import (
+    ActionKind,
+    CapabilityConfigError,
+    LoadedCapabilities,
+    UnknownCapability,
+    clear_cache,
+    load_capabilities,
+    parse_capabilities,
+)
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+SHIPPED_CONFIG = REPOSITORY_ROOT / "config" / "capabilities.yaml"
+
+MINIMAL = """
+version: test.1
+capabilities:
+  - key: financial_taxes
+    name: financial/taxes
+    position: 10
+    gmail:
+      labels: [financial/taxes]
+    playbook:
+      id: evidence_to_obligation
+      steps: [collect_evidence, recommend, await_decision]
+    recommendation_policy:
+      version: taxes.1
+      categories: [obligation]
+"""
+
+
+def parse(document: str) -> LoadedCapabilities:
+    return parse_capabilities(document.encode())
+
+
+@pytest.fixture(autouse=True)
+def clear_configuration_cache() -> None:
+    clear_cache()
+    yield
+    clear_cache()
+
+
+def test_the_shipped_configuration_is_valid() -> None:
+    """The file the service actually runs on must parse, not just the fixtures."""
+    loaded = load_capabilities(SHIPPED_CONFIG)
+
+    assert [capability.key for capability in loaded.enabled()] == [
+        "career_advisor_calls",
+        "financial_taxes",
+        "admin",
+    ]
+
+
+def test_capabilities_are_ordered_by_position_not_file_order() -> None:
+    document = MINIMAL + """  - key: admin
+    name: Admin
+    position: 5
+    gmail:
+      labels: [Admin]
+    playbook:
+      id: triage
+      steps: [collect_evidence]
+    recommendation_policy:
+      version: admin.1
+      categories: [errand]
+"""
+
+    assert [capability.key for capability in parse(document).enabled()] == [
+        "admin",
+        "financial_taxes",
+    ]
+
+
+def test_a_disabled_capability_is_excluded() -> None:
+    loaded = parse(MINIMAL.replace("position: 10", "position: 10\n    enabled: false"))
+
+    assert loaded.enabled() == ()
+    assert loaded.get("financial_taxes").enabled is False
+
+
+def test_the_digest_changes_with_the_file() -> None:
+    """A run records the digest, so 'which configuration produced this?' has an answer."""
+    assert parse(MINIMAL).digest != parse(MINIMAL.replace("taxes.1", "taxes.2")).digest
+
+
+def test_an_unknown_key_is_rejected() -> None:
+    with pytest.raises(CapabilityConfigError):
+        parse(MINIMAL.replace("position: 10", "position: 10\n    labell: oops"))
+
+
+def test_duplicate_keys_are_rejected() -> None:
+    document = MINIMAL + """  - key: financial_taxes
+    name: Duplicate
+    position: 20
+    gmail:
+      labels: [Other]
+    playbook:
+      id: triage
+      steps: [collect_evidence]
+    recommendation_policy:
+      version: other.1
+      categories: [errand]
+"""
+
+    with pytest.raises(CapabilityConfigError):
+        parse(document)
+
+
+def test_duplicate_positions_are_rejected() -> None:
+    """Position orders the review, so a tie would make the order arbitrary."""
+    document = MINIMAL + """  - key: admin
+    name: Admin
+    position: 10
+    gmail:
+      labels: [Admin]
+    playbook:
+      id: triage
+      steps: [collect_evidence]
+    recommendation_policy:
+      version: admin.1
+      categories: [errand]
+"""
+
+    with pytest.raises(CapabilityConfigError):
+        parse(document)
+
+
+def test_a_rule_may_not_recommend_an_action_the_capability_cannot_take() -> None:
+    document = MINIMAL + """      rules:
+        - id: archive_everything
+          when:
+            subject_contains: [Newsletter]
+          recommend: gmail.archive
+          rationale: Not permitted here.
+"""
+
+    with pytest.raises(CapabilityConfigError, match="not allowed"):
+        parse(document)
+
+
+def test_a_rule_with_no_condition_is_rejected() -> None:
+    """An empty condition matches every thread, which is never what was meant."""
+    document = MINIMAL + """      rules:
+        - id: catch_all
+          when: {}
+          recommend: needs_review
+          rationale: Everything.
+"""
+
+    with pytest.raises(CapabilityConfigError):
+        parse(document)
+
+
+def test_the_default_recommendation_may_not_be_an_action() -> None:
+    """Otherwise unmatched mail is acted on by omission rather than by decision."""
+    document = MINIMAL.replace(
+        "      categories: [obligation]",
+        "      categories: [obligation]\n      default: gmail.archive",
+    )
+
+    with pytest.raises(CapabilityConfigError, match="must not be an action"):
+        parse(document)
+
+
+def test_auto_approval_requires_the_action_to_be_allowed() -> None:
+    document = MINIMAL + """    approval:
+      auto_approve: [gmail.trash]
+"""
+
+    with pytest.raises(CapabilityConfigError, match="without being"):
+        parse(document)
+
+
+def test_retaining_message_content_is_refused() -> None:
+    """ADR-0003 is enforced by configuration, not by convention."""
+    document = MINIMAL + """    learning:
+      record_message_content: true
+"""
+
+    with pytest.raises(CapabilityConfigError, match="never retained"):
+        parse(document)
+
+
+def test_requiring_objective_alignment_needs_a_default_objective() -> None:
+    document = MINIMAL + """    objectives:
+      require_alignment: true
+"""
+
+    with pytest.raises(CapabilityConfigError, match="require_alignment"):
+        parse(document)
+
+
+def test_an_unknown_capability_is_reported_by_name() -> None:
+    with pytest.raises(UnknownCapability, match="career"):
+        parse(MINIMAL).get("career")
+
+
+def test_permission_is_denied_by_default() -> None:
+    """A capability grants actions explicitly; nothing is permitted implicitly."""
+    capability = parse(MINIMAL).get("financial_taxes")
+
+    assert capability.permits(ActionKind.GMAIL_ARCHIVE) is False
+
+
+def test_auto_approval_respects_the_confidence_floor() -> None:
+    document = MINIMAL + """    allowed_actions: [gmail.archive]
+    approval:
+      auto_approve: [gmail.archive]
+      min_confidence_for_auto: 0.9
+"""
+    capability = parse(document).get("financial_taxes")
+
+    assert capability.auto_approves(ActionKind.GMAIL_ARCHIVE, 0.95) is True
+    assert capability.auto_approves(ActionKind.GMAIL_ARCHIVE, 0.5) is False
+
+
+def test_a_missing_file_is_reported_clearly(tmp_path: Path) -> None:
+    with pytest.raises(CapabilityConfigError, match="No capability configuration"):
+        load_capabilities(tmp_path / "absent.yaml")
+
+
+def test_an_edited_file_is_reloaded(tmp_path: Path) -> None:
+    path = tmp_path / "capabilities.yaml"
+    path.write_text(MINIMAL)
+    first = load_capabilities(path)
+
+    path.write_text(MINIMAL.replace("version: test.1", "version: test.2"))
+    os.utime(path, (0, 0))
+
+    assert load_capabilities(path).version == "test.2"
+    assert first.version == "test.1"

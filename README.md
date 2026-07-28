@@ -47,23 +47,32 @@ Reports whether the operational database is reachable and migrated. Requires `TI
 
 `status` is `not_configured` when `DATABASE_URL` is unset, `ok` when the schema is present, and `error` when the database is unreachable or unmigrated.
 
+### `GET /admin/capabilities`
+
+Reports the capability configuration the service is running on, including the digest recorded against every review run. Requires `TIMMENY_OS_API_KEY`. See [Capabilities](#capabilities).
+
+### `GET /admin/gmail/labels`
+
+Lists the mailbox's label names, so `config/capabilities.yaml` can name them exactly. Requires `TIMMENY_OS_API_KEY` and the Gmail credentials.
+
 ### `GET /admin/gmail/status`
 
-Reports whether Gmail is configured and whether the intake label resolves. Requires `TIMMENY_OS_API_KEY`. `configured` is false unless all three of `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN` are set.
+Reports whether Gmail is configured and whether each enabled capability's labels resolve. Requires `TIMMENY_OS_API_KEY`. `configured` is false unless all three of `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN` are set.
 
 ```json
 {
   "configured": true,
-  "intake_label": "financial/taxes",
-  "intake_label_found": true,
   "write_enabled": false,
+  "labels": [
+    {"capability_key": "financial_taxes", "label": "financial/taxes", "found": true}
+  ],
   "detail": null
 }
 ```
 
 ### `POST /admin/gmail/sync`
 
-Records threads that are **in the inbox and carry the intake label** as evidence. Requires `TIMMENY_OS_API_KEY`, `DATABASE_URL`, and the Gmail credentials.
+Records threads that are **in the inbox and carry an enabled capability's label** as evidence, attributed to that capability. Requires `TIMMENY_OS_API_KEY`, `DATABASE_URL`, and the Gmail credentials.
 
 Read-only with respect to both Gmail and Monday.com: no labels change, no mail is archived, and no task is created. Classification and task creation are separate steps.
 
@@ -76,18 +85,21 @@ Intake is the intersection of `INBOX` and the label, not the label alone. Archiv
 
 ```json
 {
-  "label": "financial/taxes",
+  "labels": ["financial/taxes", "Admin"],
   "scanned": 12,
   "created": 3,
   "updated": 1,
   "unchanged": 8,
-  "removed": 0
+  "removed": 0,
+  "warnings": []
 }
 ```
 
-Evidence is keyed by thread, so re-running the sync updates existing rows rather than duplicating them.
+Evidence is keyed by thread, so re-running the sync updates existing rows rather than duplicating them. A thread carrying two capabilities' labels is recorded once and appears in both reviews.
 
-`prune` returns `409` when the scan filled `limit`: a truncated listing cannot distinguish a thread that was archived from one that is simply further down the page, and pruning on that basis would delete everything past the first page.
+A label that does not exist in the mailbox is reported in `warnings` rather than failing the sync, so one mistyped label cannot stop the other capabilities from being reviewed.
+
+`prune` returns `409` when the scan filled `limit` or a label failed to resolve: an incomplete listing cannot distinguish a thread that was archived from one that is simply further down the page, and pruning on that basis would delete everything past the first page.
 
 ### `POST /admin/classify`
 
@@ -428,6 +440,125 @@ Response:
 
 If one update fails, the service keeps processing the rest and reports the per-item error in `results`.
 
+## Daily review
+
+The daily review is what "good morning" calls. One request refreshes the mailbox, opens or resumes today's review, and hands back a single capability group to work through — not an undifferentiated inbox. See [ADR-0007](docs/adr/ADR-0007-daily-review-engine.md).
+
+```text
+run (one per day)
+ └── group (one per enabled capability, in configured order)
+      └── item (one Gmail thread, with the recommendation shown for it)
+           └── decision (append-only record of what a human chose)
+```
+
+### `POST /review/start`
+
+Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_URL`.
+
+```json
+{"review_date": null, "sync": true, "limit": 50}
+```
+
+```json
+{
+  "run_id": "…",
+  "review_date": "2026-07-28",
+  "state": "in_progress",
+  "config_version": "2026-07-28.1",
+  "config_digest": "…",
+  "groups": [
+    {"capability_key": "financial_taxes", "state": "pending", "counts": {"total": 3, "pending": 3}}
+  ],
+  "current_group": { "…": "the first group still needing a decision, with its items" },
+  "warnings": []
+}
+```
+
+Identity is the review date, so calling it twice in a day resumes rather than restarts: decisions already made are kept and only mail that has arrived since is added. Gmail being unreachable is a warning, not a failure — the review still opens over the evidence already recorded.
+
+A thread settled in an earlier review does not come back, unless its content has changed since. A reply reopens a conversation; sitting in the inbox does not.
+
+### `GET /review/runs/{run_id}` and `GET /review/runs/{run_id}/groups/{capability_key}`
+
+Read the run, or one capability group with its items. Neither changes anything.
+
+Groups are worked one at a time in configured order, but a group waiting only on execution does not hold the review up: `current_group` moves to the next group that needs a decision and returns to the outstanding actions once every group has been decided.
+
+### `POST /review/runs/{run_id}/items/{item_id}/decision`
+
+Records one decision: `approve` (take the recommended action), `override` (take a different one), `dismiss` (settled, and it does not come back), or `defer` (not today — it returns in tomorrow's review).
+
+```json
+{"decision": "override", "action": "gmail.archive", "note": "Superseded"}
+```
+
+Approval is the only route to an action, and configuration decides which actions exist for a capability at all: an action it is not granted is refused with `409` however the request is phrased. An approved item is recorded as approved and **not executed** — execution arrives in the next increment, and until then a run holding approved actions reports `awaiting_actions` rather than claiming completion.
+
+### `POST /review/runs/{run_id}/groups/{capability_key}/decisions`
+
+Applies one decision across a group — "archive all of these". Refused with `409` where the capability sets `allow_bulk_decisions: false`. All or nothing: if the decision is not permitted for one item, none of them is decided.
+
+### `POST /review/runs/{run_id}/items/{item_id}/assessment`
+
+Records the model's reading of a thread: a category the capability recognises, a confidence, and at most a *suggested* action.
+
+```json
+{
+  "category": "obligation",
+  "confidence": 0.9,
+  "rationale": "The adviser asked for a filing date.",
+  "model_version": "gpt-…",
+  "recommendation": "monday.create_task"
+}
+```
+
+A suggestion is adopted as the item's recommendation only when it clears the capability's `min_ai_confidence`; below that it is recorded as unadopted, with the reason. A suggestion the capability is not allowed to act on is refused. An assessment never decides, approves, or executes anything.
+
+## Capabilities
+
+Capabilities are data, in `config/capabilities.yaml` — not branches in code. Adding one, reordering the review, or changing what an action may do is a configuration change.
+
+```yaml
+- key: financial_taxes
+  name: financial/taxes
+  position: 20
+  gmail:
+    labels: [financial/taxes]
+    require_inbox: true
+  playbook:
+    id: evidence_to_obligation
+    steps: [collect_evidence, recommend, await_decision, prepare_actions, execute_approved, verify]
+  recommendation_policy:
+    version: taxes.v1
+    categories: [filing_obligation, payment_due, advisor_request, reference]
+    rules:
+      - id: adviser_asks_for_something
+        when: {participant_domains: [kpmg.com]}
+        recommend: monday.create_task
+        confidence: 0.9
+        rationale: The adviser is asking for something.
+  allowed_actions: [gmail.label, gmail.archive, gmail.draft_reply, monday.create_task]
+  approval:
+    auto_approve: []
+    allow_bulk_decisions: true
+```
+
+The file is validated on load and rejected outright — with `503` rather than a silently empty review — if it is wrong. Some refusals are deliberate:
+
+- A rule may not recommend an action the capability is not granted.
+- The default recommendation may not be an action, or unmatched mail would be acted on by omission.
+- A capability may not auto-approve an action it is not allowed to take.
+- `learning.record_message_content: true` is refused: message content is never retained ([ADR-0003](docs/adr/ADR-0003-gmail-access-and-retention.md)).
+- Two capabilities may not share a position, since position is what orders the review.
+
+Rules read only retained metadata — subject, participants, dates — never message content, because there is none to read. The first matching rule wins; unmatched mail falls to `needs_review`.
+
+The shipped configuration carries **no rules yet** and no auto-approvals, so every thread arrives as `needs_review` and every action needs a human. Rules are the place to encode a pattern once it has been seen often enough to be worth stating.
+
+Every run records both the configuration version and a digest of the file, so a decision made months ago can be explained against the exact configuration that produced it.
+
+Three capabilities ship, named after the labels in [79 — Daily Assistant Review](docs/79-Daily-Assistant-Review.md): `Career - Advisor/Expert Calls`, `financial/taxes`, and `Admin`. Only `financial/taxes` has been resolved against the live mailbox; check the other two with `GET /admin/gmail/labels` before trusting the review. A label that does not resolve is reported as a warning rather than a failure, so a wrong name shows up as an empty group.
+
 ## Configuration
 
 Set these environment variables:
@@ -441,7 +572,7 @@ Set these environment variables:
 - `GS_KEY_INITIATIVES_GROUP_ID`: optional Monday.com group id for `Key Initiatives`. If omitted, the service matches a group named `Key Initiatives`.
 - `DATABASE_URL`: optional PostgreSQL connection string for Admin OS operational state. Leave it unset to run the service exactly as before, without persistence.
 - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`: optional Gmail OAuth credentials. All three must be present; a partially configured environment counts as unconfigured. See `docs/77-First-Slice-Setup.md`.
-- `GMAIL_INTAKE_LABEL`: Gmail label that defines the evidence set. Defaults to `financial/taxes`.
+- `CAPABILITIES_PATH`: optional path to the capability configuration. Defaults to `config/capabilities.yaml`, which is what defines the Gmail labels in scope. See [Capabilities](#capabilities).
 - `GMAIL_WRITE_ENABLED`: whether Gmail writes are permitted. Defaults to `false`.
 - `LOG_LEVEL`: optional log level for `adminos` loggers. Defaults to `INFO`.
 
@@ -588,7 +719,9 @@ The URL can be renamed later in Railway after the service/domain rename is compl
 - `main.py` contains the FastAPI app.
 - `adminos/` contains the coordination layer: configuration, persistence, and coordination endpoints.
 - `adminos/adapters/` contains clients for external systems.
-- `adminos/domain/` contains domain logic, including evidence recording.
+- `adminos/domain/` contains domain logic, including evidence recording and the review state machine.
+- `adminos/capabilities/` loads and validates the capability configuration.
+- `config/capabilities.yaml` defines the capabilities the daily review presents.
 - `adminos/db/migrations/` contains the Alembic migration history.
 - `scripts/migrate.sh` applies migrations, and is Railway's pre-deploy command.
 - `requirements.txt` defines the Python dependencies.

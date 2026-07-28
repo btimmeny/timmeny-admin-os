@@ -1,0 +1,37 @@
+version: test.auto
+channel: email
+
+capabilities:
+  - key: admin
+    name: Admin
+    position: 10
+    gmail:
+      labels:
+        - Admin
+    playbook:
+      id: triage_and_clear
+      steps:
+        - collect_evidence
+        - recommend
+        - await_decision
+        - prepare_actions
+        - execute_approved
+        - verify
+    recommendation_policy:
+      version: admin.auto
+      categories:
+        - noise
+      rules:
+        - id: newsletters_are_noise
+          when:
+            subject_contains:
+              - Newsletter
+          recommend: gmail.archive
+          confidence: 0.95
+          rationale: A newsletter needs reading, not doing.
+    allowed_actions:
+      - gmail.archive
+    approval:
+      auto_approve:
+        - gmail.archive
+      min_confidence_for_auto: 0.9

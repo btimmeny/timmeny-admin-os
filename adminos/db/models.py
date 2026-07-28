@@ -1,10 +1,10 @@
 import uuid
 
-from datetime import datetime
-from typing import Any
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -21,6 +21,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
+JsonObject = dict[str, str | int | float | bool | None]
 ID_LENGTH = 36
 SHORT_TEXT_LENGTH = 255
 DIGEST_LENGTH = 64
@@ -87,10 +88,11 @@ class Evidence(Base):
     source_thread_id: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     source_message_id: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
     subject: Mapped[str | None] = mapped_column(Text)
-    participants: Mapped[Any | None] = mapped_column(JSON_TYPE)
+    participants: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     snippet: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(String(DIGEST_LENGTH))
+    capability_keys: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
     created_at: Mapped[datetime] = created_at_column()
 
 
@@ -205,6 +207,123 @@ class WorkflowStep(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ReviewRun(Base):
+    """One daily review: the session Brian starts with "good morning".
+
+    Identity is the review date, so "start my review" twice in a day resumes
+    rather than restarts.
+    """
+
+    __tablename__ = "review_runs"
+    __table_args__ = (
+        UniqueConstraint("review_date", "channel", name="uq_review_run_date_channel"),
+    )
+
+    id: Mapped[str] = id_column()
+    review_date: Mapped[date] = mapped_column(Date, nullable=False)
+    channel: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    config_version: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    config_digest: Mapped[str] = mapped_column(String(DIGEST_LENGTH), nullable=False)
+    started_at: Mapped[datetime] = created_at_column()
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = updated_at_column()
+
+
+class ReviewGroup(Base):
+    """One capability's slice of a review run, presented on its own."""
+
+    __tablename__ = "review_groups"
+    __table_args__ = (
+        UniqueConstraint("run_id", "capability_key", name="uq_review_group_capability"),
+    )
+
+    id: Mapped[str] = id_column()
+    run_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    capability_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    capability_name: Mapped[str] = mapped_column(Text, nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
+
+
+class ReviewItem(Base):
+    """One thread inside one group, with the recommendation shown for it.
+
+    Evidence is deliberately referenced by id rather than by foreign key, and
+    the fields needed to present the item are copied here: archiving a thread
+    retires its evidence, and the record of what was decided must outlive that.
+    """
+
+    __tablename__ = "review_items"
+    __table_args__ = (
+        UniqueConstraint("group_id", "evidence_id", name="uq_review_item_evidence"),
+        Index("ix_review_items_run_state", "run_id", "state"),
+    )
+
+    id: Mapped[str] = id_column()
+    run_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    group_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_groups.id", ondelete="CASCADE"), nullable=False
+    )
+    evidence_id: Mapped[str] = mapped_column(String(ID_LENGTH), nullable=False)
+    source_thread_id: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    evidence_hash: Mapped[str | None] = mapped_column(String(DIGEST_LENGTH))
+    subject: Mapped[str | None] = mapped_column(Text)
+    participants: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    recommendation: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    recommendation_source: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    recommendation_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    recommendation_rationale: Mapped[str | None] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    rule_id: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    model_version: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    category: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    objective_keys: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    provenance: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    approved_action: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    approved_params: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReviewDecision(Base):
+    """An append-only record of what a human chose for one item."""
+
+    __tablename__ = "review_decisions"
+    __table_args__ = (Index("ix_review_decisions_item", "item_id"),)
+
+    id: Mapped[str] = id_column()
+    run_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    item_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_items.id", ondelete="CASCADE"), nullable=False
+    )
+    capability_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    decision: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    action: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    action_params: Mapped[JsonObject | None] = mapped_column(JSON_TYPE)
+    followed_recommendation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    recommendation: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    actor: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    batch_id: Mapped[str | None] = mapped_column(String(ID_LENGTH))
+    learning_scope: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_column()
+
+
 class Decision(Base):
     """An open or resolved choice, recorded when classification is ambiguous."""
 
@@ -218,7 +337,7 @@ class Decision(Base):
         String(ID_LENGTH), ForeignKey("operational_objects.id")
     )
     question: Mapped[str] = mapped_column(Text, nullable=False)
-    options: Mapped[Any | None] = mapped_column(JSON_TYPE)
+    options: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
     selected_option: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     created_at: Mapped[datetime] = created_at_column()

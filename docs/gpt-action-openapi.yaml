@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: timmeny-admin-os API
-  version: 0.6.0
-  description: GPT-safe API for reading, creating, and updating Timmeny Admin OS todos.
+  version: 0.7.0
+  description: GPT-safe API for the daily email review and for Timmeny Admin OS todos.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
 paths:
@@ -232,6 +232,255 @@ paths:
               schema:
                 $ref: "#/components/schemas/BulkUpdateResponse"
 
+  /review/start:
+    post:
+      operationId: startDailyReview
+      summary: Start or resume today's email review
+      description: >-
+        Call this for "good morning", "check my inbox", or "start my daily review".
+        Refreshes the mailbox, opens or resumes today's review, and returns the
+        first capability group to work through. Safe to call repeatedly: the same
+        day resumes rather than restarts.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                review_date:
+                  type: string
+                  format: date
+                  description: Defaults to today. Only set this to revisit an earlier review.
+                sync:
+                  type: boolean
+                  default: true
+                limit:
+                  type: integer
+                  minimum: 1
+                  maximum: 200
+                  default: 50
+      responses:
+        "200":
+          description: Review started or resumed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRunResponse"
+
+  /review/runs/{run_id}:
+    get:
+      operationId: readDailyReview
+      summary: Read where a review stands
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Review state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewRunResponse"
+
+  /review/runs/{run_id}/groups/{capability_key}:
+    get:
+      operationId: readReviewGroup
+      summary: Read one capability group and its items
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: capability_key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Group with its items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewGroupResponse"
+
+  /review/runs/{run_id}/items/{item_id}/decision:
+    post:
+      operationId: decideReviewItem
+      summary: Record Brian's decision on one item
+      description: >-
+        approve takes the recommended action, override takes a different one,
+        dismiss settles the thread, defer returns it tomorrow. Only record a
+        decision Brian has actually made. An approved action is not executed yet.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - decision
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, override, dismiss, defer]
+                action:
+                  type: string
+                  enum:
+                    - gmail.label
+                    - gmail.archive
+                    - gmail.trash
+                    - gmail.draft_reply
+                    - gmail.send_draft
+                    - monday.create_task
+                  description: Required for override. Refused if the capability is not allowed it.
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Decision recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewDecisionResponse"
+        "409":
+          description: Configuration does not permit the decision.
+
+  /review/runs/{run_id}/groups/{capability_key}/decisions:
+    post:
+      operationId: decideReviewGroup
+      summary: Apply one decision across a group
+      description: >-
+        For "archive all of these". All or nothing. Refused for capabilities that
+        require items to be decided individually.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: capability_key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - decision
+              properties:
+                decision:
+                  type: string
+                  enum: [approve, override, dismiss, defer]
+                item_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Omit to apply to every undecided item in the group.
+                action:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Decisions recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewDecisionResponse"
+        "409":
+          description: Configuration does not permit the decision.
+
+  /review/runs/{run_id}/items/{item_id}/assessment:
+    post:
+      operationId: assessReviewItem
+      summary: Record your reading of one thread
+      description: >-
+        Your interpretation, not a decision: a category the capability recognises,
+        a confidence, and at most a suggested action. It cannot approve or execute
+        anything, and a suggestion below the capability's confidence floor is
+        recorded without being adopted.
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - category
+                - confidence
+                - rationale
+                - model_version
+              properties:
+                category:
+                  type: string
+                confidence:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                rationale:
+                  type: string
+                model_version:
+                  type: string
+                recommendation:
+                  type: string
+      responses:
+        "200":
+          description: Assessment recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewItemResponse"
+        "409":
+          description: The category or suggestion is outside what the capability permits.
+
 components:
   schemas:
     HealthResponse:
@@ -285,6 +534,102 @@ components:
           type: integer
         failed_count:
           type: integer
+
+    ReviewItemResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        item_id:
+          type: string
+        thread_id:
+          type: string
+        subject:
+          type: string
+        participants:
+          type: array
+          items:
+            type: string
+        received_at:
+          type: string
+        state:
+          type: string
+        recommendation:
+          type: string
+        recommendation_source:
+          type: string
+        recommendation_confidence:
+          type: number
+        recommendation_rationale:
+          type: string
+        category:
+          type: string
+        objectives:
+          type: array
+          items:
+            type: string
+        approved_action:
+          type: string
+        requires_confirmation:
+          type: boolean
+
+    ReviewGroupResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        capability_key:
+          type: string
+        capability_name:
+          type: string
+        state:
+          type: string
+        allowed_actions:
+          type: array
+          items:
+            type: string
+        allow_bulk_decisions:
+          type: boolean
+        counts:
+          type: object
+          additionalProperties: true
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewItemResponse"
+
+    ReviewRunResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        run_id:
+          type: string
+        review_date:
+          type: string
+        state:
+          type: string
+        config_version:
+          type: string
+        groups:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        current_group:
+          $ref: "#/components/schemas/ReviewGroupResponse"
+        warnings:
+          type: array
+          items:
+            type: string
+
+    ReviewDecisionResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        run:
+          $ref: "#/components/schemas/ReviewRunResponse"
+        decided:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewItemResponse"
 
   securitySchemes:
     ApiKeyAuth:

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Sequence
 
 from sqlalchemy import and_, delete, select
@@ -10,6 +10,7 @@ from adminos.adapters.gmail import (
     GmailClient,
     GmailThread,
 )
+from adminos.capabilities.config import CapabilityConfig
 from adminos.db.models import Classification, Evidence
 from adminos.logging import get_logger
 
@@ -20,22 +21,19 @@ MAX_SYNC_LIMIT = 200
 logger = get_logger(__name__)
 
 
-class IntakeLabelMissing(RuntimeError):
-    """Raised when the configured Gmail intake label does not exist."""
-
-
 class PruneScanTruncated(RuntimeError):
     """Raised when a prune is asked for but the scan did not see every thread."""
 
 
 @dataclass(frozen=True)
 class EvidenceSyncResult:
-    label: str
+    labels: list[str]
     scanned: int
     created: int
     updated: int
     unchanged: int
     removed: int = 0
+    warnings: list[str] = field(default_factory=list)
 
 
 def prune_gmail_evidence(session: Session, live_thread_ids: Sequence[str]) -> int:
@@ -47,6 +45,8 @@ def prune_gmail_evidence(session: Session, live_thread_ids: Sequence[str]) -> in
     Classifications of the retired evidence go with it. A classification is a
     statement *about* a thread and means nothing once the thread is gone, and
     leaving the rows behind would make the foreign key reject the delete.
+    Review items deliberately survive: they record what was decided, and a
+    decision must remain auditable after the thread it concerned is archived.
     """
     condition = Evidence.source_system == SOURCE_SYSTEM
     retired = select(Evidence.id).where(
@@ -62,12 +62,18 @@ def prune_gmail_evidence(session: Session, live_thread_ids: Sequence[str]) -> in
     return removed.rowcount or 0
 
 
-def record_gmail_thread(session: Session, thread: GmailThread) -> str:
+def record_gmail_thread(
+    session: Session,
+    thread: GmailThread,
+    capability_keys: Sequence[str],
+) -> str:
     """Store a thread as evidence. Returns 'created', 'updated', or 'unchanged'.
 
     Identity is the thread, not the message, so a reply to an already-recorded
     conversation updates one row rather than creating a second piece of
-    evidence for the same subject.
+    evidence for the same subject. The capabilities whose labels the thread
+    carries are recorded on it: that attribution, not a branch in code, is what
+    puts a thread in one review group rather than another.
     """
     existing = session.execute(
         select(Evidence).where(
@@ -77,6 +83,7 @@ def record_gmail_thread(session: Session, thread: GmailThread) -> str:
     ).scalar_one_or_none()
 
     content_hash = thread.content_hash()
+    keys = sorted(set(capability_keys))
 
     if existing is None:
         session.add(
@@ -89,11 +96,12 @@ def record_gmail_thread(session: Session, thread: GmailThread) -> str:
                 received_at=thread.received_at,
                 snippet=thread.snippet,
                 content_hash=content_hash,
+                capability_keys=keys,
             )
         )
         return "created"
 
-    if existing.content_hash == content_hash:
+    if existing.content_hash == content_hash and existing.capability_keys == keys:
         return "unchanged"
 
     existing.source_message_id = thread.message_id
@@ -102,66 +110,88 @@ def record_gmail_thread(session: Session, thread: GmailThread) -> str:
     existing.received_at = thread.received_at
     existing.snippet = thread.snippet
     existing.content_hash = content_hash
+    existing.capability_keys = keys
     return "updated"
 
 
 async def sync_gmail_evidence(
     client: GmailClient,
     session: Session,
-    label: str,
+    capabilities: Sequence[CapabilityConfig],
     limit: int = DEFAULT_SYNC_LIMIT,
     prune: bool = False,
 ) -> EvidenceSyncResult:
-    """Record inbox threads carrying the intake label as evidence.
+    """Record the threads each capability watches, attributed to that capability.
 
-    Scoped to the intersection of INBOX and the intake label. A thread the owner
-    has already archived is deliberately out of scope: archiving is how they say
-    they are done with it, so re-reading it would resurrect settled mail.
+    Scoped to the intersection of INBOX and the capability's label. A thread the
+    owner has already archived is deliberately out of scope: archiving is how
+    they say they are done with it, so re-reading it would resurrect settled
+    mail.
 
-    With `prune`, evidence for threads outside that set is deleted, which also
-    retires evidence recorded before the scope narrowed. Pruning is refused when
-    the scan filled the page limit, because a truncated listing cannot
-    distinguish "archived" from "further down the page".
+    A label that does not exist is reported as a warning rather than an error,
+    so one mistyped label in configuration cannot stop the other capabilities
+    from being reviewed. Pruning, which needs the complete in-scope set, is the
+    exception: it is refused if any label failed to resolve.
 
     Read-only with respect to Gmail and Monday: nothing is labelled, archived,
-    or turned into a task here. Classification decides that later.
+    or turned into a task here.
     """
-    label_id = await client.resolve_label_id(label)
-    if label_id is None:
-        raise IntakeLabelMissing(f"Gmail has no label named {label!r}.")
-
     effective_limit = min(limit, MAX_SYNC_LIMIT)
-    thread_ids = await client.list_thread_ids([INBOX_LABEL_ID, label_id], effective_limit)
-    counts = {"created": 0, "updated": 0, "unchanged": 0}
+    attribution: dict[str, list[str]] = {}
+    labels: list[str] = []
+    warnings: list[str] = []
 
-    if prune and len(thread_ids) >= effective_limit:
+    for capability in capabilities:
+        for label in capability.gmail.labels:
+            labels.append(label)
+            label_id = await client.resolve_label_id(label)
+            if label_id is None:
+                warnings.append(
+                    f"Gmail has no label named {label!r}, so {capability.key!r} was skipped."
+                )
+                continue
+
+            scope = [INBOX_LABEL_ID, label_id] if capability.gmail.require_inbox else [label_id]
+            thread_ids = await client.list_thread_ids(scope, effective_limit)
+            if len(thread_ids) >= effective_limit:
+                warnings.append(
+                    f"The scan of {label!r} filled the limit of {effective_limit}, so "
+                    "older threads with that label were not seen."
+                )
+            for thread_id in thread_ids:
+                attribution.setdefault(thread_id, []).append(capability.key)
+
+    if prune and warnings:
         raise PruneScanTruncated(
-            f"The scan returned {len(thread_ids)} threads, filling the limit, so the "
-            "in-scope set may be incomplete. Raise the limit and retry."
+            "Pruning needs the complete in-scope set, and this scan was incomplete: "
+            + " ".join(warnings)
         )
 
-    for thread_id in thread_ids:
+    counts = {"created": 0, "updated": 0, "unchanged": 0}
+    for thread_id, capability_keys in attribution.items():
         thread = await client.fetch_thread(thread_id)
-        counts[record_gmail_thread(session, thread)] += 1
+        counts[record_gmail_thread(session, thread, capability_keys)] += 1
 
-    removed = prune_gmail_evidence(session, thread_ids) if prune else 0
+    removed = prune_gmail_evidence(session, list(attribution)) if prune else 0
 
     logger.info(
-        "gmail evidence sync: label=%s scanned=%d created=%d updated=%d "
-        "unchanged=%d removed=%d",
-        label,
-        len(thread_ids),
+        "gmail evidence sync: labels=%d scanned=%d created=%d updated=%d "
+        "unchanged=%d removed=%d warnings=%d",
+        len(labels),
+        len(attribution),
         counts["created"],
         counts["updated"],
         counts["unchanged"],
         removed,
+        len(warnings),
     )
 
     return EvidenceSyncResult(
-        label=label,
-        scanned=len(thread_ids),
+        labels=labels,
+        scanned=len(attribution),
         created=counts["created"],
         updated=counts["updated"],
         unchanged=counts["unchanged"],
         removed=removed,
+        warnings=warnings,
     )

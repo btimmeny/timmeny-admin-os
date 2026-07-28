@@ -15,6 +15,9 @@ from adminos.adapters.monday import MondayItem
 STRONG_MATCH_SCORE = 0.75
 CANDIDATE_SCORE = 0.45
 DEFAULT_MATCH_LIMIT = 5
+# A title wholly contained in a longer one is a strong candidate but not the
+# same title, so it stops short of the score that means "this already exists".
+SUBSET_MATCH_SCORE = 0.95
 
 # Mail subjects arrive wrapped in reply and forward markers that say nothing
 # about the underlying obligation.
@@ -155,7 +158,10 @@ def score_similarity(left: str, right: str, weights: TokenWeights = UNIFORM_WEIG
     Overlap is scored against the lighter of the two titles rather than their
     union: a short title wholly contained in a longer one is a duplicate, and
     penalising it for the extra words would hide exactly the case where someone
-    re-adds an existing task in fewer words.
+    re-adds an existing task in fewer words. Containment alone stops below 1.0
+    though — "KPMG | Next Steps" is contained in "Taxes | Confirm KPMG
+    activities and next steps" without being the same task, and a full score
+    should mean the words match, not merely fit inside.
     """
     left_tokens = tokenize(left)
     right_tokens = tokenize(right)
@@ -172,6 +178,8 @@ def score_similarity(left: str, right: str, weights: TokenWeights = UNIFORM_WEIG
     shared = weights.weigh(shared_tokens)
     smaller = min(weights.weigh(left_tokens), weights.weigh(right_tokens))
     containment = shared / smaller if smaller else 0.0
+    if left_tokens != right_tokens:
+        containment = min(containment, SUBSET_MATCH_SCORE)
     sequence = SequenceMatcher(None, normalize_title(left), normalize_title(right)).ratio()
     return round(max(containment, sequence), 3)
 

@@ -1,6 +1,7 @@
 from adminos.adapters.monday import MondayItem
 from adminos.domain.duplicates import (
     STRONG_MATCH_SCORE,
+    SUBSET_MATCH_SCORE,
     build_token_weights,
     find_duplicates,
     normalize_title,
@@ -162,3 +163,29 @@ def test_an_empty_board_reports_nothing() -> None:
 
     assert report.matches == []
     assert report.compared == 0
+
+
+def test_a_contained_title_scores_below_an_identical_one() -> None:
+    """A subset is a strong candidate, not the same task."""
+    board = [item("KPMG | Next Steps")]
+
+    subset = find_duplicates("Taxes | Confirm KPMG activities and next steps", board)
+    identical = find_duplicates("KPMG | Next Steps", board)
+
+    assert subset.matches[0].score == SUBSET_MATCH_SCORE
+    assert identical.matches[0].score == 1.0
+
+
+def test_a_contained_title_is_still_a_strong_match() -> None:
+    board = [item("KPMG | Next Steps")]
+
+    report = find_duplicates("Taxes | Confirm KPMG activities and next steps", board)
+
+    assert report.has_strong_match is True
+
+
+def test_reordered_words_still_score_as_identical() -> None:
+    """Same words, different order: the board writes both ways round."""
+    report = find_duplicates("KPMG | Annual Taxes", [item("Annual Taxes | KPMG")])
+
+    assert report.matches[0].score == 1.0

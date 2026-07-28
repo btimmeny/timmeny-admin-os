@@ -1,7 +1,7 @@
 # 00 — Timmeny Admin OS Documentation
 
 **Status:** Active  
-**Version:** 1.2  
+**Version:** 1.3  
 **Stability:** High  
 **Purpose:** Provides the reading order, current documentation status, and navigation for the Timmeny Admin OS architecture library.
 
@@ -17,11 +17,12 @@ The documentation is ordered from most enduring to most changeable:
 6. [60 — Domain Model](./60-Domain-Model.md) — the canonical business language
 7. [70 — Implementation Strategy](./70-Implementation-Strategy.md) — how capabilities are built incrementally
 8. [75 — First Vertical Slice](./75-First-Vertical-Slice.md) — the current bounded implementation contract and achieved increments
-9. [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md) — the next repeatable morning-review capability
-10. [80 — Monday.com Architecture](./80-Monday-Architecture.md) — the execution-system implementation design
-11. [85 — Operating Model](./85-Operating-Model.md) — the current operating-object specification
-12. [90 — Roadmap](./90-Roadmap.md) — the current sequence of work
-13. [95 — Governance](./95-Governance.md) — how operational learning changes the model and architecture
+9. [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md) — deterministic expert-call labeling and grouped review
+10. [79 — Daily Assistant Review](./79-Daily-Assistant-Review.md) — the daily conversational review, approval, execution, and learning loop
+11. [80 — Monday.com Architecture](./80-Monday-Architecture.md) — the execution-system implementation design
+12. [85 — Operating Model](./85-Operating-Model.md) — the current operating-object specification
+13. [90 — Roadmap](./90-Roadmap.md) — the current sequence of work
+14. [95 — Governance](./95-Governance.md) — how operational learning changes the model and architecture
 
 Supporting material:
 
@@ -67,4 +68,4 @@ Lower-numbered documents are more foundational and should change less frequently
 
 [ADR-0001](./adr/ADR-0001-admin-os-coordination-layer.md) establishes the architectural boundary: ChatGPT is the reasoning layer; Timmeny Admin OS is the coordination layer; Monday.com owns task execution; PostgreSQL persists canonical operational state; Gmail owns communication; and Calendar owns scheduling.
 
-The repository now has working Gmail evidence intake, an explicit classification and review boundary, Monday board reads and duplicate checks, and approval-gated verified Monday task creation. The next bounded capability is [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md), governed by [ADR-0007](./adr/ADR-0007-deterministic-labeling-and-grouped-review.md).
+The repository has working Gmail evidence intake, an explicit classification and review boundary, Monday board reads and duplicate checks, and approval-gated verified Monday task creation. The current product increment is the label-scoped daily action loop in [79 — Daily Assistant Review](./79-Daily-Assistant-Review.md), beginning with [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md) and governed by [ADR-0007](./adr/ADR-0007-deterministic-labeling-and-grouped-review.md) and [ADR-0008](./adr/ADR-0008-label-scoped-daily-action-loop.md).

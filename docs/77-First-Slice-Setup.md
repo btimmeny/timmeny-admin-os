@@ -146,7 +146,7 @@ The sync only reads. It creates no Monday task, changes no Gmail label, and arch
 - [x] The board's `Status` done-labels are confirmed: completion is `Done`
 - [x] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
 - [x] Schema applied: `alembic_version` reports `0001_baseline`
-- [ ] Consent screen publishing status reads **In production** — verify this, since a `Testing` screen expires the refresh token weekly and the failure would not appear for seven days
+- [x] Consent screen publishing status reads **In production**, confirmed by the account owner — a `Testing` screen would expire the refresh token weekly, and that failure would not appear for seven days
 - [ ] Only `gmail.modify` is granted — check https://myaccount.google.com/permissions
 - [x] `financial/taxes` label exists and contains the threads intended as evidence
 - [x] `GMAIL_WRITE_ENABLED` is `false`

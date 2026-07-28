@@ -1,8 +1,8 @@
 # 75 — First Vertical Slice
 
-**Status:** Ready for implementation discovery  
-**Version:** 0.1  
-**Purpose:** Provides the bounded implementation contract for the first Timmeny Admin OS end-to-end workflow.  
+**Status:** Foundation implemented; completion and Gmail-disposition loop remain  
+**Version:** 0.2  
+**Purpose:** Records the bounded implementation contract, achieved increments, and remaining work for the first Timmeny Admin OS end-to-end workflow.  
 **Depends on:** [50 — Architecture](./50-Architecture.md), [60 — Domain Model](./60-Domain-Model.md), [70 — Implementation Strategy](./70-Implementation-Strategy.md), [ADR-0001](./adr/ADR-0001-admin-os-coordination-layer.md)
 
 ## Objective
@@ -18,122 +18,162 @@ Gmail evidence
   -> verification and audit
 ```
 
-The implementation must extend the existing repository and preserve working Railway and Monday capabilities.
+The implementation extends the existing repository and preserves working Railway and Monday capabilities.
 
-## First Codex Task: Repository Assessment
+## Current Repository State
 
-Before changing code, inspect and document:
+The following increments are implemented on `main`:
 
-- current application entry points and module structure
-- current FastAPI routes and authentication
-- current Monday connector and supported operations
-- current Railway deployment and environment configuration
-- existing persistence, if any
-- tests and local development workflow
-- existing ChatGPT Action or API contracts
-- gaps against this vertical slice
+1. PostgreSQL baseline and migrations for durable coordination state.
+2. Gmail OAuth status and intake-label resolution.
+3. Gmail inbox-plus-label synchronization into thread-level evidence.
+4. Idempotent evidence updates and safe pruning behavior.
+5. Explicit classifier boundary using `v1-review-all`, which assigns no inferred meaning and routes every item to review.
+6. Human review queue.
+7. Monday To Do List board reads.
+8. Duplicate scoring against existing Monday items.
+9. Approval-gated Monday task creation from evidence.
+10. Reserved Admin OS identity, retry adoption, write verification, and workflow audit.
 
-Produce a concise implementation plan grounded in the repository. Do not redesign the entire system.
+This means the repository can ingest real Gmail evidence, expose it for review, inspect Monday for duplicates, and create a verified Monday task after explicit confirmation. It does not yet complete the full loop through Monday completion and Gmail disposition.
 
-## Minimum Domain Records
+## Implemented Minimum Domain Records
 
-The first slice requires only the records necessary to preserve identity, state, provenance, and audit:
+The runtime now uses the minimum records necessary to preserve identity, state, provenance, and audit, including:
 
-- `operational_objects`
-- `evidence`
-- `external_mappings`
-- `workflow_runs`
-- `workflow_steps` or equivalent audit events
-- `decisions` only if required to represent ambiguous classification
+- operational objects;
+- evidence;
+- classifications;
+- external mappings;
+- workflow runs;
+- workflow steps or equivalent audit events.
 
-The exact physical schema is an implementation decision, but it must support stable IDs, timestamps, source-system identifiers, lifecycle state, confidence, and idempotency.
+Physical schema remains an implementation concern, but stable IDs, timestamps, source identifiers, confidence, lifecycle state, and idempotency are required invariants.
 
-## Required Interfaces
+## Implemented Interfaces
 
 ### Gmail adapter
 
-- synchronize a thread and messages
-- preserve Gmail thread and message IDs
-- read and apply labels
-- archive a thread only after an approved completion condition
-- support retry without duplicate state
+Implemented:
+
+- authenticate using OAuth refresh credentials;
+- resolve the configured intake label;
+- synchronize inbox threads carrying that label;
+- preserve Gmail thread identity;
+- retry without duplicate evidence;
+- prune only when the scan is complete enough to do so safely.
+
+Not yet complete:
+
+- generalized deterministic label application;
+- completion-conditioned archive or other disposition;
+- granular Gmail write policies and read-back verification for each write type.
 
 ### Monday adapter
 
-- create a task
-- update a mapped task
-- read task state and completion
-- preserve Monday board and item IDs
-- verify resulting state after a write
-- support retry without duplicate tasks
+Implemented:
+
+- read board items;
+- inspect completion-related state;
+- score possible duplicate tasks;
+- create a task from evidence after the approval gate;
+- preserve board, item, and Admin OS IDs;
+- adopt an existing write after a retry;
+- verify resulting state after creation.
+
+Not yet complete:
+
+- update a mapped task through the coordination workflow;
+- synchronize task completion into workflow state;
+- drive completion-conditioned Gmail disposition.
 
 ### Classification service
 
-Given evidence and current operational context, return:
+Implemented:
 
-- affected or proposed operational object
-- relationship: creates, updates, completes, blocks, contradicts, or supports
-- confidence
-- recommended disposition
-- whether human review is required
+- one classification per evidence item and classifier version;
+- explicit `needs_review` disposition;
+- zero confidence and undetermined relationship for classifier v1;
+- no hidden inference and no automatic task creation.
 
-The first implementation may use deterministic rules and an explicit AI classification boundary. It must not hide uncertain classification as fact.
+Next:
+
+- add the narrow deterministic and grouped-review capability defined in [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md);
+- preserve separate label and recommendation confidence;
+- retain Brian's corrections as structured learning.
 
 ### Workflow service
 
-- execute one approved Gmail-to-Monday workflow
-- maintain explicit workflow state
-- prevent duplicate execution
-- stop safely on ambiguous or failed steps
-- verify each external write
-- preserve an audit trail
+Implemented:
+
+- approval gate for Monday task creation;
+- duplicate review before creation;
+- stable identity reservation;
+- idempotent retry adoption;
+- verified write and audit.
+
+Remaining:
+
+- mapped task update;
+- completion synchronization;
+- safe Gmail disposition;
+- grouped review and bulk-decision workflow.
 
 ### Executive Review API
 
+Current:
+
+- unresolved evidence is exposed through the review queue;
+- Monday board and duplicate information can be retrieved separately.
+
+Next:
+
 Return one assembled view containing:
 
-- active relevant operational objects
-- open and recently completed mapped Monday tasks
-- unresolved Gmail evidence
-- waiting, blocked, or failed workflows
-- recommended next actions
-- source freshness and confidence
+- capability groups;
+- active relevant operational objects;
+- open and recently completed mapped Monday tasks;
+- unresolved Gmail evidence;
+- waiting, blocked, or failed workflows;
+- recommended next actions;
+- confidence, source freshness, provenance, and rule/model versions.
 
 ## Safety and Invariants
 
 - An email is evidence, not automatically a task.
-- No Monday task is created until classification selects that disposition.
+- No Monday task is created until classification selects that disposition and the approval gate allows it.
 - No Gmail thread is archived before the workflow completion condition is verified.
 - Every external write is idempotent.
 - Every external record has a stable mapping to the Admin OS object or workflow.
 - Ambiguous classification requires review.
+- Confidence supports review but does not independently authorize execution.
 - Every workflow can explain what it read, inferred, changed, and verified.
-- Logs and audit data must not expose secrets or full sensitive message content unnecessarily.
+- Logs and audit data must not expose secrets or unnecessary full sensitive message content.
 
-## Out of Scope
+## Current Test Scenarios
 
-- broad Monday workspace redesign
-- Calendar synchronization unless already available and trivial to reuse
-- recurring obligations
-- financial integrations
-- life-health scoring
-- broad autonomous execution
-- multiple new workflow types
-- sophisticated UI
+The implemented foundation should continue to test:
 
-## Test Scenarios
+1. Gmail status and label resolution.
+2. Repeated intake creates no duplicate evidence.
+3. Archived or out-of-scope threads are not treated as active intake.
+4. Truncated scans cannot prune unseen evidence.
+5. Classifier reruns are idempotent by evidence and version.
+6. Uncertain evidence remains in review.
+7. Duplicate Monday candidates are surfaced before creation.
+8. Unconfirmed uncertain creation is refused.
+9. Confirmed creation writes one task and verifies it.
+10. A retry adopts the existing Monday item rather than duplicating it.
 
-At minimum, test:
+Remaining end-to-end tests:
 
-1. New actionable email creates one Monday task.
-2. Retrying the same input does not create a duplicate task.
-3. Non-actionable evidence is recorded without task creation.
-4. Ambiguous evidence pauses for review.
-5. Monday completion is synchronized before Gmail archive.
-6. A failed Monday write leaves the Gmail thread unarchived.
-7. A failed archive can be retried without duplicating prior work.
-8. Executive Review reports stale, blocked, and unresolved state accurately.
+11. Monday completion is synchronized before Gmail archive.
+12. A failed Monday update leaves Gmail unchanged.
+13. A failed Gmail disposition can be retried without duplicating prior work.
+14. Executive Review reports grouped, stale, blocked, and unresolved state accurately.
 
 ## Completion Criteria
 
-The slice is complete when it runs repeatedly on real Gmail and Monday records, preserves provenance, avoids duplicate tasks, prevents premature archive, exposes verified workflow state, and produces a useful Executive Review.
+The original vertical slice is complete when it runs repeatedly on real Gmail and Monday records, preserves provenance, avoids duplicate tasks, synchronizes mapped task completion, prevents premature Gmail disposition, exposes verified workflow state, and produces a useful Executive Review.
+
+The advisor/expert-call capability may be developed on top of the implemented foundation before the final completion loop, provided it does not bypass these invariants or broaden autonomous execution.

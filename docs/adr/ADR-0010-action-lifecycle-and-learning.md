@@ -87,6 +87,7 @@ Even a promoted rule only *approves*. It creates an action in `approved`, record
 
 - [README](../../README.md) — Actions, Learning, Capabilities
 - [ADR-0009](./ADR-0009-review-engine-implementation.md) — its "execution is the next increment" gap is closed here
+- [81 — Action Execution Runbook](../81-Action-Execution-Runbook.md) — the operational sequence
 - [docs/gpt-action-openapi.yaml](../gpt-action-openapi.yaml)
 - [79 — Daily Assistant Review](../79-Daily-Assistant-Review.md)
 

@@ -518,7 +518,7 @@ A suggestion is adopted as the item's recommendation only when it clears the cap
 
 ## Actions
 
-An approval is intent. Between intent and a changed mailbox sit four states, each durable, so at every point there is an answer to what was meant to happen, what was attempted, and what Gmail actually shows. See [ADR-0010](docs/adr/ADR-0010-action-lifecycle-and-learning.md).
+An approval is intent. Between intent and a changed mailbox sit four states, each durable, so at every point there is an answer to what was meant to happen, what was attempted, and what Gmail actually shows. See [ADR-0010](docs/adr/ADR-0010-action-lifecycle-and-learning.md) for why, and [81 — Action Execution Runbook](docs/81-Action-Execution-Runbook.md) for the requests.
 
 ```text
 approved  -> a decision, and nothing more

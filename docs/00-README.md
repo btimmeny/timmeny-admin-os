@@ -28,6 +28,7 @@ Supporting material:
 
 - [76 — Repository Assessment](./76-Repository-Assessment.md) — current-state assessment and staged plan for the first slice
 - [77 — First Slice Setup Runbook](./77-First-Slice-Setup.md) — the manual Monday, Railway, and Google steps
+- [81 — Action Execution Runbook](./81-Action-Execution-Runbook.md) — driving a review from approval to a changed mailbox, and promoting a correction to a rule
 - [Architecture Decision Records](./adr/README.md)
 - [Product Discoveries](./discovery/Product-Discoveries.md)
 - [Diagrams](./diagrams/README.md)

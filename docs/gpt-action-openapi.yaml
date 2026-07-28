@@ -2,7 +2,12 @@ openapi: 3.1.0
 info:
   title: timmeny-admin-os API
   version: 0.7.0
-  description: GPT-safe API for the daily email review and for Timmeny Admin OS todos.
+  description: >-
+    GPT-safe API for the daily email review and for Timmeny Admin OS todos.
+    Approving an action never performs it: an action runs approved -> prepared
+    -> executed -> verified -> completed, and only the execute route touches
+    Gmail. Worked examples of each sequence, with their real responses, are in
+    docs/81-Action-Execution-Runbook.md.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
 paths:

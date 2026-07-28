@@ -173,7 +173,7 @@ Request. `titles` takes up to 20 candidates; `filter` defaults to `all` because 
 }
 ```
 
-Response. `score` runs 0–1; at or above `strong_match_score` the candidate almost certainly already exists.
+Response. `score` runs 0–1; at or above `strong_match_score` the candidate almost certainly already exists. A score of 1.0 means the two titles use the same words, in any order. A title wholly contained in a longer one caps at 0.95 — a strong candidate, but not the same task.
 
 ```json
 {

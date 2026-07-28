@@ -36,14 +36,18 @@ In the Railway project that hosts `timmeny-admin-os`:
    The reference keeps working if Railway rotates the credential.
 3. Leave everything else alone. Until `DATABASE_URL` is present the service behaves exactly as it does today; the new code paths are gated on it.
 
-Migrations run as a pre-deploy step, not at import time, so a failed migration cannot take a running service down mid-request. That will be added to `railway.json` in the same PR that introduces Alembic:
+Migrations run as a pre-deploy step, not at import time, so a failed migration stops the deploy rather than taking a live service down mid-request. `railway.json` already carries it:
 
 ```json
 "deploy": {
-  "preDeployCommand": ["alembic upgrade head"],
+  "preDeployCommand": ["sh scripts/migrate.sh"],
   "startCommand": "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
 }
 ```
+
+`scripts/migrate.sh` exits successfully without doing anything when `DATABASE_URL` is unset, so deploys keep working until you finish this step.
+
+Once the database is attached, `GET /admin/db-status` (authenticated) reports `{"status": "ok", "revision": "0001_baseline"}`.
 
 ---
 

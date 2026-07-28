@@ -8,6 +8,9 @@ import httpx
 from fastapi import Body, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
+from adminos.api.admin import router as admin_router
+from adminos.api.security import extract_bearer_token
+
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 ACTION_GROUP_COLUMN_TITLE = "Action Group"
@@ -26,6 +29,7 @@ KEY_INITIATIVES_GROUP_TITLE = "Key Initiatives"
 GS_KEY_INITIATIVES_GROUP_ID_VARIABLE = "GS_KEY_INITIATIVES_GROUP_ID"
 
 app = FastAPI(title="timmeny-admin-os", version="0.4.1")
+app.include_router(admin_router)
 
 
 class TodoList(StrEnum):
@@ -732,17 +736,6 @@ def verify_api_key(
             status_code=401,
             detail="Invalid or missing API key.",
         )
-
-
-def extract_bearer_token(authorization: str | None) -> str | None:
-    if not authorization:
-        return None
-
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        return None
-
-    return token
 
 
 def get_todo_lists_for_filter(list_filter: TodoListFilter) -> list[TodoList]:

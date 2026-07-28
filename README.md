@@ -33,6 +33,20 @@ Returns service health.
 }
 ```
 
+### `GET /admin/db-status`
+
+Reports whether the operational database is reachable and migrated. Requires `TIMMENY_OS_API_KEY`; unlike the todo routes this endpoint refuses to serve when no key is configured.
+
+```json
+{
+  "status": "ok",
+  "revision": "0001_baseline",
+  "detail": null
+}
+```
+
+`status` is `not_configured` when `DATABASE_URL` is unset, `ok` when the schema is present, and `error` when the database is unreachable or unmigrated.
+
 ### `POST /todos`
 
 Creates a todo item on a Monday.com board.
@@ -237,6 +251,8 @@ Set these environment variables:
 - `GS_TODO_BOARD_ID`: Monday.com board id for `GS | Initiatives & Action Items`.
 - `GS_TODO_GROUP_ID`: optional Monday.com group id for GS todos.
 - `GS_KEY_INITIATIVES_GROUP_ID`: optional Monday.com group id for `Key Initiatives`. If omitted, the service matches a group named `Key Initiatives`.
+- `DATABASE_URL`: optional PostgreSQL connection string for Admin OS operational state. Leave it unset to run the service exactly as before, without persistence.
+- `LOG_LEVEL`: optional log level for `adminos` loggers. Defaults to `INFO`.
 
 The organize workflow also expects these Monday.com columns on each board:
 
@@ -271,6 +287,18 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+### Database
+
+Persistence is optional and entirely gated on `DATABASE_URL`. With it unset, every existing route behaves as it always has and `GET /admin/db-status` reports `not_configured`.
+
+Apply the schema with:
+
+```bash
+alembic upgrade head
+```
+
+See [docs/77 — First Slice Setup Runbook](./docs/77-First-Slice-Setup.md) for provisioning.
+
 ## Railway
 
 Railway uses `railway.json` to start the app with Uvicorn:
@@ -278,6 +306,8 @@ Railway uses `railway.json` to start the app with Uvicorn:
 ```bash
 uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
 ```
+
+Migrations run before the new deployment goes live, via the pre-deploy command `sh scripts/migrate.sh`. The script exits successfully without doing anything when `DATABASE_URL` is unset, so a project without a database still deploys.
 
 Add `MONDAY_API_TOKEN` and `TODO_BOARD_ID` as Railway environment variables before calling `POST /todos`.
 
@@ -365,6 +395,9 @@ The URL can be renamed later in Railway after the service/domain rename is compl
 ## Repository Map
 
 - `main.py` contains the FastAPI app.
+- `adminos/` contains the coordination layer: configuration, persistence, and coordination endpoints.
+- `adminos/db/migrations/` contains the Alembic migration history.
+- `scripts/migrate.sh` applies migrations, and is Railway's pre-deploy command.
 - `requirements.txt` defines the Python dependencies.
 - `requirements-dev.txt` defines local test dependencies.
 - `railway.json` configures Railway deployment.

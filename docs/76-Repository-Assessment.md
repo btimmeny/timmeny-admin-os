@@ -383,9 +383,16 @@ One PR per increment; no increment starts before the previous one is green.
 6. *Rate limits.* Monday enforces a complexity budget and Gmail a quota; polling frequency and page sizes must stay bounded.
 7. *No CI today.* Invariants this important should not rely on local runs.
 
-**Resolved since drafting:** the slice targets the **To Do List** board (`8962223984`) and may add an `Admin OS ID` text column; Gmail intake is scoped to the **`financial/taxes`** label; Railway Postgres does **not** exist yet and must be provisioned.
+**Resolved since drafting**, verified against the live board on 2026-07-28:
 
-**Unknowns:** the real label set of the target board's `Status` column; what triggers a sync run; where approval happens.
+- The slice targets the **To Do List** board (`8962223984`).
+- `Admin OS ID` exists as a text column, id `text_mm5prcay`.
+- `Status` offers exactly `Not Yet Started`, `In Progress`, `Done`, so completion is unambiguously `Done`.
+- Gmail intake is scoped to the **`financial/taxes`** label.
+
+**Observed while verifying, out of scope but worth knowing:** the To Do List board has no `Annual Objective`, `Initiative`, `Owner`, or `Due Date` column, although the README documents all four. Reads degrade quietly to `null`, but `POST /todos` or `PATCH /todos/{id}/action-metadata` carrying `annual_objective` or `initiative_project` for `list=todo` will fail with a 502 from `require_board_column`. Only the GS board has those columns.
+
+**Unknowns:** what triggers a sync run; where approval happens.
 
 **Assumptions:** single user, single tenant; Railway remains the runtime; ChatGPT remains the only client; classification v1 is deterministic; Calendar stays out of scope.
 

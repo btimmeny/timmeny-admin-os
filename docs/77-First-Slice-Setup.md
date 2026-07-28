@@ -11,30 +11,25 @@ Three tasks: a Monday board column, a Railway Postgres database, and a Google OA
 
 ## 1. Monday.com — add the `Admin OS ID` column
 
-On the **To Do List** board (`8962223984`):
+**Done.** The **To Do List** board (`8962223984`) has a text column titled `Admin OS ID` (id `text_mm5prcay`), and its `Status` column offers `Not Yet Started`, `In Progress`, and `Done` — so completion is unambiguously `Done`.
 
-1. Add a new column, type **Text**, titled exactly `Admin OS ID`.
-2. Hide it from the default view. Nothing should ever type into it by hand.
+Keep the column hidden from the default view. Nothing should ever type into it by hand.
 
 Why it exists: Monday's API has no idempotency token, so Admin OS writes its own identifier into the item and searches for it before retrying a create. Without it, a crash between the Monday write and the local commit duplicates the task. See [ADR-0002](./adr/ADR-0002-monday-identity-and-idempotency.md).
-
-Also confirm the exact labels configured on the board's `Status` column. The service currently treats only `done`, `complete`, and `completed` (case-insensitive) as finished, and completion is what gates archiving an email.
 
 ---
 
 ## 2. Railway — provision PostgreSQL
 
-In the Railway project that hosts `timmeny-admin-os`:
+**Done.** The `timmeny-todo-os` project (production environment) now has a `Postgres` service running PostgreSQL 18.4, and the `timmeny-admin-os` service has:
 
-1. **New → Database → Add PostgreSQL.** This creates a `Postgres` service with its own `DATABASE_URL`.
-2. Open the **`timmeny-admin-os` service → Variables**, and add a *reference* variable rather than pasting a literal connection string:
+```text
+DATABASE_URL = ${{Postgres.DATABASE_URL}}
+```
 
-   ```text
-   DATABASE_URL = ${{Postgres.DATABASE_URL}}
-   ```
+It is a *reference*, not a literal connection string, so it keeps working if Railway rotates the credential. It resolves to `postgresql://postgres:***@postgres.railway.internal:5432/railway` — note the `postgresql://` scheme, which SQLAlchemy maps to psycopg 2; `normalize_database_url` rewrites it to `postgresql+psycopg://`.
 
-   The reference keeps working if Railway rotates the credential.
-3. Leave everything else alone. Until `DATABASE_URL` is present the service behaves exactly as it does today; the new code paths are gated on it.
+The baseline migration has already been applied, so the first deploy's pre-deploy step is a no-op.
 
 Migrations run as a pre-deploy step, not at import time, so a failed migration stops the deploy rather than taking a live service down mid-request. `railway.json` already carries it:
 
@@ -45,7 +40,7 @@ Migrations run as a pre-deploy step, not at import time, so a failed migration s
 }
 ```
 
-`scripts/migrate.sh` exits successfully without doing anything when `DATABASE_URL` is unset, so deploys keep working until you finish this step.
+`scripts/migrate.sh` exits successfully without doing anything when `DATABASE_URL` is unset, so deploys keep working in an environment that has no database.
 
 Once the database is attached, `GET /admin/db-status` (authenticated) reports `{"status": "ok", "revision": "0001_baseline"}`.
 
@@ -129,9 +124,10 @@ Treat the refresh token as a mailbox credential: it grants read, label, and arch
 
 ## Verification checklist
 
-- [ ] `Admin OS ID` text column exists on the To Do List board and is hidden from the default view
-- [ ] The board's `Status` done-labels are confirmed
-- [ ] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
+- [x] `Admin OS ID` text column exists on the To Do List board and is hidden from the default view
+- [x] The board's `Status` done-labels are confirmed: completion is `Done`
+- [x] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
+- [x] Schema applied: `alembic_version` reports `0001_baseline`
 - [ ] Consent screen publishing status reads **In production**
 - [ ] Only `gmail.modify` is granted — check https://myaccount.google.com/permissions
 - [ ] `financial/taxes` label exists and contains the threads intended as evidence

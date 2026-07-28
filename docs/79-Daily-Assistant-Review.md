@@ -28,8 +28,8 @@ The daily review is pull-based initially: Brian starts it by talking to the GPT.
 
 The first daily-review release supports three bounded Gmail groups:
 
-1. `Career - Advisor/Expert Calls`
-2. `financial/taxes`
+1. `Career - Advisory/Expert Calls`
+2. `Financial/Taxes`
 3. `Admin`
 
 Each group is an independent capability with its own:

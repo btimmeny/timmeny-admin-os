@@ -29,8 +29,8 @@ If a required source cannot be read, identify the missing source and do not fabr
 
 The first daily-review release contains three bounded groups:
 
-1. `Career - Advisor/Expert Calls`;
-2. `financial/taxes`;
+1. `Career - Advisory/Expert Calls`;
+2. `Financial/Taxes`;
 3. an administrative-mail label whose exact Gmail label name must remain configurable until Brian confirms it.
 
 Each group has independent deterministic rules, recommendations, allowed actions, confidence thresholds, completion conditions, and learning. Do not propagate rules from one group to another without explicit confirmation.
@@ -61,7 +61,7 @@ Every item must propose exactly one disposition. Examples include:
 
 The review may compress related items into a capability group when they share a stable classification and review workflow. Grouping must not erase item identity, provenance, confidence, exceptions, allowed actions, or execution state.
 
-For `Career - Advisor/Expert Calls`:
+For `Career - Advisory/Expert Calls`:
 
 - use the Gmail label as the intake and grouping signal;
 - retain each distinct advisory opportunity as a separate item;

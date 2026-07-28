@@ -8,12 +8,12 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-07-28.2"
+version: "2026-07-28.3"
 channel: email
 
 capabilities:
   - key: career_advisor_calls
-    name: Career - Advisor/Expert Calls
+    name: Career - Advisory/Expert Calls
     enabled: true
     position: 10
     description: >-
@@ -21,7 +21,7 @@ capabilities:
       usually answered rather than filed.
     gmail:
       labels:
-        - Career - Advisor/Expert Calls
+        - Career - Advisory/Expert Calls
       require_inbox: true
     playbook:
       id: respond_or_schedule
@@ -67,7 +67,7 @@ capabilities:
       require_alignment: false
 
   - key: financial_taxes
-    name: financial/taxes
+    name: Financial/Taxes
     enabled: true
     position: 20
     description: >-
@@ -75,7 +75,7 @@ capabilities:
       counterparties, so nothing is acted on without confirmation.
     gmail:
       labels:
-        - financial/taxes
+        - Financial/Taxes
       require_inbox: true
     playbook:
       id: evidence_to_obligation

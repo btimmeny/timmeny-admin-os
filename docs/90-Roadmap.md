@@ -38,7 +38,7 @@ Build [79 — Daily Assistant Review](./79-Daily-Assistant-Review.md):
 
 Build [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls-Capability.md) as the first active group:
 
-1. Resolve or create the Gmail label `Career - Advisor/Expert Calls`.
+1. Resolve or create the Gmail label `Career - Advisory/Expert Calls`.
 2. Define versioned deterministic sender, domain, and phrase rules.
 3. Detect matching inbox threads and record rule provenance.
 4. Apply or preserve the label idempotently behind a dedicated Gmail-write policy.

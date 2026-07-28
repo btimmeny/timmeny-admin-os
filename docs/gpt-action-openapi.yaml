@@ -1,31 +1,20 @@
 openapi: 3.1.0
 info:
   title: timmeny-admin-os API
-  version: 0.8.0
+  version: 0.9.0
   description: >-
-    GPT-safe API for the daily email review and for Timmeny Admin OS todos.
-
-    Every review response carries its own presentation contract. `screen`
-    holds a `screen_id`, the columns in the order they are to be shown, and
-    `rows` whose `cells` are finished text in that same order. Print the
-    columns and the cells as given; do not reorder them, reword them, add a
-    column, drop one, or restate a row in prose. `screen.actions` names the
-    decisions on offer and the exact request each one makes, and each row's
-    `actions` lists the ones that row would accept.
-
-    Approving an action never performs it: an action runs approved -> prepared
-    -> executed -> verified -> completed, and only the execute route touches
-    Gmail. Worked examples of each sequence, with their real responses, are in
-    docs/81-Action-Execution-Runbook.md.
+    GPT-safe API for Timmeny Admin OS daily email review and todo operations.
+    Review responses include a versioned screen contract. Render its columns and
+    row cells in the returned order without rewriting, merging, or omitting them.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
+security:
+  - ApiKeyAuth: []
 paths:
   /health:
     get:
       operationId: checkHealth
       summary: Check service health
-      security:
-        - ApiKeyAuth: []
       responses:
         "200":
           description: Service is healthy.
@@ -37,20 +26,14 @@ paths:
   /todos/read-simple:
     get:
       operationId: listTodos
-      summary: List todo items as GPT-safe text
-      description: Returns selected todo items as compact text with item IDs and metadata.
-      security:
-        - ApiKeyAuth: []
+      summary: List todo items
       parameters:
         - name: list
           in: query
           required: false
           schema:
             type: string
-            enum:
-              - all
-              - todo
-              - gs
+            enum: [all, todo, gs]
             default: all
         - name: limit
           in: query
@@ -68,7 +51,7 @@ paths:
             default: false
       responses:
         "200":
-          description: Todo items read successfully.
+          description: Todo items returned.
           content:
             application/json:
               schema:
@@ -78,8 +61,6 @@ paths:
     post:
       operationId: createTodo
       summary: Create a todo item
-      security:
-        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -87,8 +68,7 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required:
-                - title
+              required: [title]
               properties:
                 title:
                   type: string
@@ -96,9 +76,7 @@ paths:
                   maxLength: 255
                 list:
                   type: string
-                  enum:
-                    - todo
-                    - gs
+                  enum: [todo, gs]
                   default: todo
                 action_group:
                   type: string
@@ -112,7 +90,7 @@ paths:
                   type: string
       responses:
         "200":
-          description: Todo item created successfully.
+          description: Todo item created.
           content:
             application/json:
               schema:
@@ -121,23 +99,18 @@ paths:
   /todos/metadata/read-simple:
     get:
       operationId: getTodoMetadata
-      summary: Get todo board metadata as GPT-safe text
-      description: Returns configured Monday columns as compact text.
-      security:
-        - ApiKeyAuth: []
+      summary: Get todo board metadata
       parameters:
         - name: list
           in: query
           required: false
           schema:
             type: string
-            enum:
-              - todo
-              - gs
+            enum: [todo, gs]
             default: gs
       responses:
         "200":
-          description: Board metadata read successfully.
+          description: Board metadata returned.
           content:
             application/json:
               schema:
@@ -146,10 +119,7 @@ paths:
   /key-initiatives/read-simple:
     get:
       operationId: listKeyInitiatives
-      summary: List Key Initiatives as GPT-safe text
-      description: Returns open items from the GS Key Initiatives group as compact text.
-      security:
-        - ApiKeyAuth: []
+      summary: List key initiatives
       parameters:
         - name: limit
           in: query
@@ -167,7 +137,7 @@ paths:
             default: false
       responses:
         "200":
-          description: Key Initiatives read successfully.
+          description: Key initiatives returned.
           content:
             application/json:
               schema:
@@ -177,42 +147,17 @@ paths:
     patch:
       operationId: updateTodoActionMetadata
       summary: Update todo action metadata
-      security:
-        - ApiKeyAuth: []
       parameters:
-        - name: item_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/TodoItemId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required:
-                - list
-              properties:
-                list:
-                  type: string
-                  enum:
-                    - todo
-                    - gs
-                action_group:
-                  type: string
-                action_date:
-                  type: string
-                action:
-                  type: string
-                annual_objective:
-                  type: string
-                initiative_project:
-                  type: string
+              $ref: "#/components/schemas/TodoMetadataRequest"
       responses:
         "200":
-          description: Todo action metadata updated successfully.
+          description: Todo metadata updated.
           content:
             application/json:
               schema:
@@ -222,9 +167,6 @@ paths:
     post:
       operationId: bulkUpdateTodoActionMetadata
       summary: Bulk update todo action metadata
-      description: Updates many todo items. Send updates_json as a JSON string array.
-      security:
-        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -232,12 +174,11 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required:
-                - updates_json
+              required: [updates_json]
               properties:
                 updates_json:
                   type: string
-                  description: JSON string array of update objects with item_id, list, and metadata fields.
+                  description: JSON string array of todo metadata updates.
       responses:
         "200":
           description: Bulk update completed.
@@ -251,12 +192,8 @@ paths:
       operationId: startDailyReview
       summary: Start or resume today's email review
       description: >-
-        Call this for "good morning", "check my inbox", or "start my daily review".
-        Refreshes the mailbox, opens or resumes today's review, and returns the
-        first capability group to work through. Safe to call repeatedly: the same
-        day resumes rather than restarts.
-      security:
-        - ApiKeyAuth: []
+        Use for good morning, check my inbox, begin our admin, or start my review.
+        Refreshes Gmail and resumes the same persisted review for the date.
       requestBody:
         required: false
         content:
@@ -268,7 +205,6 @@ paths:
                 review_date:
                   type: string
                   format: date
-                  description: Defaults to today. Only set this to revisit an earlier review.
                 sync:
                   type: boolean
                   default: true
@@ -288,18 +224,12 @@ paths:
   /review/runs/{run_id}:
     get:
       operationId: readDailyReview
-      summary: Read where a review stands
-      security:
-        - ApiKeyAuth: []
+      summary: Read a daily review
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
       responses:
         "200":
-          description: Review state.
+          description: Review state returned.
           content:
             application/json:
               schema:
@@ -308,26 +238,14 @@ paths:
   /review/runs/{run_id}/groups/{capability_key}:
     get:
       operationId: readReviewGroup
-      summary: Read one capability group and its items
-      security:
-        - ApiKeyAuth: []
+      summary: Read one review group
+      description: Returns the group's screen contract and item rows.
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: capability_key
-          in: path
-          required: true
-          schema:
-            type: string
-      description: >-
-        Returns the capability's presentation contract together with its rows.
-        Render `screen` as given.
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/CapabilityKey"
       responses:
         "200":
-          description: Group with its presentation contract and rows.
+          description: Group returned.
           content:
             application/json:
               schema:
@@ -336,57 +254,19 @@ paths:
   /review/runs/{run_id}/items/{item_id}/decision:
     post:
       operationId: decideReviewItem
-      summary: Record Brian's decision on one item
+      summary: Record a decision on one review item
       description: >-
-        approve takes the recommended action, override takes a different one,
-        dismiss settles the thread, defer returns it tomorrow. Only record a
-        decision Brian has actually made. An approved action is not executed yet.
-      security:
-        - ApiKeyAuth: []
+        Approve accepts the recommendation. Override selects another permitted
+        action. Dismiss settles the item. Defer returns it in a later review.
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: item_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/ReviewItemId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required:
-                - decision
-              properties:
-                decision:
-                  type: string
-                  enum: [approve, override, dismiss, defer]
-                action:
-                  type: string
-                  enum:
-                    - gmail.label
-                    - gmail.archive
-                    - gmail.draft_reply
-                    - gmail.send_draft
-                    - monday.create_task
-                  description: >-
-                    Required for override. Refused if the capability is not allowed it.
-                    Permanent deletion is not offered: no capability may take it.
-                action_params:
-                  type: object
-                  additionalProperties: true
-                  description: >-
-                    Parameters for the chosen action. gmail.label takes add_labels
-                    and remove_labels; gmail.draft_reply takes to, cc, subject, and
-                    body; gmail.archive takes none.
-                note:
-                  type: string
+              $ref: "#/components/schemas/ItemDecisionRequest"
       responses:
         "200":
           description: Decision recorded.
@@ -395,50 +275,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReviewDecisionResponse"
         "409":
-          description: Configuration does not permit the decision.
+          description: Decision or action is not permitted.
 
   /review/runs/{run_id}/groups/{capability_key}/decisions:
     post:
       operationId: decideReviewGroup
-      summary: Apply one decision across a group
-      description: >-
-        For "archive all of these". All or nothing. Refused for capabilities that
-        require items to be decided individually.
-      security:
-        - ApiKeyAuth: []
+      summary: Record the same decision for several items
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: capability_key
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/CapabilityKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required:
-                - decision
-              properties:
-                decision:
-                  type: string
-                  enum: [approve, override, dismiss, defer]
-                item_ids:
-                  type: array
-                  items:
-                    type: string
-                  description: Omit to apply to every undecided item in the group.
-                action:
-                  type: string
-                note:
-                  type: string
+              $ref: "#/components/schemas/GroupDecisionRequest"
       responses:
         "200":
           description: Decisions recorded.
@@ -447,55 +298,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReviewDecisionResponse"
         "409":
-          description: Configuration does not permit the decision.
+          description: Bulk decision is not permitted.
 
   /review/runs/{run_id}/items/{item_id}/assessment:
     post:
       operationId: assessReviewItem
-      summary: Record your reading of one thread
+      summary: Record an AI assessment of one item
       description: >-
-        Your interpretation, not a decision: a category the capability recognises,
-        a confidence, and at most a suggested action. It cannot approve or execute
-        anything, and a suggestion below the capability's confidence floor is
-        recorded without being adopted.
-      security:
-        - ApiKeyAuth: []
+        Records interpretation, confidence, rationale, and an optional suggested
+        action. It cannot approve or execute an external action.
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: item_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/ReviewItemId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required:
-                - category
-                - confidence
-                - rationale
-                - model_version
-              properties:
-                category:
-                  type: string
-                confidence:
-                  type: number
-                  minimum: 0
-                  maximum: 1
-                rationale:
-                  type: string
-                model_version:
-                  type: string
-                recommendation:
-                  type: string
+              $ref: "#/components/schemas/AssessmentRequest"
       responses:
         "200":
           description: Assessment recorded.
@@ -504,44 +324,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReviewItemResponse"
         "409":
-          description: The category or suggestion is outside what the capability permits.
+          description: Assessment is outside capability policy.
 
   /review/runs/{run_id}/actions/prepare:
     post:
       operationId: prepareReviewActions
-      summary: Turn approvals into exact, inspectable plans
+      summary: Prepare approved actions
       description: >-
-        Preparing writes nothing to Gmail. It resolves each approved decision
-        into the exact parameters that would be sent and a stable idempotency
-        key, so the plan can be read before anything happens. Preparing the same
-        approval twice returns the same action.
-      security:
-        - ApiKeyAuth: []
+        Resolves approved decisions into exact inspectable action plans. This
+        operation writes nothing to Gmail and is idempotent.
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              properties:
-                capability_key:
-                  type: string
-                  description: Limit to one capability. Omit for the whole run.
-                item_ids:
-                  type: array
-                  items:
-                    type: string
-                action_ids:
-                  type: array
-                  items:
-                    type: string
+              $ref: "#/components/schemas/PrepareActionsRequest"
       responses:
         "200":
           description: Actions prepared.
@@ -550,22 +349,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/ActionsResponse"
         "409":
-          description: >-
-            The capability is not permitted to execute the action, or the
-            parameters are not usable.
+          description: Action cannot be prepared.
 
   /review/runs/{run_id}/actions:
     get:
       operationId: listReviewActions
-      summary: Read every action on a run, with verification and failures
-      security:
-        - ApiKeyAuth: []
+      summary: List actions for a review
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
         - name: capability_key
           in: query
           required: false
@@ -574,13 +365,11 @@ paths:
         - name: state
           in: query
           required: false
-          description: Filter by lifecycle state. Use failed to find what needs a retry.
           schema:
-            type: string
-            enum: [approved, prepared, executed, verified, completed, failed]
+            $ref: "#/components/schemas/ActionState"
       responses:
         "200":
-          description: Actions on the run.
+          description: Actions returned.
           content:
             application/json:
               schema:
@@ -589,68 +378,35 @@ paths:
   /review/runs/{run_id}/actions/{action_id}:
     get:
       operationId: readReviewAction
-      summary: Read one action and its whole audit history
-      security:
-        - ApiKeyAuth: []
+      summary: Read one review action
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: action_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/ActionId"
       responses:
         "200":
-          description: The action, its verification, and every event recorded against it.
+          description: Action returned.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActionResponse"
         "404":
-          description: No such action on this run.
+          description: Action not found.
 
   /review/runs/{run_id}/actions/execute:
     post:
       operationId: executeReviewActions
-      summary: Execute prepared actions and verify each one
+      summary: Execute and verify prepared actions
       description: >-
-        The only route that changes the mailbox. Four gates stand in front of
-        it: the capability must be allowed the action, separately permitted to
-        execute it, GMAIL_WRITE_ENABLED must be on, and confirm must be true.
-        Each action is read back from Gmail afterwards; an action Gmail does not
-        confirm is left failed rather than reported as done.
-      security:
-        - ApiKeyAuth: []
+        Executes prepared actions after checking capability permission, Gmail
+        write enablement, and confirm=true. Each result is verified from Gmail.
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required:
-                - confirm
-              properties:
-                confirm:
-                  type: boolean
-                  description: Must be true. Executing writes to Gmail.
-                capability_key:
-                  type: string
-                action_ids:
-                  type: array
-                  items:
-                    type: string
-                  description: Omit to execute everything prepared on the run.
+              $ref: "#/components/schemas/ExecuteActionsRequest"
       responses:
         "200":
           description: Actions executed and verified.
@@ -661,64 +417,40 @@ paths:
         "400":
           description: confirm was not true.
         "409":
-          description: Gmail writes are disabled, or the capability may not execute this.
+          description: Writes are disabled or execution is not permitted.
         "502":
-          description: Gmail could not be reached. The action is recorded as failed and can be retried.
+          description: Gmail execution failed and was recorded for retry.
         "503":
           description: Gmail is not configured.
 
   /review/runs/{run_id}/actions/{action_id}/retry:
     post:
       operationId: retryReviewAction
-      summary: Retry one failed action without repeating its effect
-      description: >-
-        The effect is verified before it is attempted again, so a write that in
-        fact landed before the connection dropped is adopted rather than made
-        twice.
-      security:
-        - ApiKeyAuth: []
+      summary: Retry one failed action
+      description: Verifies the effect first so a retry cannot duplicate a write.
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: action_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/ActionId"
       responses:
         "200":
-          description: The action after the retry.
+          description: Retry result returned.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActionResponse"
         "404":
-          description: No such action on this run.
+          description: Action not found.
 
   /review/runs/{run_id}/actions/{action_id}/verify:
     post:
       operationId: verifyReviewAction
-      summary: Read an executed action back from Gmail again
-      description: Writes nothing. Confirms that what was done is still what Gmail shows.
-      security:
-        - ApiKeyAuth: []
+      summary: Verify an executed action again
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: action_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/ActionId"
       responses:
         "200":
-          description: The action with fresh verification.
+          description: Fresh verification returned.
           content:
             application/json:
               schema:
@@ -729,46 +461,20 @@ paths:
       operationId: approveSendDraft
       summary: Approve sending one exact draft
       description: >-
-        Creating a draft never sends it. This approves the send of one specific
-        draft, identified by both its draft id and the message id it contained
-        when it was read back. Approving does not send either: the resulting
-        action still has to be executed, and it refuses if the draft has changed
-        since it was approved.
-      security:
-        - ApiKeyAuth: []
+        Approves one verified draft for sending. This does not send it. Execution
+        is separate and is refused if the draft changed after approval.
       parameters:
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: item_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/ReviewItemId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required:
-                - draft_id
-                - draft_message_id
-                - confirm
-              properties:
-                draft_id:
-                  type: string
-                draft_message_id:
-                  type: string
-                  description: From the draft action's verification. Proves which draft was read.
-                confirm:
-                  type: boolean
+              $ref: "#/components/schemas/ApproveSendDraftRequest"
       responses:
         "200":
-          description: The send is approved, and not yet executed.
+          description: Exact draft send approved but not executed.
           content:
             application/json:
               schema:
@@ -776,20 +482,12 @@ paths:
         "400":
           description: confirm was not true.
         "409":
-          description: >-
-            The capability may not send, or these ids are not the draft that was
-            reviewed.
+          description: Draft or capability is not eligible for sending.
 
   /learning/events:
     get:
       operationId: listLearningEvents
-      summary: Read what the review has been taught
-      description: >-
-        One event for every decision that answered a recommendation, including
-        every override. Evidence only: an event never changes what the review
-        recommends.
-      security:
-        - ApiKeyAuth: []
+      summary: List learning events
       parameters:
         - name: capability_key
           in: query
@@ -816,7 +514,7 @@ paths:
             default: 50
       responses:
         "200":
-          description: Learning events, newest first.
+          description: Learning events returned.
           content:
             application/json:
               schema:
@@ -825,9 +523,7 @@ paths:
   /learning/rules:
     get:
       operationId: listCandidateRules
-      summary: Read every candidate rule and where it stands
-      security:
-        - ApiKeyAuth: []
+      summary: List candidate deterministic rules
       parameters:
         - name: capability_key
           in: query
@@ -838,85 +534,47 @@ paths:
           in: query
           required: false
           schema:
-            type: string
-            enum: [observed, proposed, confirmed, automatable, retired]
+            $ref: "#/components/schemas/RuleState"
       responses:
         "200":
-          description: Candidate rules.
+          description: Candidate rules returned.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RulesResponse"
     post:
       operationId: proposeCandidateRule
-      summary: Propose a deterministic rule for one capability
+      summary: Propose a deterministic rule
       description: >-
-        Proposing changes nothing. A correction is never silently turned into a
-        rule: it is recorded as an observation, and becoming a rule takes this
-        explicit proposal, then a confirmation, and — to act without asking — a
-        separate promotion. Conditions are retained metadata only, and a rule
-        with no condition is refused because it would match everything.
-      security:
-        - ApiKeyAuth: []
+        Creates an inactive rule proposal from explicit metadata conditions. It
+        cannot recommend or execute until separately confirmed or promoted.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required:
-                - capability_key
-                - match
-                - action
-                - rationale
-              properties:
-                capability_key:
-                  type: string
-                match:
-                  $ref: "#/components/schemas/RuleMatch"
-                action:
-                  type: string
-                  enum:
-                    - gmail.label
-                    - gmail.archive
-                    - gmail.draft_reply
-                    - monday.create_task
-                  description: The one thing the rule would do. Refused if the capability is not allowed it.
-                rationale:
-                  type: string
-                confidence:
-                  type: number
-                  minimum: 0
-                  maximum: 1
-                  default: 1
+              $ref: "#/components/schemas/ProposeRuleRequest"
       responses:
         "201":
-          description: The rule is proposed, and inactive.
+          description: Inactive rule proposed.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuleResponse"
         "409":
-          description: The capability is not allowed this action, or learning is off for it.
+          description: Capability does not permit the action or learning.
         "422":
-          description: The conditions are not usable, or would match every thread.
+          description: Match conditions are invalid or match every thread.
 
   /learning/rules/{rule_id}:
     get:
       operationId: readCandidateRule
-      summary: Read a rule's exact conditions and the single action it would take
-      security:
-        - ApiKeyAuth: []
+      summary: Read one candidate rule
       parameters:
-        - name: rule_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RuleId"
       responses:
         "200":
-          description: The rule in full.
+          description: Candidate rule returned.
           content:
             application/json:
               schema:
@@ -925,18 +583,10 @@ paths:
   /learning/rules/{rule_id}/confirm:
     post:
       operationId: confirmCandidateRule
-      summary: Activate a proposed rule for future recommendations
-      description: >-
-        A confirmed rule advises. It does not act: agreeing with a rule is never
-        the same as licensing it to run unattended.
-      security:
-        - ApiKeyAuth: []
+      summary: Confirm a rule for future recommendations
+      description: A confirmed rule recommends but does not execute unattended.
       parameters:
-        - name: rule_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RuleId"
       requestBody:
         required: false
         content:
@@ -945,43 +595,40 @@ paths:
               $ref: "#/components/schemas/RuleTransitionRequest"
       responses:
         "200":
-          description: The rule now recommends.
+          description: Rule confirmed.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuleResponse"
         "409":
-          description: The rule cannot move to confirmed from where it is.
+          description: Rule cannot transition to confirmed.
 
   /learning/rules/{rule_id}/promote:
     post:
       operationId: promoteCandidateRule
-      summary: Let a confirmed rule act without asking first
+      summary: Promote a confirmed rule to automatable
       description: >-
-        The narrowest grant in the system, and still not the last gate: the
-        capability must permit the action's execution and Gmail writes must be
-        enabled before anything happens.
-      security:
-        - ApiKeyAuth: []
+        Allows a confirmed rule to approve matching mail without asking. External
+        execution still requires capability permission and enabled Gmail writes.
       parameters:
-        - name: rule_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RuleId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf:
-                - $ref: "#/components/schemas/RuleTransitionRequest"
-                - type: object
-                  required:
-                    - confirm
+              type: object
+              additionalProperties: false
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: Must be true to promote the rule.
+                reason:
+                  type: string
       responses:
         "200":
-          description: The rule may now approve matching mail on its own.
+          description: Rule promoted to automatable.
           content:
             application/json:
               schema:
@@ -989,23 +636,14 @@ paths:
         "400":
           description: confirm was not true.
         "409":
-          description: >-
-            The rule is not confirmed yet, or the capability does not allow
-            automatable rules.
+          description: Rule or capability is not eligible for automation.
 
   /learning/rules/{rule_id}/retire:
     post:
       operationId: retireCandidateRule
-      summary: Retire a rule permanently
-      description: A retired rule stops recommending and stops acting. It cannot come back.
-      security:
-        - ApiKeyAuth: []
+      summary: Retire a rule
       parameters:
-        - name: rule_id
-          in: path
-          required: true
-          schema:
-            type: string
+        - $ref: "#/components/parameters/RuleId"
       requestBody:
         required: false
         content:
@@ -1014,13 +652,56 @@ paths:
               $ref: "#/components/schemas/RuleTransitionRequest"
       responses:
         "200":
-          description: The rule is retired.
+          description: Rule retired.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RuleResponse"
 
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+
+  parameters:
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+    ReviewItemId:
+      name: item_id
+      in: path
+      required: true
+      schema:
+        type: string
+    TodoItemId:
+      name: item_id
+      in: path
+      required: true
+      schema:
+        type: string
+    CapabilityKey:
+      name: capability_key
+      in: path
+      required: true
+      schema:
+        type: string
+    ActionId:
+      name: action_id
+      in: path
+      required: true
+      schema:
+        type: string
+    RuleId:
+      name: rule_id
+      in: path
+      required: true
+      schema:
+        type: string
+
   schemas:
     HealthResponse:
       type: object
@@ -1040,18 +721,14 @@ components:
         result_text:
           type: string
 
-    TodoWriteResponse:
+    TodoMetadataRequest:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      required: [list]
       properties:
-        success:
-          type: boolean
-        item_id:
-          type: string
-        title:
-          type: string
         list:
           type: string
+          enum: [todo, gs]
         action_group:
           type: string
         action_date:
@@ -1061,6 +738,17 @@ components:
         annual_objective:
           type: string
         initiative_project:
+          type: string
+
+    TodoWriteResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        success:
+          type: boolean
+        item_id:
+          type: string
+        title:
           type: string
 
     BulkUpdateResponse:
@@ -1073,6 +761,177 @@ components:
           type: integer
         failed_count:
           type: integer
+
+    ExternalAction:
+      type: string
+      enum:
+        - gmail.label
+        - gmail.archive
+        - gmail.draft_reply
+        - gmail.send_draft
+        - monday.create_task
+
+    ItemDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, override, dismiss, defer]
+        action:
+          $ref: "#/components/schemas/ExternalAction"
+        action_params:
+          type: object
+          additionalProperties: true
+        note:
+          type: string
+
+    GroupDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [approve, override, dismiss, defer]
+        item_ids:
+          type: array
+          items:
+            type: string
+        action:
+          $ref: "#/components/schemas/ExternalAction"
+        note:
+          type: string
+
+    AssessmentRequest:
+      type: object
+      additionalProperties: false
+      required: [category, confidence, rationale, model_version]
+      properties:
+        category:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        rationale:
+          type: string
+        model_version:
+          type: string
+        recommendation:
+          $ref: "#/components/schemas/ExternalAction"
+
+    PrepareActionsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        capability_key:
+          type: string
+        item_ids:
+          type: array
+          items:
+            type: string
+        action_ids:
+          type: array
+          items:
+            type: string
+
+    ExecuteActionsRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm]
+      properties:
+        confirm:
+          type: boolean
+          description: Must be true to execute external writes.
+        capability_key:
+          type: string
+        action_ids:
+          type: array
+          items:
+            type: string
+
+    ApproveSendDraftRequest:
+      type: object
+      additionalProperties: false
+      required: [draft_id, draft_message_id, confirm]
+      properties:
+        draft_id:
+          type: string
+        draft_message_id:
+          type: string
+        confirm:
+          type: boolean
+
+    ScreenColumn:
+      type: object
+      additionalProperties: false
+      required: [key, title]
+      properties:
+        key:
+          type: string
+        title:
+          type: string
+
+    ScreenAction:
+      type: object
+      additionalProperties: true
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        operation_id:
+          type: string
+        request:
+          type: object
+          additionalProperties: true
+
+    ScreenRow:
+      type: object
+      additionalProperties: true
+      required: [item_id, cells]
+      properties:
+        item_id:
+          type: string
+        cells:
+          type: array
+          items:
+            type: string
+        actions:
+          type: array
+          items:
+            type: string
+
+    ReviewScreen:
+      type: object
+      additionalProperties: true
+      required: [screen_id, layout, columns, rows]
+      properties:
+        screen_id:
+          type: string
+        title:
+          type: string
+        layout:
+          type: string
+          enum: [table]
+        columns:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenColumn"
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenRow"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScreenAction"
+        summary:
+          type: object
+          additionalProperties:
+            type: integer
 
     ReviewItemResponse:
       type: object
@@ -1090,6 +949,7 @@ components:
             type: string
         received_at:
           type: string
+          format: date-time
         state:
           type: string
         recommendation:
@@ -1102,114 +962,10 @@ components:
           type: string
         category:
           type: string
-        objectives:
-          type: array
-          items:
-            type: string
         approved_action:
           type: string
         requires_confirmation:
           type: boolean
-
-    ScreenColumn:
-      type: object
-      additionalProperties: true
-      properties:
-        key:
-          type: string
-          description: The value shown, for example what_it_is or confidence.
-        label:
-          type: string
-          description: The heading to print. Use it exactly as given.
-        align:
-          type: string
-          enum: [left, right]
-        format:
-          type: string
-          enum: [text, number, percent, date, relative_date, joined]
-          description: How the cell was already formatted. Do not reformat it.
-
-    ScreenAction:
-      type: object
-      additionalProperties: true
-      description: One decision on offer, and the exact request that records it.
-      properties:
-        id:
-          type: string
-        label:
-          type: string
-        decision:
-          type: string
-          enum: [approve, override, dismiss, defer]
-        action:
-          type: string
-          nullable: true
-        scope:
-          type: string
-          enum: [item, group]
-        method:
-          type: string
-        path:
-          type: string
-          description: >-
-            Ready to call. An item-scoped path contains {item_id}; substitute
-            the row's item_id and send nothing else.
-        body:
-          type: object
-          additionalProperties: true
-
-    ScreenRow:
-      type: object
-      additionalProperties: true
-      properties:
-        item_id:
-          type: string
-        thread_id:
-          type: string
-        cells:
-          type: array
-          description: Finished text, one per column, in the columns' order.
-          items:
-            type: string
-        actions:
-          type: array
-          description: The ids from screen.actions this row would accept.
-          items:
-            type: string
-
-    ScreenResponse:
-      type: object
-      additionalProperties: true
-      description: >-
-        The presentation contract and the rows it describes. Admin OS owns the
-        layout; render it rather than composing one.
-      properties:
-        screen_id:
-          type: string
-          description: Versioned contract id, for example admin-review-v1.
-        kind:
-          type: string
-          enum: [table]
-        title:
-          type: string
-        columns:
-          type: array
-          items:
-            $ref: "#/components/schemas/ScreenColumn"
-        actions:
-          type: array
-          items:
-            $ref: "#/components/schemas/ScreenAction"
-        rows:
-          type: array
-          items:
-            $ref: "#/components/schemas/ScreenRow"
-        footer:
-          type: string
-          description: Already filled in. Print it under the table.
-        empty_text:
-          type: string
-          description: Print this instead of the table when there are no rows.
 
     ReviewGroupResponse:
       type: object
@@ -1221,23 +977,16 @@ components:
           type: string
         state:
           type: string
-        screen_id:
-          type: string
-        screen:
-          $ref: "#/components/schemas/ScreenResponse"
-        allowed_actions:
-          type: array
-          items:
-            type: string
-        allow_bulk_decisions:
-          type: boolean
         counts:
           type: object
-          additionalProperties: true
+          additionalProperties:
+            type: integer
         items:
           type: array
           items:
             $ref: "#/components/schemas/ReviewItemResponse"
+        screen:
+          $ref: "#/components/schemas/ReviewScreen"
 
     ReviewRunResponse:
       type: object
@@ -1247,14 +996,11 @@ components:
           type: string
         review_date:
           type: string
+          format: date
         state:
           type: string
         config_version:
           type: string
-        screen_id:
-          type: string
-          nullable: true
-          description: The contract of current_group, absent once the review is done.
         groups:
           type: array
           items:
@@ -1262,6 +1008,8 @@ components:
             additionalProperties: true
         current_group:
           $ref: "#/components/schemas/ReviewGroupResponse"
+        screen:
+          $ref: "#/components/schemas/ReviewScreen"
         warnings:
           type: array
           items:
@@ -1278,27 +1026,9 @@ components:
           items:
             $ref: "#/components/schemas/ReviewItemResponse"
 
-    ActionEventResponse:
-      type: object
-      additionalProperties: true
-      properties:
-        sequence:
-          type: integer
-        event:
-          type: string
-          description: >-
-            approved, prepared, execution_started, executed, adopted_existing,
-            already_applied, verified, verification_failed, or failed.
-        state_after:
-          type: string
-        detail:
-          type: object
-          additionalProperties: true
-        external_ref:
-          type: string
-        at:
-          type: string
-          format: date-time
+    ActionState:
+      type: string
+      enum: [approved, prepared, executed, verified, completed, failed]
 
     ActionResponse:
       type: object
@@ -1313,38 +1043,19 @@ components:
         action:
           type: string
         state:
-          type: string
-          enum: [approved, prepared, executed, verified, completed, failed]
-          description: >-
-            approved is recorded intent and nothing more. prepared has exact
-            parameters and has still written nothing. executed has reached
-            Gmail. verified and completed mean Gmail was read back and agrees.
-            failed is durable and retryable.
+          $ref: "#/components/schemas/ActionState"
         params:
           type: object
           additionalProperties: true
         prepared_params:
           type: object
           additionalProperties: true
-          description: Exactly what would be sent, resolved at preparation.
         idempotency_key:
-          type: string
-          description: Derived from the item, the action, and its parameters, so a retry cannot duplicate a write.
-        thread_id:
-          type: string
-        external_kind:
           type: string
         external_ref:
           type: string
-          description: The Gmail thread or draft the action touched.
         approval_kind:
           type: string
-          enum: [human, automatable_rule]
-        approved_by:
-          type: string
-        rule_id:
-          type: string
-          description: Set when a promoted rule approved this rather than a person.
         attempts:
           type: integer
         last_error:
@@ -1352,26 +1063,11 @@ components:
         verification:
           type: object
           additionalProperties: true
-          description: What Gmail said when the action was read back.
-        prepared_at:
-          type: string
-          format: date-time
-        executed_at:
-          type: string
-          format: date-time
-        verified_at:
-          type: string
-          format: date-time
-        completed_at:
-          type: string
-          format: date-time
-        failed_at:
-          type: string
-          format: date-time
         events:
           type: array
           items:
-            $ref: "#/components/schemas/ActionEventResponse"
+            type: object
+            additionalProperties: true
 
     ActionsResponse:
       type: object
@@ -1379,10 +1075,10 @@ components:
       properties:
         gmail_write_enabled:
           type: boolean
-          description: The global kill switch. False means no action can reach the mailbox.
         counts:
           type: object
-          additionalProperties: true
+          additionalProperties:
+            type: integer
         actions:
           type: array
           items:
@@ -1391,9 +1087,6 @@ components:
     RuleMatch:
       type: object
       additionalProperties: false
-      description: >-
-        Exact, deterministic conditions over retained metadata. Every condition
-        given must hold. At least one is required.
       properties:
         participants:
           type: array
@@ -1414,6 +1107,29 @@ components:
           type: integer
           minimum: 0
 
+    RuleState:
+      type: string
+      enum: [observed, proposed, confirmed, automatable, retired]
+
+    ProposeRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [capability_key, match, action, rationale]
+      properties:
+        capability_key:
+          type: string
+        match:
+          $ref: "#/components/schemas/RuleMatch"
+        action:
+          $ref: "#/components/schemas/ExternalAction"
+        rationale:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 1
+
     RuleTransitionRequest:
       type: object
       additionalProperties: false
@@ -1422,7 +1138,6 @@ components:
           type: string
         confirm:
           type: boolean
-          description: Required only for promotion.
 
     RuleResponse:
       type: object
@@ -1433,12 +1148,7 @@ components:
         capability_key:
           type: string
         state:
-          type: string
-          enum: [observed, proposed, confirmed, automatable, retired]
-          description: >-
-            observed came from a correction and does nothing. proposed is
-            written down but inactive. confirmed recommends. automatable may
-            approve without being asked. retired does neither, permanently.
+          $ref: "#/components/schemas/RuleState"
         match:
           $ref: "#/components/schemas/RuleMatch"
         action:
@@ -1449,38 +1159,14 @@ components:
           type: number
         observed_count:
           type: integer
-          description: How many times this exact correction has been seen.
-        source:
-          type: string
-        policy_version:
-          type: string
         active:
           type: boolean
-          description: Whether the rule currently recommends.
         may_execute_without_approval:
           type: boolean
         next_states:
           type: array
           items:
             type: string
-        proposed_by:
-          type: string
-        proposed_at:
-          type: string
-          format: date-time
-        confirmed_by:
-          type: string
-        confirmed_at:
-          type: string
-          format: date-time
-        automatable_at:
-          type: string
-          format: date-time
-        retired_at:
-          type: string
-          format: date-time
-        retired_reason:
-          type: string
 
     RulesResponse:
       type: object
@@ -1501,11 +1187,6 @@ components:
           type: string
         kind:
           type: string
-          enum:
-            - override
-            - dismissed_recommendation
-            - deferred_recommendation
-            - confirmed_recommendation
         recommended:
           type: string
         chosen:
@@ -1514,21 +1195,8 @@ components:
           type: string
         policy_version:
           type: string
-        rule_id:
-          type: string
-        model_version:
-          type: string
-        signals:
-          type: object
-          additionalProperties: true
-          description: >-
-            The retained metadata the decision turned on. Never message bodies
-            or attachments.
-        note:
-          type: string
         candidate_rule_id:
           type: string
-          description: The observation this correction contributed to, if any.
         item_id:
           type: string
         run_id:
@@ -1545,8 +1213,3 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LearningEventResponse"
-
-  securitySchemes:
-    ApiKeyAuth:
-      type: http
-      scheme: bearer

@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Sequence
 
 import pytest
 from alembic import command
@@ -34,7 +34,7 @@ class FakeGmailClient:
             raise self.error
         return self.labels.get(label_name)
 
-    async def list_thread_ids(self, label_id: str, limit: int) -> list[str]:
+    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
         return list(self.threads)[:limit]
 
     async def fetch_thread(self, thread_id: str) -> GmailThread:
@@ -197,6 +197,7 @@ def test_gmail_sync_records_evidence(
         "created": 2,
         "updated": 0,
         "unchanged": 0,
+        "removed": 0,
     }
 
 
@@ -226,6 +227,47 @@ def test_gmail_sync_reports_a_missing_intake_label(
     response = client.post("/admin/gmail/sync", headers=AUTH)
 
     assert response.status_code == 404
+
+
+def test_gmail_sync_prunes_only_when_asked(
+    client: TestClient, database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure_credentials(monkeypatch)
+    install_client(
+        monkeypatch,
+        FakeGmailClient(
+            labels={"financial/taxes": "Label_9"},
+            threads={"t1": thread("t1", "Q3 estimate"), "t2": thread("t2", "1099")},
+        ),
+    )
+    client.post("/admin/gmail/sync", headers=AUTH)
+
+    install_client(
+        monkeypatch,
+        FakeGmailClient(
+            labels={"financial/taxes": "Label_9"}, threads={"t1": thread("t1", "Q3 estimate")}
+        ),
+    )
+
+    assert client.post("/admin/gmail/sync", headers=AUTH).json()["removed"] == 0
+    assert client.post("/admin/gmail/sync?prune=true", headers=AUTH).json()["removed"] == 1
+
+
+def test_gmail_sync_refuses_to_prune_a_truncated_scan(
+    client: TestClient, database: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configure_credentials(monkeypatch)
+    install_client(
+        monkeypatch,
+        FakeGmailClient(
+            labels={"financial/taxes": "Label_9"},
+            threads={"t1": thread("t1", "Q3 estimate"), "t2": thread("t2", "1099")},
+        ),
+    )
+
+    response = client.post("/admin/gmail/sync?limit=1&prune=true", headers=AUTH)
+
+    assert response.status_code == 409
 
 
 def test_gmail_sync_rejects_an_out_of_range_limit(

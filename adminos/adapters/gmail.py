@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import getaddresses
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Sequence
 
 import httpx
 
@@ -15,6 +15,7 @@ from adminos.logging import get_logger
 GMAIL_API_BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+INBOX_LABEL_ID = "INBOX"
 SOURCE_SYSTEM = "gmail"
 REQUEST_TIMEOUT_SECONDS = 20.0
 TOKEN_EXPIRY_MARGIN_SECONDS = 60
@@ -138,14 +139,18 @@ class GmailClient:
                 return label_id
         return None
 
-    async def list_thread_ids(self, label_id: str, limit: int) -> list[str]:
-        """Return up to `limit` thread ids carrying the label, newest first."""
+    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
+        """Return up to `limit` thread ids carrying *every* label, newest first.
+
+        Gmail ANDs the ids, so passing INBOX alongside the intake label excludes
+        archived threads that still carry the label.
+        """
         thread_ids: list[str] = []
         page_token: str | None = None
 
         while len(thread_ids) < limit:
             params: dict[str, Any] = {
-                "labelIds": label_id,
+                "labelIds": list(label_ids),
                 "maxResults": min(limit - len(thread_ids), 100),
             }
             if page_token:

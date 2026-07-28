@@ -120,6 +120,22 @@ Add to Railway (**Variables** on the `timmeny-admin-os` service):
 
 Treat the refresh token as a mailbox credential: it grants read, label, and archive on the account until you revoke it at https://myaccount.google.com/permissions.
 
+### 3f. Confirm it works
+
+```bash
+curl -s https://timmeny-admin-os-production.up.railway.app/admin/gmail/status \
+  -H "X-API-Key: $TIMMENY_OS_API_KEY"
+```
+
+`configured` and `intake_label_found` should both be `true`. Then record the labelled threads as evidence:
+
+```bash
+curl -s -X POST "https://timmeny-admin-os-production.up.railway.app/admin/gmail/sync?limit=25" \
+  -H "X-API-Key: $TIMMENY_OS_API_KEY"
+```
+
+The sync only reads. It creates no Monday task, changes no Gmail label, and archives nothing.
+
 ---
 
 ## Verification checklist
@@ -132,3 +148,5 @@ Treat the refresh token as a mailbox credential: it grants read, label, and arch
 - [ ] Only `gmail.modify` is granted — check https://myaccount.google.com/permissions
 - [ ] `financial/taxes` label exists and contains the threads intended as evidence
 - [ ] `GMAIL_WRITE_ENABLED` is `false`
+- [ ] `GET /admin/gmail/status` reports `configured: true` and `intake_label_found: true`
+- [ ] `POST /admin/gmail/sync` returns a non-zero `scanned` count

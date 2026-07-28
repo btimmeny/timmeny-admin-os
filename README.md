@@ -47,6 +47,40 @@ Reports whether the operational database is reachable and migrated. Requires `TI
 
 `status` is `not_configured` when `DATABASE_URL` is unset, `ok` when the schema is present, and `error` when the database is unreachable or unmigrated.
 
+### `GET /admin/gmail/status`
+
+Reports whether Gmail is configured and whether the intake label resolves. Requires `TIMMENY_OS_API_KEY`.
+
+```json
+{
+  "configured": true,
+  "intake_label": "financial/taxes",
+  "intake_label_found": true,
+  "write_enabled": false,
+  "detail": null
+}
+```
+
+### `POST /admin/gmail/sync`
+
+Records every thread carrying the intake label as evidence. Requires `TIMMENY_OS_API_KEY`, `DATABASE_URL`, and the Gmail credentials.
+
+Read-only with respect to both Gmail and Monday.com: no labels change, no mail is archived, and no task is created. Classification and task creation are separate steps.
+
+`limit` (query, 1–200, default 50) bounds how many threads are scanned.
+
+```json
+{
+  "label": "financial/taxes",
+  "scanned": 12,
+  "created": 3,
+  "updated": 1,
+  "unchanged": 8
+}
+```
+
+Evidence is keyed by thread, so re-running the sync updates existing rows rather than duplicating them.
+
 ### `POST /todos`
 
 Creates a todo item on a Monday.com board.
@@ -252,6 +286,9 @@ Set these environment variables:
 - `GS_TODO_GROUP_ID`: optional Monday.com group id for GS todos.
 - `GS_KEY_INITIATIVES_GROUP_ID`: optional Monday.com group id for `Key Initiatives`. If omitted, the service matches a group named `Key Initiatives`.
 - `DATABASE_URL`: optional PostgreSQL connection string for Admin OS operational state. Leave it unset to run the service exactly as before, without persistence.
+- `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`: optional Gmail OAuth credentials. All three must be present; a partially configured environment counts as unconfigured. See `docs/77-First-Slice-Setup.md`.
+- `GMAIL_INTAKE_LABEL`: Gmail label that defines the evidence set. Defaults to `financial/taxes`.
+- `GMAIL_WRITE_ENABLED`: whether Gmail writes are permitted. Defaults to `false`.
 - `LOG_LEVEL`: optional log level for `adminos` loggers. Defaults to `INFO`.
 
 The organize workflow also expects these Monday.com columns on each board:
@@ -396,6 +433,8 @@ The URL can be renamed later in Railway after the service/domain rename is compl
 
 - `main.py` contains the FastAPI app.
 - `adminos/` contains the coordination layer: configuration, persistence, and coordination endpoints.
+- `adminos/adapters/` contains clients for external systems.
+- `adminos/domain/` contains domain logic, including evidence recording.
 - `adminos/db/migrations/` contains the Alembic migration history.
 - `scripts/migrate.sh` applies migrations, and is Railway's pre-deploy command.
 - `requirements.txt` defines the Python dependencies.

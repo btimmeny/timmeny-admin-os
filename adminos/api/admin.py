@@ -15,11 +15,12 @@ from adminos.adapters.monday import (
     open_monday_client,
     open_monday_writer,
 )
+from adminos.api.deps import read_capability_config
 from adminos.api.security import require_api_key
+from adminos.capabilities.config import CapabilityConfig
 from adminos.config import (
     get_database_url,
     get_gmail_credentials,
-    get_gmail_intake_label,
     get_monday_token,
     get_todo_board_id,
     get_todo_group_id,
@@ -39,7 +40,6 @@ from adminos.domain.duplicates import (
 from adminos.domain.evidence import (
     DEFAULT_SYNC_LIMIT,
     MAX_SYNC_LIMIT,
-    IntakeLabelMissing,
     PruneScanTruncated,
     sync_gmail_evidence,
 )
@@ -109,35 +109,81 @@ def read_database_status(_: None = Depends(require_api_key)) -> DatabaseStatusRe
     return DatabaseStatusResponse(status=DatabaseStatus.OK, revision=revision)
 
 
+class CapabilityLabelResponse(BaseModel):
+    capability_key: str
+    label: str
+    found: bool | None = None
+
+
 class GmailStatusResponse(BaseModel):
     configured: bool
-    intake_label: str
-    intake_label_found: bool | None = None
     write_enabled: bool
+    labels: list[CapabilityLabelResponse]
     detail: str | None = None
 
 
 class GmailSyncResponse(BaseModel):
-    label: str
+    labels: list[str]
     scanned: int
     created: int
     updated: int
     unchanged: int
     removed: int
+    warnings: list[str]
+
+
+class CapabilityResponse(BaseModel):
+    key: str
+    name: str
+    enabled: bool
+    position: int
+    description: str | None
+    labels: list[str]
+    playbook: str
+    playbook_steps: list[str]
+    policy_version: str
+    categories: list[str]
+    allowed_actions: list[str]
+    auto_approve: list[str]
+    objectives: list[str]
+
+
+class CapabilitiesResponse(BaseModel):
+    version: str
+    digest: str
+    channel: str
+    capabilities: list[CapabilityResponse]
+
+
+@router.get("/capabilities", response_model=CapabilitiesResponse)
+def read_capabilities(_: None = Depends(require_api_key)) -> CapabilitiesResponse:
+    """Report the configuration the review engine is running on."""
+    loaded = read_capability_config()
+    return CapabilitiesResponse(
+        version=loaded.version,
+        digest=loaded.digest,
+        channel=loaded.channel,
+        capabilities=[describe_capability(capability) for capability in loaded.capabilities],
+    )
 
 
 @router.get("/gmail/status", response_model=GmailStatusResponse)
 async def read_gmail_status(_: None = Depends(require_api_key)) -> GmailStatusResponse:
-    """Report whether Gmail is configured and the intake label resolves."""
-    intake_label = get_gmail_intake_label()
+    """Report whether Gmail is configured and each capability's label resolves."""
     write_enabled = is_gmail_write_enabled()
+    loaded = read_capability_config()
+    labels = [
+        CapabilityLabelResponse(capability_key=capability.key, label=label)
+        for capability in loaded.enabled()
+        for label in capability.gmail.labels
+    ]
 
     credentials = get_gmail_credentials()
     if credentials is None:
         return GmailStatusResponse(
             configured=False,
-            intake_label=intake_label,
             write_enabled=write_enabled,
+            labels=labels,
             detail=(
                 "Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN "
                 "to enable Gmail intake."
@@ -146,23 +192,54 @@ async def read_gmail_status(_: None = Depends(require_api_key)) -> GmailStatusRe
 
     try:
         async with open_gmail_client(credentials) as client:
-            label_id = await client.resolve_label_id(intake_label)
+            resolved = [
+                CapabilityLabelResponse(
+                    capability_key=entry.capability_key,
+                    label=entry.label,
+                    found=await client.resolve_label_id(entry.label) is not None,
+                )
+                for entry in labels
+            ]
     except GmailError as exc:
         logger.error("gmail status check failed: %s", type(exc).__name__)
         return GmailStatusResponse(
             configured=True,
-            intake_label=intake_label,
             write_enabled=write_enabled,
+            labels=labels,
             detail=str(exc),
         )
 
+    missing = [entry.label for entry in resolved if not entry.found]
     return GmailStatusResponse(
         configured=True,
-        intake_label=intake_label,
-        intake_label_found=label_id is not None,
         write_enabled=write_enabled,
-        detail=None if label_id else f"Gmail has no label named {intake_label!r}.",
+        labels=resolved,
+        detail=f"Gmail has no label named {', '.join(missing)}." if missing else None,
     )
+
+
+@router.get("/gmail/labels", response_model=list[str])
+async def read_gmail_labels(_: None = Depends(require_api_key)) -> list[str]:
+    """List the mailbox's label names, so configuration can name them exactly."""
+    credentials = get_gmail_credentials()
+    if credentials is None:
+        raise HTTPException(status_code=503, detail="Gmail credentials are not configured.")
+
+    try:
+        async with open_gmail_client(credentials) as client:
+            payload = await client.request("/labels")
+    except GmailAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except GmailError as exc:
+        logger.error("gmail label read failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    names = [
+        label["name"]
+        for label in payload.get("labels") or []
+        if isinstance(label, dict) and isinstance(label.get("name"), str)
+    ]
+    return sorted(names)
 
 
 @router.post("/gmail/sync", response_model=GmailSyncResponse)
@@ -171,7 +248,7 @@ async def sync_gmail(
     limit: int = Query(default=DEFAULT_SYNC_LIMIT, ge=1, le=MAX_SYNC_LIMIT),
     prune: bool = Query(default=False),
 ) -> GmailSyncResponse:
-    """Record inbox threads carrying the intake label as evidence.
+    """Record inbox threads carrying each capability's labels as evidence.
 
     Reads only, as far as Gmail and Monday are concerned: no label changes, no
     task, no classification. `prune` deletes local evidence for threads that
@@ -181,20 +258,20 @@ async def sync_gmail(
     if credentials is None:
         raise HTTPException(status_code=503, detail="Gmail credentials are not configured.")
 
+    capabilities = read_capability_config().enabled()
+
     try:
         async with open_gmail_client(credentials) as client:
             with session_scope() as session:
                 result = await sync_gmail_evidence(
                     client,
                     session,
-                    get_gmail_intake_label(),
+                    capabilities,
                     limit=limit,
                     prune=prune,
                 )
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except IntakeLabelMissing as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PruneScanTruncated as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except GmailAuthError as exc:
@@ -204,12 +281,13 @@ async def sync_gmail(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return GmailSyncResponse(
-        label=result.label,
+        labels=result.labels,
         scanned=result.scanned,
         created=result.created,
         updated=result.updated,
         unchanged=result.unchanged,
         removed=result.removed,
+        warnings=result.warnings,
     )
 
 
@@ -554,6 +632,24 @@ async def list_todo_items(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return board_id, items
+
+
+def describe_capability(capability: CapabilityConfig) -> CapabilityResponse:
+    return CapabilityResponse(
+        key=capability.key,
+        name=capability.name,
+        enabled=capability.enabled,
+        position=capability.position,
+        description=capability.description,
+        labels=list(capability.gmail.labels),
+        playbook=capability.playbook.id,
+        playbook_steps=[step.value for step in capability.playbook.steps],
+        policy_version=capability.recommendation_policy.version,
+        categories=list(capability.recommendation_policy.categories),
+        allowed_actions=[action.value for action in capability.allowed_actions],
+        auto_approve=[action.value for action in capability.approval.auto_approve],
+        objectives=list(capability.objectives.default_keys),
+    )
 
 
 def read_current_revision() -> str | None:

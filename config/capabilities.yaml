@@ -1,0 +1,173 @@
+# Capability configuration for the daily email review.
+#
+# This file is the only place a Gmail label, a permitted action, or an approval
+# rule is named. Code reads capabilities generically: adding a capability, or
+# changing what one may do, is an edit here, not a branch in a function.
+#
+# Bump `version` whenever a capability's behaviour changes. Every review run
+# records the version and a digest of this file, so a past run can be explained
+# by the configuration that produced it.
+
+version: "2026-07-28.2"
+channel: email
+
+capabilities:
+  - key: career_advisor_calls
+    name: Career - Advisor/Expert Calls
+    enabled: true
+    position: 10
+    description: >-
+      Requests for advisory or expert calls. Time-boxed, reputational, and
+      usually answered rather than filed.
+    gmail:
+      labels:
+        - Career - Advisor/Expert Calls
+      require_inbox: true
+    playbook:
+      id: respond_or_schedule
+      steps:
+        - collect_evidence
+        - recommend
+        - await_decision
+        - prepare_actions
+        - execute_approved
+        - verify
+    recommendation_policy:
+      version: career.v1
+      default: needs_review
+      categories:
+        - call_request
+        - scheduling
+        - follow_up
+        - newsletter
+        - other
+      allow_ai_recommendation: true
+      min_ai_confidence: 0.8
+      rules: []
+    allowed_actions:
+      - gmail.label
+      - gmail.archive
+      - gmail.draft_reply
+      - gmail.send_draft
+      - monday.create_task
+    approval:
+      auto_approve: []
+      min_confidence_for_auto: 1.0
+      allow_bulk_decisions: true
+    completion:
+      require_all_items_decided: true
+      require_executed_actions: true
+    learning:
+      scope: capability
+      record_decisions: true
+      record_message_content: false
+    objectives:
+      default_keys:
+        - career_network
+      require_alignment: false
+
+  - key: financial_taxes
+    name: financial/taxes
+    enabled: true
+    position: 20
+    description: >-
+      Tax and financial correspondence. Obligations here have deadlines and
+      counterparties, so nothing is acted on without confirmation.
+    gmail:
+      labels:
+        - financial/taxes
+      require_inbox: true
+    playbook:
+      id: evidence_to_obligation
+      steps:
+        - collect_evidence
+        - recommend
+        - await_decision
+        - prepare_actions
+        - execute_approved
+        - verify
+    recommendation_policy:
+      version: taxes.v1
+      default: needs_review
+      categories:
+        - filing_obligation
+        - payment
+        - advisor_update
+        - statement
+        - other
+      allow_ai_recommendation: true
+      min_ai_confidence: 0.9
+      rules: []
+    allowed_actions:
+      - gmail.label
+      - gmail.archive
+      - gmail.draft_reply
+      - monday.create_task
+    approval:
+      auto_approve: []
+      min_confidence_for_auto: 1.0
+      allow_bulk_decisions: true
+    completion:
+      require_all_items_decided: true
+      require_executed_actions: true
+    learning:
+      scope: capability
+      record_decisions: true
+      record_message_content: false
+    objectives:
+      default_keys:
+        - financial_compliance
+      require_alignment: false
+
+  - key: admin
+    name: Admin
+    enabled: true
+    position: 30
+    description: >-
+      Administrative mail: confirmations, receipts, and notices. Mostly
+      disposable, which is why archiving is permitted here and trashing is not.
+    gmail:
+      labels:
+        - Admin
+      require_inbox: true
+    playbook:
+      id: triage_and_clear
+      steps:
+        - collect_evidence
+        - recommend
+        - await_decision
+        - prepare_actions
+        - execute_approved
+        - verify
+    recommendation_policy:
+      version: admin.v1
+      default: needs_review
+      categories:
+        - receipt
+        - confirmation
+        - notice
+        - newsletter
+        - other
+      allow_ai_recommendation: true
+      min_ai_confidence: 0.8
+      rules: []
+    allowed_actions:
+      - gmail.label
+      - gmail.archive
+      - gmail.draft_reply
+      - monday.create_task
+    approval:
+      auto_approve: []
+      min_confidence_for_auto: 1.0
+      allow_bulk_decisions: true
+    completion:
+      require_all_items_decided: true
+      require_executed_actions: true
+    learning:
+      scope: capability
+      record_decisions: true
+      record_message_content: false
+    objectives:
+      default_keys:
+        - operational_hygiene
+      require_alignment: false

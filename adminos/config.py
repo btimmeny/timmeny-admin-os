@@ -10,9 +10,8 @@ TODO_GROUP_ID_VARIABLE = "TODO_GROUP_ID"
 GMAIL_CLIENT_ID_VARIABLE = "GMAIL_CLIENT_ID"
 GMAIL_CLIENT_SECRET_VARIABLE = "GMAIL_CLIENT_SECRET"
 GMAIL_REFRESH_TOKEN_VARIABLE = "GMAIL_REFRESH_TOKEN"
-GMAIL_INTAKE_LABEL_VARIABLE = "GMAIL_INTAKE_LABEL"
 GMAIL_WRITE_ENABLED_VARIABLE = "GMAIL_WRITE_ENABLED"
-DEFAULT_GMAIL_INTAKE_LABEL = "financial/taxes"
+CAPABILITIES_PATH_VARIABLE = "CAPABILITIES_PATH"
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -66,8 +65,9 @@ def get_gmail_credentials() -> GmailCredentials | None:
     )
 
 
-def get_gmail_intake_label() -> str:
-    return get_optional_setting(GMAIL_INTAKE_LABEL_VARIABLE) or DEFAULT_GMAIL_INTAKE_LABEL
+def get_capabilities_path() -> str | None:
+    """An override for the capability configuration file, mainly for tests."""
+    return get_optional_setting(CAPABILITIES_PATH_VARIABLE)
 
 
 def is_gmail_write_enabled() -> bool:

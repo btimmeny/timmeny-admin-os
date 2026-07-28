@@ -115,7 +115,6 @@ Add to Railway (**Variables** on the `timmeny-admin-os` service):
 | `GMAIL_CLIENT_ID` | from 3c |
 | `GMAIL_CLIENT_SECRET` | from 3c |
 | `GMAIL_REFRESH_TOKEN` | from 3d |
-| `GMAIL_INTAKE_LABEL` | `financial/taxes` |
 | `GMAIL_WRITE_ENABLED` | `false` |
 
 `GMAIL_WRITE_ENABLED` stays `false` until the read-and-classify loop has been observed working on real threads. Nothing in the mailbox is modified while it is false.

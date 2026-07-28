@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import main
 from adminos.adapters.gmail import GmailAuthError, GmailThread
+from adminos.capabilities.config import clear_cache
 from adminos.api import admin as admin_module
 from adminos.db import engine as engine_module
 
@@ -58,7 +59,8 @@ def configure_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("TIMMENY_OS_API_KEY", API_KEY)
-    monkeypatch.setenv("GMAIL_INTAKE_LABEL", "financial/taxes")
+    monkeypatch.setenv("CAPABILITIES_PATH", str(REPOSITORY_ROOT / "tests/data/capabilities_single.yaml"))
+    clear_cache()
     for name in ("DATABASE_URL", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("GMAIL_WRITE_ENABLED", raising=False)
@@ -104,7 +106,9 @@ def test_gmail_status_reports_unconfigured_credentials(client: TestClient) -> No
     body = response.json()
     assert response.status_code == 200
     assert body["configured"] is False
-    assert body["intake_label"] == "financial/taxes"
+    assert body["labels"] == [
+        {"capability_key": "financial_taxes", "label": "financial/taxes", "found": None}
+    ]
     assert body["write_enabled"] is False
 
 
@@ -117,7 +121,7 @@ def test_gmail_status_reports_a_resolved_label(
     body = client.get("/admin/gmail/status", headers=AUTH).json()
 
     assert body["configured"] is True
-    assert body["intake_label_found"] is True
+    assert body["labels"][0]["found"] is True
     assert body["detail"] is None
 
 
@@ -129,7 +133,7 @@ def test_gmail_status_reports_a_missing_label(
 
     body = client.get("/admin/gmail/status", headers=AUTH).json()
 
-    assert body["intake_label_found"] is False
+    assert body["labels"][0]["found"] is False
     assert "financial/taxes" in body["detail"]
 
 
@@ -142,7 +146,7 @@ def test_gmail_status_surfaces_an_auth_failure(
     body = client.get("/admin/gmail/status", headers=AUTH).json()
 
     assert body["configured"] is True
-    assert body["intake_label_found"] is None
+    assert body["labels"][0]["found"] is None
     assert body["detail"] == "token rejected"
 
 
@@ -192,12 +196,13 @@ def test_gmail_sync_records_evidence(
 
     assert response.status_code == 200
     assert response.json() == {
-        "label": "financial/taxes",
+        "labels": ["financial/taxes"],
         "scanned": 2,
         "created": 2,
         "updated": 0,
         "unchanged": 0,
         "removed": 0,
+        "warnings": [],
     }
 
 
@@ -218,15 +223,17 @@ def test_repeated_sync_creates_nothing_new(
     assert (body["created"], body["unchanged"]) == (0, 1)
 
 
-def test_gmail_sync_reports_a_missing_intake_label(
+def test_gmail_sync_warns_about_a_missing_intake_label(
     client: TestClient, database: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A label that does not exist is reported, not fatal: other capabilities still sync."""
     configure_credentials(monkeypatch)
     install_client(monkeypatch, FakeGmailClient(labels={}))
 
     response = client.post("/admin/gmail/sync", headers=AUTH)
 
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert "financial/taxes" in response.json()["warnings"][0]
 
 
 def test_gmail_sync_prunes_only_when_asked(

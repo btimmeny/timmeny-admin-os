@@ -1,0 +1,28 @@
+version: test.single
+channel: email
+
+capabilities:
+  - key: financial_taxes
+    name: financial/taxes
+    position: 10
+    gmail:
+      labels:
+        - financial/taxes
+    playbook:
+      id: evidence_to_obligation
+      steps:
+        - collect_evidence
+        - recommend
+        - await_decision
+        - prepare_actions
+        - execute_approved
+        - verify
+    recommendation_policy:
+      version: taxes.test
+      categories:
+        - obligation
+        - reference
+    allowed_actions:
+      - gmail.label
+      - gmail.archive
+      - monday.create_task

@@ -9,6 +9,7 @@ from fastapi import Body, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from adminos.api.admin import router as admin_router
+from adminos.api.review import router as review_router
 from adminos.api.security import extract_bearer_token
 
 
@@ -28,8 +29,9 @@ MONDAY_ITEMS_PAGE_SIZE = 500
 KEY_INITIATIVES_GROUP_TITLE = "Key Initiatives"
 GS_KEY_INITIATIVES_GROUP_ID_VARIABLE = "GS_KEY_INITIATIVES_GROUP_ID"
 
-app = FastAPI(title="timmeny-admin-os", version="0.4.1")
+app = FastAPI(title="timmeny-admin-os", version="0.5.0")
 app.include_router(admin_router)
+app.include_router(review_router)
 
 
 class TodoList(StrEnum):

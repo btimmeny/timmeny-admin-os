@@ -1,9 +1,9 @@
 import pytest
 
 from adminos.config import (
+    get_capabilities_path,
     get_database_url,
     get_gmail_credentials,
-    get_gmail_intake_label,
     is_gmail_write_enabled,
     normalize_database_url,
     redact_database_url,
@@ -15,7 +15,7 @@ GMAIL_VARIABLES = ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKE
 
 @pytest.fixture
 def no_gmail_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in (*GMAIL_VARIABLES, "GMAIL_INTAKE_LABEL", "GMAIL_WRITE_ENABLED"):
+    for name in (*GMAIL_VARIABLES, "CAPABILITIES_PATH", "GMAIL_WRITE_ENABLED"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -97,18 +97,16 @@ def test_gmail_credentials_are_read_together(
     assert credentials.refresh_token == "gmail_refresh_token-value"
 
 
-def test_intake_label_defaults_to_the_configured_slice_label(
-    no_gmail_environment: None,
-) -> None:
-    assert get_gmail_intake_label() == "financial/taxes"
+def test_capabilities_path_is_unset_by_default(no_gmail_environment: None) -> None:
+    assert get_capabilities_path() is None
 
 
-def test_intake_label_can_be_overridden(
+def test_capabilities_path_can_be_overridden(
     no_gmail_environment: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("GMAIL_INTAKE_LABEL", "Receipts/2026")
+    monkeypatch.setenv("CAPABILITIES_PATH", "/etc/admin-os/capabilities.yaml")
 
-    assert get_gmail_intake_label() == "Receipts/2026"
+    assert get_capabilities_path() == "/etc/admin-os/capabilities.yaml"
 
 
 @pytest.mark.parametrize(

@@ -64,7 +64,7 @@ Reports whether Gmail is configured and whether each enabled capability's labels
   "configured": true,
   "write_enabled": false,
   "labels": [
-    {"capability_key": "financial_taxes", "label": "financial/taxes", "found": true}
+    {"capability_key": "financial_taxes", "label": "Financial/Taxes", "found": true}
   ],
   "detail": null
 }
@@ -85,7 +85,7 @@ Intake is the intersection of `INBOX` and the label, not the label alone. Archiv
 
 ```json
 {
-  "labels": ["financial/taxes", "Admin"],
+  "labels": ["Financial/Taxes", "Admin"],
   "scanned": 12,
   "created": 3,
   "updated": 1,
@@ -520,10 +520,10 @@ Capabilities are data, in `config/capabilities.yaml` — not branches in code. A
 
 ```yaml
 - key: financial_taxes
-  name: financial/taxes
+  name: Financial/Taxes
   position: 20
   gmail:
-    labels: [financial/taxes]
+    labels: [Financial/Taxes]
     require_inbox: true
   playbook:
     id: evidence_to_obligation
@@ -557,7 +557,9 @@ The shipped configuration carries **no rules yet** and no auto-approvals, so eve
 
 Every run records both the configuration version and a digest of the file, so a decision made months ago can be explained against the exact configuration that produced it.
 
-Three capabilities ship, named after the labels in [79 — Daily Assistant Review](docs/79-Daily-Assistant-Review.md): `Career - Advisor/Expert Calls`, `financial/taxes`, and `Admin`. Only `financial/taxes` has been resolved against the live mailbox; check the other two with `GET /admin/gmail/labels` before trusting the review. A label that does not resolve is reported as a warning rather than a failure, so a wrong name shows up as an empty group.
+Three capabilities ship, named exactly as the mailbox names them: `Career - Advisory/Expert Calls`, `Financial/Taxes`, and `Admin`. All three were resolved against the live mailbox with `GET /admin/gmail/labels`, which is the way to check after any label is renamed. Matching is case-insensitive, and a label that does not resolve is reported as a warning rather than a failure, so a wrong name shows up as an empty group.
+
+Gmail nesting is not hierarchy: `Admin/- Meetings` and `Admin/spam & junk` are separate labels, and a thread in one of them does not carry `Admin`. Sub-labels are included only by naming them.
 
 ## Configuration
 

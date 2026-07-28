@@ -8,7 +8,7 @@
 
 ## Objective
 
-Each morning, identify advisor and expert-call messages, apply or preserve the Gmail label `Career - Advisor/Expert Calls`, and present the resulting threads as one review group rather than as unrelated inbox items.
+Each morning, identify advisor and expert-call messages, apply or preserve the Gmail label `Career - Advisory/Expert Calls`, and present the resulting threads as one review group rather than as unrelated inbox items.
 
 The first release is intentionally review-oriented. It may label messages deterministically, but it must not send replies, accept engagements, decline opportunities, archive threads, or create Monday tasks without an approved workflow action.
 
@@ -17,7 +17,7 @@ The first release is intentionally review-oriented. It may label messages determ
 ```text
 Gmail inbox refresh
   -> deterministic candidate detection
-  -> apply or preserve Career - Advisor/Expert Calls label
+  -> apply or preserve Career - Advisory/Expert Calls label
   -> synchronize labeled threads as evidence
   -> group related threads for morning review
   -> score classification and recommendation confidence
@@ -49,7 +49,7 @@ A deterministic label match records:
 
 ## Grouped Morning Review
 
-The Executive Review should expose one group named `Career - Advisor/Expert Calls` with:
+The Executive Review should expose one group named `Career - Advisory/Expert Calls` with:
 
 - total new and unresolved threads;
 - proposed bulk disposition counts;

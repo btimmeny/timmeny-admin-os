@@ -68,8 +68,8 @@ The GPT should converse over one assembled Admin OS review contract. It should n
 
 Build a shared capability framework and instantiate it narrowly for:
 
-1. `Career - Advisor/Expert Calls`;
-2. `financial/taxes`;
+1. `Career - Advisory/Expert Calls`;
+2. `Financial/Taxes`;
 3. a configurable administrative-mail label pending confirmation of its exact Gmail name.
 
 Each capability has independent:
@@ -91,7 +91,7 @@ Implement [78 — Advisor and Expert Calls Capability](./78-Advisor-Expert-Calls
 ```text
 Gmail refresh
   -> deterministic advisor/expert-call detection
-  -> apply or preserve Career - Advisor/Expert Calls
+  -> apply or preserve Career - Advisory/Expert Calls
   -> synchronize labeled inbox threads as evidence
   -> grouped review with confidence and exceptions
   -> Brian confirms or corrects recommendations

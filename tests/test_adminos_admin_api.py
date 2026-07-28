@@ -11,6 +11,7 @@ from adminos.db import engine as engine_module
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 API_KEY = "test-api-key"
+HEAD_REVISION = "0002_classification_identity"
 
 
 @pytest.fixture
@@ -76,7 +77,9 @@ def test_db_status_reports_the_applied_revision(
     response = client.get("/admin/db-status", headers={"X-API-Key": API_KEY})
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "revision": "0001_baseline", "detail": None}
+    body = response.json()
+    assert (body["status"], body["detail"]) == ("ok", None)
+    assert body["revision"] == HEAD_REVISION
 
 
 def test_db_status_reports_an_unmigrated_database(

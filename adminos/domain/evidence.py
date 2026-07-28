@@ -10,7 +10,7 @@ from adminos.adapters.gmail import (
     GmailClient,
     GmailThread,
 )
-from adminos.db.models import Evidence
+from adminos.db.models import Classification, Evidence
 from adminos.logging import get_logger
 
 
@@ -43,14 +43,23 @@ def prune_gmail_evidence(session: Session, live_thread_ids: Sequence[str]) -> in
 
     Only safe when `live_thread_ids` is the complete in-scope set: anything
     absent from it is treated as retired and removed.
+
+    Classifications of the retired evidence go with it. A classification is a
+    statement *about* a thread and means nothing once the thread is gone, and
+    leaving the rows behind would make the foreign key reject the delete.
     """
     condition = Evidence.source_system == SOURCE_SYSTEM
-    statement = delete(Evidence).where(
+    retired = select(Evidence.id).where(
         condition
         if not live_thread_ids
         else and_(condition, Evidence.source_thread_id.not_in(live_thread_ids))
     )
-    return session.execute(statement).rowcount or 0
+
+    session.execute(
+        delete(Classification).where(Classification.evidence_id.in_(retired.scalar_subquery()))
+    )
+    removed = session.execute(delete(Evidence).where(Evidence.id.in_(retired.scalar_subquery())))
+    return removed.rowcount or 0
 
 
 def record_gmail_thread(session: Session, thread: GmailThread) -> str:

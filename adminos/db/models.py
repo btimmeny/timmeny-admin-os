@@ -98,6 +98,11 @@ class Classification(Base):
     """An inference about evidence. Reviewable, never stored as confirmed fact."""
 
     __tablename__ = "classifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "evidence_id", "classifier_version", name="uq_classification_evidence_version"
+        ),
+    )
 
     id: Mapped[str] = id_column()
     evidence_id: Mapped[str] = mapped_column(

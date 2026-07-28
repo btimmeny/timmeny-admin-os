@@ -1,6 +1,32 @@
 version: test.pair
 channel: email
 
+screens:
+  - id: test-review-v1
+    title: Test review
+    columns:
+      - label: "#"
+        source: index
+      - label: What it is
+        source: what_it_is
+      - label: Recommended Action
+        source: recommended_action
+      - label: Confidence
+        source: confidence
+      - label: Decision
+        source: decision
+    footer: "{pending} of {total} still need you."
+    actions:
+      - id: approve
+        label: Do what is recommended
+        decision: approve
+      - id: dismiss
+        label: Leave it alone
+        decision: dismiss
+      - id: defer
+        label: Not today
+        decision: defer
+
 capabilities:
   - key: financial_taxes
     name: financial/taxes
@@ -8,6 +34,8 @@ capabilities:
     gmail:
       labels:
         - financial/taxes
+    presentation:
+      screen: test-review-v1
     playbook:
       id: evidence_to_obligation
       steps:
@@ -46,6 +74,8 @@ capabilities:
     gmail:
       labels:
         - Admin
+    presentation:
+      screen: test-review-v1
     playbook:
       id: triage_and_clear
       steps:

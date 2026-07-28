@@ -19,12 +19,22 @@ SHIPPED_CONFIG = REPOSITORY_ROOT / "config" / "capabilities.yaml"
 
 MINIMAL = """
 version: test.1
+screens:
+  - id: test-review-v1
+    title: Test review
+    columns:
+      - {label: "#", source: index}
+      - {label: What it is, source: what_it_is}
+    actions:
+      - {id: approve, label: Do what is recommended, decision: approve}
 capabilities:
   - key: financial_taxes
     name: financial/taxes
     position: 10
     gmail:
       labels: [financial/taxes]
+    presentation:
+      screen: test-review-v1
     playbook:
       id: evidence_to_obligation
       steps: [collect_evidence, recommend, await_decision]
@@ -118,6 +128,8 @@ def test_capabilities_are_ordered_by_position_not_file_order() -> None:
     position: 5
     gmail:
       labels: [Admin]
+    presentation:
+      screen: test-review-v1
     playbook:
       id: triage
       steps: [collect_evidence]

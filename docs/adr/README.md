@@ -26,12 +26,14 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0008 — Label-Scoped Daily Action Loop](./ADR-0008-label-scoped-daily-action-loop.md)
 - [ADR-0009 — Capability Configuration and the Persisted Review State Machine](./ADR-0009-review-engine-implementation.md)
 - [ADR-0010 — The Action Lifecycle and How a Correction Becomes a Rule](./ADR-0010-action-lifecycle-and-learning.md)
+- [ADR-0011 — Presentation Is a Versioned Contract Owned by Admin OS](./ADR-0011-presentation-contracts.md)
 
 ## Candidate Decisions
 
 Create an ADR only when the decision materially constrains architecture or implementation. Current candidates include:
 
 - sync scheduling and trigger model;
+- presentation contracts for the action lifecycle and rule-learning views;
 - Monday task execution inside the review's action lifecycle;
 - automatic retry policy for failed actions;
 - model-provider and prompt-version governance.

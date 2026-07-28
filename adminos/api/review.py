@@ -14,6 +14,7 @@ from adminos.capabilities.config import (
     ActionKind,
     CapabilityConfig,
     LoadedCapabilities,
+    UnknownCapability,
 )
 from adminos.config import get_gmail_credentials
 from adminos.db.engine import DatabaseNotConfigured, session_scope
@@ -24,6 +25,7 @@ from adminos.domain.evidence import (
     PruneScanTruncated,
     sync_gmail_evidence,
 )
+from adminos.domain.presentation import ScreenView, render_group
 from adminos.domain.review import (
     Assessment,
     DecisionKind,
@@ -71,15 +73,60 @@ class ItemResponse(BaseModel):
     requires_confirmation: bool
 
 
+class ColumnResponse(BaseModel):
+    key: str
+    label: str
+    align: str
+    format: str
+
+
+class ScreenActionResponse(BaseModel):
+    id: str
+    label: str
+    decision: str
+    action: str | None
+    scope: str
+    method: str
+    path: str
+    body: dict[str, str]
+
+
+class RowResponse(BaseModel):
+    item_id: str
+    thread_id: str
+    cells: list[str]
+    actions: list[str]
+
+
+class ScreenResponse(BaseModel):
+    """The presentation contract, and the rows it describes.
+
+    `cells` are finished strings in `columns` order: a renderer prints them and
+    nothing else. Every layout decision — wording, ordering, formatting,
+    truncation, which decisions may be offered — was made here.
+    """
+
+    screen_id: str
+    kind: str
+    title: str
+    columns: list[ColumnResponse]
+    actions: list[ScreenActionResponse]
+    rows: list[RowResponse]
+    footer: str
+    empty_text: str
+
+
 class GroupResponse(BaseModel):
     capability_key: str
     capability_name: str
     position: int
     state: str
     policy_version: str
+    screen_id: str
     allowed_actions: list[str]
     allow_bulk_decisions: bool
     counts: dict[str, int]
+    screen: ScreenResponse
     items: list[ItemResponse]
 
 
@@ -98,6 +145,7 @@ class RunResponse(BaseModel):
     state: str
     config_version: str
     config_digest: str
+    screen_id: str | None
     groups: list[GroupSummaryResponse]
     current_group: GroupResponse | None
     warnings: list[str]
@@ -156,7 +204,7 @@ async def start_review(
     try:
         with session_scope() as session:
             view = start_or_resume_review(session, loaded, review_date=request.review_date)
-            return build_run_response(view, warnings)
+            return build_run_response(view, warnings, loaded)
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -166,7 +214,7 @@ def read_review_run(run_id: str, _: None = Depends(require_api_key)) -> RunRespo
     """Report where a review stands, without changing anything."""
     loaded = read_capability_config()
     with open_review(run_id) as (session, run):
-        return build_run_response(refresh_states(session, loaded, run), [])
+        return build_run_response(refresh_states(session, loaded, run), [], loaded)
 
 
 @router.get("/runs/{run_id}/groups/{capability_key}", response_model=GroupResponse)
@@ -184,7 +232,7 @@ def read_review_group(
         view = refresh_states(session, loaded, run)
         for group in view.groups:
             if group.group.capability_key == capability_key:
-                return build_group_response(group)
+                return build_group_response(group, loaded, run)
         raise HTTPException(status_code=404, detail=f"Run {run_id!r} has no {capability_key!r}.")
 
 
@@ -221,7 +269,7 @@ def decide_item(
 
         view = refresh_states(session, loaded, run)
         return DecisionResponse(
-            run=build_run_response(view, []),
+            run=build_run_response(view, [], loaded),
             decided=[build_item_response(decided, capability)],
         )
 
@@ -262,7 +310,7 @@ def decide_items(
 
         view = refresh_states(session, loaded, run)
         return DecisionResponse(
-            run=build_run_response(view, []),
+            run=build_run_response(view, [], loaded),
             decided=[build_item_response(item, capability) for item in decided],
         )
 
@@ -374,8 +422,13 @@ def requires_confirmation(capability: CapabilityConfig, item: ReviewItem) -> boo
     )
 
 
-def build_run_response(view: RunView, warnings: list[str]) -> RunResponse:
+def build_run_response(
+    view: RunView,
+    warnings: list[str],
+    loaded: LoadedCapabilities,
+) -> RunResponse:
     current = view.current_group()
+    rendered = build_group_response(current, loaded, view.run) if current else None
     return RunResponse(
         run_id=view.run.id,
         review_date=view.run.review_date,
@@ -383,6 +436,7 @@ def build_run_response(view: RunView, warnings: list[str]) -> RunResponse:
         state=view.run.state,
         config_version=view.run.config_version,
         config_digest=view.run.config_digest,
+        screen_id=rendered.screen_id if rendered else None,
         groups=[
             GroupSummaryResponse(
                 capability_key=group.group.capability_key,
@@ -393,22 +447,83 @@ def build_run_response(view: RunView, warnings: list[str]) -> RunResponse:
             )
             for group in view.groups
         ],
-        current_group=build_group_response(current) if current else None,
+        current_group=rendered,
         warnings=warnings,
     )
 
 
-def build_group_response(view: GroupView) -> GroupResponse:
+def build_group_response(
+    view: GroupView,
+    loaded: LoadedCapabilities,
+    run: ReviewRun,
+) -> GroupResponse:
+    screen = build_screen_response(view, loaded, run)
     return GroupResponse(
         capability_key=view.group.capability_key,
         capability_name=view.group.capability_name,
         position=view.group.position,
         state=view.group.state,
         policy_version=view.group.policy_version,
+        screen_id=screen.screen_id,
         allowed_actions=[action.value for action in view.capability.allowed_actions],
         allow_bulk_decisions=view.capability.approval.allow_bulk_decisions,
         counts=count_states(view.items),
+        screen=screen,
         items=[build_item_response(item, view.capability) for item in view.items],
+    )
+
+
+def build_screen_response(
+    view: GroupView,
+    loaded: LoadedCapabilities,
+    run: ReviewRun,
+) -> ScreenResponse:
+    """Render the capability's presentation contract for this group."""
+    try:
+        screen = loaded.screen_for(view.capability)
+    except UnknownCapability as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return as_screen_response(render_group(screen, view, run))
+
+
+def as_screen_response(rendered: ScreenView) -> ScreenResponse:
+    return ScreenResponse(
+        screen_id=rendered.screen_id,
+        kind=rendered.kind,
+        title=rendered.title,
+        columns=[
+            ColumnResponse(
+                key=column.key,
+                label=column.label,
+                align=column.align,
+                format=column.format,
+            )
+            for column in rendered.columns
+        ],
+        actions=[
+            ScreenActionResponse(
+                id=action.id,
+                label=action.label,
+                decision=action.decision,
+                action=action.action,
+                scope=action.scope,
+                method=action.method,
+                path=action.path,
+                body=action.body,
+            )
+            for action in rendered.actions
+        ],
+        rows=[
+            RowResponse(
+                item_id=row.item_id,
+                thread_id=row.thread_id,
+                cells=row.cells,
+                actions=row.actions,
+            )
+            for row in rendered.rows
+        ],
+        footer=rendered.footer,
+        empty_text=rendered.empty_text,
     )
 
 

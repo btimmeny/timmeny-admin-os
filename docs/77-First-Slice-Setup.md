@@ -31,7 +31,7 @@ It is a *reference*, not a literal connection string, so it keeps working if Rai
 
 The baseline migration has already been applied, so the first deploy's pre-deploy step is a no-op.
 
-Migrations run as a pre-deploy step, not at import time, so a failed migration cannot take a running service down mid-request. `railway.json` calls a guard script that exits cleanly when no database is configured:
+Migrations run as a pre-deploy step, not at import time, so a failed migration stops the deploy rather than taking a live service down mid-request. `railway.json` already carries it:
 
 ```json
 "deploy": {
@@ -39,6 +39,10 @@ Migrations run as a pre-deploy step, not at import time, so a failed migration c
   "startCommand": "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
 }
 ```
+
+`scripts/migrate.sh` exits successfully without doing anything when `DATABASE_URL` is unset, so deploys keep working in an environment that has no database.
+
+Once the database is attached, `GET /admin/db-status` (authenticated) reports `{"status": "ok", "revision": "0001_baseline"}`.
 
 ---
 

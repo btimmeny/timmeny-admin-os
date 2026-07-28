@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 
 DATABASE_URL_VARIABLE = "DATABASE_URL"
+MONDAY_API_TOKEN_VARIABLE = "MONDAY_API_TOKEN"
+TODO_BOARD_ID_VARIABLE = "TODO_BOARD_ID"
+TODO_GROUP_ID_VARIABLE = "TODO_GROUP_ID"
 GMAIL_CLIENT_ID_VARIABLE = "GMAIL_CLIENT_ID"
 GMAIL_CLIENT_SECRET_VARIABLE = "GMAIL_CLIENT_SECRET"
 GMAIL_REFRESH_TOKEN_VARIABLE = "GMAIL_REFRESH_TOKEN"
@@ -29,6 +32,19 @@ def get_optional_setting(name: str) -> str | None:
 
 def get_database_url() -> str | None:
     return get_optional_setting(DATABASE_URL_VARIABLE)
+
+
+def get_monday_token() -> str | None:
+    return get_optional_setting(MONDAY_API_TOKEN_VARIABLE)
+
+
+def get_todo_board_id() -> str | None:
+    """The To Do List board, the only Monday board in the slice's scope."""
+    return get_optional_setting(TODO_BOARD_ID_VARIABLE)
+
+
+def get_todo_group_id() -> str | None:
+    return get_optional_setting(TODO_GROUP_ID_VARIABLE)
 
 
 def get_gmail_credentials() -> GmailCredentials | None:

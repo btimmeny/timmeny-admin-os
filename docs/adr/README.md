@@ -20,6 +20,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0002 — Monday Identity and Write Idempotency](./ADR-0002-monday-identity-and-idempotency.md)
 - [ADR-0003 — Gmail Access, Intake Scope, and Retention](./ADR-0003-gmail-access-and-retention.md)
 - [ADR-0004 — Classification Boundary and Review State](./ADR-0004-classification-boundary-and-review.md)
+- [ADR-0005 — Duplicate Review Before Monday Writes](./ADR-0005-duplicate-review-before-monday-writes.md)
 
 ## Candidate Decisions
 

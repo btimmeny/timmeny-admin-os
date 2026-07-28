@@ -17,16 +17,17 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 ## Accepted ADRs
 
 - [ADR-0001 — Admin OS Is the Coordination Layer](./ADR-0001-admin-os-coordination-layer.md)
+- [ADR-0002 — Monday Identity and Write Idempotency](./ADR-0002-monday-identity-and-idempotency.md)
+- [ADR-0003 — Gmail Access, Intake Scope, and Retention](./ADR-0003-gmail-access-and-retention.md)
 
 ## Candidate Decisions
 
 Create an ADR only when the decision materially constrains architecture or implementation. Current candidates include:
 
-- canonical identity and external-system mapping strategy
 - operational-object classification contract
 - workflow safety and approval policy
-- Monday board and minimum-field design for the first vertical slice
 - PostgreSQL persistence and audit model
 - Executive Review API contract
+- sync scheduling and trigger model
 
 Operational discoveries remain under `operating/` until they justify an architectural decision.

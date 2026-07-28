@@ -1,0 +1,134 @@
+# 77 — First Slice Setup Runbook
+
+**Status:** Active
+**Version:** 0.1
+**Purpose:** The manual, one-time steps required before the first vertical slice can run. Everything here is done by the account owner; none of it can be automated.
+**Depends on:** [ADR-0002](./adr/ADR-0002-monday-identity-and-idempotency.md), [ADR-0003](./adr/ADR-0003-gmail-access-and-retention.md), [76 — Repository Assessment](./76-Repository-Assessment.md)
+
+Three tasks: a Monday board column, a Railway Postgres database, and a Google OAuth credential.
+
+---
+
+## 1. Monday.com — add the `Admin OS ID` column
+
+On the **To Do List** board (`8962223984`):
+
+1. Add a new column, type **Text**, titled exactly `Admin OS ID`.
+2. Hide it from the default view. Nothing should ever type into it by hand.
+
+Why it exists: Monday's API has no idempotency token, so Admin OS writes its own identifier into the item and searches for it before retrying a create. Without it, a crash between the Monday write and the local commit duplicates the task. See [ADR-0002](./adr/ADR-0002-monday-identity-and-idempotency.md).
+
+Also confirm the exact labels configured on the board's `Status` column. The service currently treats only `done`, `complete`, and `completed` (case-insensitive) as finished, and completion is what gates archiving an email.
+
+---
+
+## 2. Railway — provision PostgreSQL
+
+In the Railway project that hosts `timmeny-admin-os`:
+
+1. **New → Database → Add PostgreSQL.** This creates a `Postgres` service with its own `DATABASE_URL`.
+2. Open the **`timmeny-admin-os` service → Variables**, and add a *reference* variable rather than pasting a literal connection string:
+
+   ```text
+   DATABASE_URL = ${{Postgres.DATABASE_URL}}
+   ```
+
+   The reference keeps working if Railway rotates the credential.
+3. Leave everything else alone. Until `DATABASE_URL` is present the service behaves exactly as it does today; the new code paths are gated on it.
+
+Migrations run as a pre-deploy step, not at import time, so a failed migration cannot take a running service down mid-request. That will be added to `railway.json` in the same PR that introduces Alembic:
+
+```json
+"deploy": {
+  "preDeployCommand": ["alembic upgrade head"],
+  "startCommand": "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+}
+```
+
+---
+
+## 3. Google — create the OAuth credential
+
+This produces three values: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`.
+
+A service account cannot be used. Domain-wide delegation requires a Workspace domain admin, and this is a personal `gmail.com` mailbox, so access must come from a credential the account owner consents to once.
+
+### 3a. Project and API
+
+1. Go to https://console.cloud.google.com/ and create a project (e.g. `timmeny-admin-os`).
+2. Enable the Gmail API: **APIs & Services → Library → Gmail API → Enable**.
+
+### 3b. Consent screen — publish it to production
+
+Under **APIs & Services → OAuth consent screen** (newer consoles present this as **Google Auth Platform → Branding / Audience**):
+
+1. User type: **External**.
+2. Fill in app name, your email as support contact, and your email as developer contact. Nothing else is required.
+3. Add the scope `https://www.googleapis.com/auth/gmail.modify`. Google will flag it as sensitive/restricted; that is expected.
+4. **Publish the app.** On the consent screen (or **Audience**) page, set the publishing status from **Testing** to **In production**.
+
+Step 4 is not optional. Google issues a refresh token that **expires after 7 days** to any external consent screen left in `Testing` status ([documented here](https://developers.google.com/identity/protocols/oauth2)). A background service authenticated that way stops working every week. Publishing does not require Google verification — because the app is unverified you will see an "unverified app" warning during consent, click **Advanced → Go to … (unsafe)**, and proceed. That warning is expected and appears once.
+
+### 3c. OAuth client
+
+1. **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+2. Application type: **Desktop app**. Name it anything.
+3. Copy the **Client ID** and **Client secret**.
+
+### 3d. Mint the refresh token
+
+Run this on your own machine, so your Google session never touches anything else. It starts a temporary local server, opens your browser, and prints the refresh token.
+
+```bash
+python3 -m venv /tmp/oauth && /tmp/oauth/bin/pip install -q google-auth-oauthlib
+GMAIL_CLIENT_ID="<client id>" GMAIL_CLIENT_SECRET="<client secret>" /tmp/oauth/bin/python - <<'PY'
+import os
+from google_auth_oauthlib.flow import InstalledAppFlow
+
+flow = InstalledAppFlow.from_client_config(
+    {
+        "installed": {
+            "client_id": os.environ["GMAIL_CLIENT_ID"],
+            "client_secret": os.environ["GMAIL_CLIENT_SECRET"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    },
+    scopes=["https://www.googleapis.com/auth/gmail.modify"],
+)
+creds = flow.run_local_server(port=0, access_type="offline", prompt="consent")
+print("\nGMAIL_REFRESH_TOKEN=" + creds.refresh_token)
+PY
+```
+
+`prompt="consent"` matters — without it Google reuses a prior grant and returns no refresh token.
+
+Sign in as the mailbox owner, accept the unverified-app warning, and grant the single Gmail permission. The refresh token is printed at the end.
+
+### 3e. Store the values
+
+Add to Railway (**Variables** on the `timmeny-admin-os` service):
+
+| Variable | Value |
+|---|---|
+| `GMAIL_CLIENT_ID` | from 3c |
+| `GMAIL_CLIENT_SECRET` | from 3c |
+| `GMAIL_REFRESH_TOKEN` | from 3d |
+| `GMAIL_INTAKE_LABEL` | `financial/taxes` |
+| `GMAIL_WRITE_ENABLED` | `false` |
+
+`GMAIL_WRITE_ENABLED` stays `false` until the read-and-classify loop has been observed working on real threads. Nothing in the mailbox is modified while it is false.
+
+Treat the refresh token as a mailbox credential: it grants read, label, and archive on the account until you revoke it at https://myaccount.google.com/permissions.
+
+---
+
+## Verification checklist
+
+- [ ] `Admin OS ID` text column exists on the To Do List board and is hidden from the default view
+- [ ] The board's `Status` done-labels are confirmed
+- [ ] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
+- [ ] Consent screen publishing status reads **In production**
+- [ ] Only `gmail.modify` is granted — check https://myaccount.google.com/permissions
+- [ ] `financial/taxes` label exists and contains the threads intended as evidence
+- [ ] `GMAIL_WRITE_ENABLED` is `false`

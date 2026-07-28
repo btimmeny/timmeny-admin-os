@@ -492,7 +492,9 @@ Records one decision: `approve` (take the recommended action), `override` (take 
 {"decision": "override", "action": "gmail.archive", "note": "Superseded"}
 ```
 
-Approval is the only route to an action, and configuration decides which actions exist for a capability at all: an action it is not granted is refused with `409` however the request is phrased. An approved item is recorded as approved and **not executed** — execution arrives in the next increment, and until then a run holding approved actions reports `awaiting_actions` rather than claiming completion.
+Approval is the only route to an action, and configuration decides which actions exist for a capability at all: an action it is not granted is refused with `409` however the request is phrased. An approved item is recorded as approved and **not executed**: approval creates an action in `approved`, and reaching the mailbox takes the separate steps below. A run holding unexecuted actions reports `awaiting_actions` rather than claiming completion.
+
+`override` may carry `action_params` — `add_labels` and `remove_labels` for `gmail.label`, `to`/`cc`/`subject`/`body` for `gmail.draft_reply`.
 
 ### `POST /review/runs/{run_id}/groups/{capability_key}/decisions`
 
@@ -513,6 +515,76 @@ Records the model's reading of a thread: a category the capability recognises, a
 ```
 
 A suggestion is adopted as the item's recommendation only when it clears the capability's `min_ai_confidence`; below that it is recorded as unadopted, with the reason. A suggestion the capability is not allowed to act on is refused. An assessment never decides, approves, or executes anything.
+
+## Actions
+
+An approval is intent. Between intent and a changed mailbox sit four states, each durable, so at every point there is an answer to what was meant to happen, what was attempted, and what Gmail actually shows. See [ADR-0010](docs/adr/ADR-0010-action-lifecycle-and-learning.md) for why, and [81 — Action Execution Runbook](docs/81-Action-Execution-Runbook.md) for the requests.
+
+```text
+approved  -> a decision, and nothing more
+prepared  -> exact parameters and a stable idempotency key; still no write
+executed  -> Gmail has been called
+verified  -> Gmail was read back and agrees
+completed -> done; re-running is a no-op
+failed    -> durable, with the error, and retryable
+```
+
+Three Gmail actions ship: `gmail.label`, `gmail.archive`, and `gmail.draft_reply`. `gmail.send_draft` exists but sends only a specific draft that has been approved by id. **There is no permanent deletion**: `gmail.trash` has no executor and no capability is granted it.
+
+### `POST /review/runs/{run_id}/actions/prepare`
+
+Resolves approvals into exact parameters and writes nothing. Preparing twice returns the same action, because the idempotency key is derived from the item, the action, and its parameters rather than from the attempt.
+
+### `POST /review/runs/{run_id}/actions/execute`
+
+The only route that changes the mailbox, behind four gates: the capability must be *allowed* the action, separately *permitted to execute* it, `GMAIL_WRITE_ENABLED` must be true, and the request must carry `confirm: true`.
+
+```json
+{"confirm": true, "capability_key": "admin"}
+```
+
+Every execution is read back from Gmail. An archive that Gmail still lists in the inbox is `failed`, not `completed` — a write that cannot be confirmed is not a write that happened. Permission and the kill switch are rechecked at execution, not trusted from preparation, so revoking a permission stops work already approved.
+
+### `GET /review/runs/{run_id}/actions` and `GET …/actions/{action_id}`
+
+Every action with its state, verification, attempts, and last error; the single-action route adds the full event trail — `approved`, `prepared`, `execution_started`, `executed`, `verified`, and any failure — in order.
+
+### `POST /review/runs/{run_id}/actions/{action_id}/retry` and `…/verify`
+
+Retry re-attempts a failed action, checking first whether the effect already landed: a draft created just before a connection dropped is adopted rather than written twice. Verify only re-reads Gmail.
+
+### `POST /review/runs/{run_id}/items/{item_id}/send-draft`
+
+Creating a draft never sends it. Sending takes an explicit approval of one exact draft, named by both its draft id and the message id it carried when it was read back:
+
+```json
+{"draft_id": "r-123", "draft_message_id": "msg-456", "confirm": true}
+```
+
+And approving still does not send: it creates a `gmail.send_draft` action that has to be executed like any other, and that refuses if the draft has changed since it was approved.
+
+## Learning
+
+A correction is evidence, not an instruction. Every decision that answers a recommendation is recorded as a learning event — with the metadata the decision turned on, the actor, the policy version, and the provenance, and never message content — and no event changes what the review recommends.
+
+A rule reaches autonomy only by being walked through five states, each an explicit act:
+
+```text
+observed    -> a correction was seen; the review is unchanged
+proposed    -> written down in full, and still inactive
+confirmed   -> recommends
+automatable -> may approve without being asked
+retired     -> neither, permanently
+```
+
+- `GET /learning/events` — what the review has been taught, filterable by capability and kind.
+- `GET|POST /learning/rules` — read every candidate rule, or propose one. Conditions are exact and metadata-only, and a rule with no condition is refused because it would match everything.
+- `GET /learning/rules/{rule_id}` — the exact conditions and the single action, before agreeing to either.
+- `POST /learning/rules/{rule_id}/confirm` — activate it for recommendations. Agreeing with a rule does not license it to run unattended.
+- `POST /learning/rules/{rule_id}/promote` — the narrowest grant in the system, and it needs `confirm: true`. Only a promoted rule may approve without being asked, and the capability must set `learning.allow_automatable_rules`.
+- `POST /learning/rules/{rule_id}/retire` — stops it recommending and acting, for good.
+
+Even a promoted rule only *approves*: execution permission and the kill switch still stand between it and the mailbox, and the action it approves records `approval_kind: automatable_rule` with the rule that did it.
 
 ## Capabilities
 
@@ -541,23 +613,36 @@ Capabilities are data, in `config/capabilities.yaml` — not branches in code. A
   approval:
     auto_approve: []
     allow_bulk_decisions: true
+  execution:
+    permitted_actions: [gmail.label, gmail.draft_reply]
+    require_verification: true
+  learning:
+    allow_rule_learning: true
+    allow_automatable_rules: false
 ```
+
+Two grants govern an action, deliberately separately. `allowed_actions` is what may be *approved*; `execution.permitted_actions` is what may actually *reach the mailbox*. The capability above may approve an archive and never carry one out — useful while a new action is being trusted, and the reason a mistake in one grant does not become a write.
 
 The file is validated on load and rejected outright — with `503` rather than a silently empty review — if it is wrong. Some refusals are deliberate:
 
 - A rule may not recommend an action the capability is not granted.
 - The default recommendation may not be an action, or unmatched mail would be acted on by omission.
 - A capability may not auto-approve an action it is not allowed to take.
+- A capability may not execute an action it may not approve.
+- `allow_automatable_rules` without `allow_rule_learning` is refused: a rule cannot be promoted where none may be learned.
+- No capability is granted `gmail.trash`, and there is no code to perform it.
 - `learning.record_message_content: true` is refused: message content is never retained ([ADR-0003](docs/adr/ADR-0003-gmail-access-and-retention.md)).
 - Two capabilities may not share a position, since position is what orders the review.
 
 Rules read only retained metadata — subject, participants, dates — never message content, because there is none to read. The first matching rule wins; unmatched mail falls to `needs_review`.
 
-The shipped configuration carries **no rules yet** and no auto-approvals, so every thread arrives as `needs_review` and every action needs a human. Rules are the place to encode a pattern once it has been seen often enough to be worth stating.
+The shipped configuration carries two rules, both on Admin, both narrow and both recommending only `gmail.archive`: a USPS Informed Delivery digest, and a GitHub notification more than a week old. Everything else — all of Financial/Taxes, all of Career — arrives as `needs_review`. No capability auto-approves anything, so a matched rule still waits for a decision.
+
+Rules are the place to encode a pattern once it has been seen often enough to be worth stating, which is what the [learning](#learning) routes are for.
 
 Every run records both the configuration version and a digest of the file, so a decision made months ago can be explained against the exact configuration that produced it.
 
-Three capabilities ship, named exactly as the mailbox names them: `Career - Advisory/Expert Calls`, `Financial/Taxes`, and `Admin`. All three were resolved against the live mailbox with `GET /admin/gmail/labels`, which is the way to check after any label is renamed. Matching is case-insensitive, and a label that does not resolve is reported as a warning rather than a failure, so a wrong name shows up as an empty group.
+Three capabilities ship, reviewed in this order and named exactly as the mailbox names them: `Admin`, `Financial/Taxes`, then `Career - Advisory/Expert Calls`. All three were resolved against the live mailbox with `GET /admin/gmail/labels`, which is the way to check after any label is renamed. Matching is case-insensitive, and a label that does not resolve is reported as a warning rather than a failure, so a wrong name shows up as an empty group.
 
 Gmail nesting is not hierarchy: `Admin/- Meetings` and `Admin/spam & junk` are separate labels, and a thread in one of them does not carry `Admin`. Sub-labels are included only by naming them.
 
@@ -721,7 +806,7 @@ The URL can be renamed later in Railway after the service/domain rename is compl
 - `main.py` contains the FastAPI app.
 - `adminos/` contains the coordination layer: configuration, persistence, and coordination endpoints.
 - `adminos/adapters/` contains clients for external systems.
-- `adminos/domain/` contains domain logic, including evidence recording and the review state machine.
+- `adminos/domain/` contains domain logic: evidence recording, the review state machine, the action lifecycle, and rule learning.
 - `adminos/capabilities/` loads and validates the capability configuration.
 - `config/capabilities.yaml` defines the capabilities the daily review presents.
 - `adminos/db/migrations/` contains the Alembic migration history.

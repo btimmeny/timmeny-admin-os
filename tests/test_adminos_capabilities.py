@@ -50,10 +50,66 @@ def test_the_shipped_configuration_is_valid() -> None:
     loaded = load_capabilities(SHIPPED_CONFIG)
 
     assert [capability.key for capability in loaded.enabled()] == [
-        "career_advisor_calls",
-        "financial_taxes",
         "admin",
+        "financial_taxes",
+        "career_advisor_calls",
     ]
+
+
+def test_the_shipped_admin_rules_only_ever_archive() -> None:
+    """The first automatable capability recommends nothing irreversible."""
+    admin = load_capabilities(SHIPPED_CONFIG).get("admin")
+
+    assert admin.recommendation_policy.version == "admin.v2"
+    assert {rule.recommend for rule in admin.recommendation_policy.rules} == {
+        ActionKind.GMAIL_ARCHIVE
+    }
+    assert admin.recommendation_policy.default == "needs_review"
+
+
+def test_no_shipped_capability_may_delete_mail() -> None:
+    for capability in load_capabilities(SHIPPED_CONFIG).enabled():
+        assert ActionKind.GMAIL_TRASH not in capability.allowed_actions
+        assert ActionKind.GMAIL_TRASH not in capability.execution.permitted_actions
+
+
+def test_being_allowed_to_approve_an_action_is_not_permission_to_run_it() -> None:
+    """Two grants, so approving a Monday task cannot reach the mailbox."""
+    admin = load_capabilities(SHIPPED_CONFIG).get("admin")
+
+    assert admin.permits(ActionKind.MONDAY_CREATE_TASK) is True
+    assert admin.execution.permits(ActionKind.MONDAY_CREATE_TASK) is False
+
+
+def test_an_action_may_not_be_executable_without_being_allowed() -> None:
+    document = MINIMAL + """    execution:
+      permitted_actions: [gmail.archive]
+"""
+
+    with pytest.raises(CapabilityConfigError, match="without being allowed to approve"):
+        parse(document)
+
+
+def test_sending_requires_permission_to_draft() -> None:
+    """Nothing may go out that was not written down and reviewed first."""
+    document = MINIMAL + """    allowed_actions: [gmail.send_draft]
+    execution:
+      permitted_actions: [gmail.send_draft]
+"""
+
+    with pytest.raises(CapabilityConfigError, match="draft"):
+        parse(document)
+
+
+def test_automatable_rules_require_learning_to_be_on() -> None:
+    document = MINIMAL + """    learning:
+      scope: none
+      allow_rule_learning: false
+      allow_automatable_rules: true
+"""
+
+    with pytest.raises(CapabilityConfigError, match="without allowing rule learning"):
+        parse(document)
 
 
 def test_capabilities_are_ordered_by_position_not_file_order() -> None:

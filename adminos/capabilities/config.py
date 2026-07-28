@@ -142,6 +142,22 @@ class ApprovalRules(StrictModel):
     allow_bulk_decisions: bool = True
 
 
+class ExecutionRules(StrictModel):
+    """Which approved actions may actually reach the outside world.
+
+    Separate from `allowed_actions` so that approving something and performing
+    it are two grants rather than one: an action can be approvable and recorded
+    while its executor is still unproven, and `GMAIL_WRITE_ENABLED` remains a
+    kill switch over the top rather than the only gate.
+    """
+
+    permitted_actions: list[ActionKind] = []
+    require_verification: bool = True
+
+    def permits(self, action: ActionKind) -> bool:
+        return action in self.permitted_actions
+
+
 class CompletionRules(StrictModel):
     require_all_items_decided: bool = True
     require_executed_actions: bool = True
@@ -151,6 +167,8 @@ class LearningRules(StrictModel):
     scope: Literal["capability", "global", "none"] = "capability"
     record_decisions: bool = True
     record_message_content: bool = False
+    allow_rule_learning: bool = True
+    allow_automatable_rules: bool = False
 
     @model_validator(mode="after")
     def refuse_content_retention(self) -> Self:
@@ -187,6 +205,7 @@ class CapabilityConfig(StrictModel):
     recommendation_policy: RecommendationPolicy
     allowed_actions: list[ActionKind] = []
     approval: ApprovalRules = ApprovalRules()
+    execution: ExecutionRules = ExecutionRules()
     completion: CompletionRules = CompletionRules()
     learning: LearningRules = LearningRules()
     objectives: ObjectiveRules = ObjectiveRules()
@@ -211,10 +230,31 @@ class CapabilityConfig(StrictModel):
                     f"{self.key!r} auto-approves {action.value!r} without being "
                     "allowed to do it."
                 )
+        for action in self.execution.permitted_actions:
+            if action not in self.allowed_actions:
+                raise ValueError(
+                    f"{self.key!r} may execute {action.value!r} without being allowed "
+                    "to approve it."
+                )
+        if (
+            ActionKind.GMAIL_SEND_DRAFT in self.execution.permitted_actions
+            and ActionKind.GMAIL_DRAFT_REPLY not in self.execution.permitted_actions
+        ):
+            raise ValueError(
+                f"{self.key!r} may send a draft but not create one; a send is only "
+                "ever the approval of a draft this capability wrote."
+            )
+        if self.learning.allow_automatable_rules and not self.learning.allow_rule_learning:
+            raise ValueError(
+                f"{self.key!r} allows automatable rules without allowing rule learning."
+            )
         return self
 
     def permits(self, action: ActionKind) -> bool:
         return action in self.allowed_actions
+
+    def may_execute(self, action: ActionKind) -> bool:
+        return self.execution.permits(action)
 
     def auto_approves(self, action: ActionKind, confidence: float) -> bool:
         """Whether an action may execute without a human saying so."""

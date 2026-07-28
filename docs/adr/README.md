@@ -25,15 +25,15 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0007 — Deterministic Labeling and Grouped Review](./ADR-0007-deterministic-labeling-and-grouped-review.md)
 - [ADR-0008 — Label-Scoped Daily Action Loop](./ADR-0008-label-scoped-daily-action-loop.md)
 - [ADR-0009 — Capability Configuration and the Persisted Review State Machine](./ADR-0009-review-engine-implementation.md)
+- [ADR-0010 — The Action Lifecycle and How a Correction Becomes a Rule](./ADR-0010-action-lifecycle-and-learning.md)
 
 ## Candidate Decisions
 
 Create an ADR only when the decision materially constrains architecture or implementation. Current candidates include:
 
-- Gmail action execution, permissions, and read-back verification;
 - sync scheduling and trigger model;
-- learning-event and preference-promotion persistence;
-- granular Gmail write policies beyond the current global switch;
+- Monday task execution inside the review's action lifecycle;
+- automatic retry policy for failed actions;
 - model-provider and prompt-version governance.
 
 Operational discoveries remain under `operating/` until they justify an architectural decision.

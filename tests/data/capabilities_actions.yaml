@@ -1,0 +1,85 @@
+version: test.actions
+channel: email
+
+capabilities:
+  - key: admin
+    name: Admin
+    position: 10
+    gmail:
+      labels:
+        - Admin
+    playbook:
+      id: triage_and_clear
+      steps:
+        - collect_evidence
+        - recommend
+        - await_decision
+        - prepare_actions
+        - execute_approved
+        - verify
+    recommendation_policy:
+      version: admin.test
+      default: needs_review
+      categories:
+        - noise
+        - errand
+      rules:
+        - id: newsletters_are_noise
+          when:
+            subject_contains:
+              - Newsletter
+          recommend: gmail.archive
+          confidence: 0.95
+          rationale: A newsletter needs reading, not doing.
+    allowed_actions:
+      - gmail.label
+      - gmail.archive
+      - gmail.draft_reply
+      - gmail.send_draft
+      - monday.create_task
+    execution:
+      permitted_actions:
+        - gmail.label
+        - gmail.archive
+        - gmail.draft_reply
+        - gmail.send_draft
+    learning:
+      scope: capability
+      record_decisions: true
+      record_message_content: false
+      allow_rule_learning: true
+      allow_automatable_rules: true
+
+  - key: financial_taxes
+    name: financial/taxes
+    position: 20
+    gmail:
+      labels:
+        - financial/taxes
+    playbook:
+      id: evidence_to_obligation
+      steps:
+        - collect_evidence
+        - recommend
+        - await_decision
+        - prepare_actions
+        - execute_approved
+        - verify
+    recommendation_policy:
+      version: taxes.test
+      default: needs_review
+      categories:
+        - obligation
+        - reference
+    allowed_actions:
+      - gmail.label
+      - monday.create_task
+    execution:
+      permitted_actions:
+        - gmail.label
+    learning:
+      scope: capability
+      record_decisions: true
+      record_message_content: false
+      allow_rule_learning: true
+      allow_automatable_rules: false

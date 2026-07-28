@@ -19,12 +19,12 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0001 — Admin OS Is the Coordination Layer](./ADR-0001-admin-os-coordination-layer.md)
 - [ADR-0002 — Monday Identity and Write Idempotency](./ADR-0002-monday-identity-and-idempotency.md)
 - [ADR-0003 — Gmail Access, Intake Scope, and Retention](./ADR-0003-gmail-access-and-retention.md)
+- [ADR-0004 — Classification Boundary and Review State](./ADR-0004-classification-boundary-and-review.md)
 
 ## Candidate Decisions
 
 Create an ADR only when the decision materially constrains architecture or implementation. Current candidates include:
 
-- operational-object classification contract
 - workflow safety and approval policy
 - PostgreSQL persistence and audit model
 - Executive Review API contract

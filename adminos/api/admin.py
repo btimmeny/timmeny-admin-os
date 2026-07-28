@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import StrEnum
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,6 +17,7 @@ from adminos.config import (
 )
 from adminos.db import engine
 from adminos.db.engine import DatabaseNotConfigured, session_scope
+from adminos.domain.classification import classify_evidence, read_review_queue
 from adminos.domain.evidence import (
     DEFAULT_SYNC_LIMIT,
     MAX_SYNC_LIMIT,
@@ -25,6 +27,9 @@ from adminos.domain.evidence import (
 )
 from adminos.logging import get_logger
 
+
+DEFAULT_REVIEW_LIMIT = 50
+MAX_REVIEW_LIMIT = 200
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -179,6 +184,77 @@ async def sync_gmail(
         unchanged=result.unchanged,
         removed=result.removed,
     )
+
+
+class ClassifyResponse(BaseModel):
+    classifier_version: str
+    scanned: int
+    created: int
+    unchanged: int
+
+
+class ReviewItemResponse(BaseModel):
+    classification_id: str
+    evidence_id: str
+    source_thread_id: str
+    subject: str | None
+    received_at: datetime | None
+    disposition: str
+    rationale: str | None
+
+
+class ReviewQueueResponse(BaseModel):
+    count: int
+    items: list[ReviewItemResponse]
+
+
+@router.post("/classify", response_model=ClassifyResponse)
+def classify(
+    _: None = Depends(require_api_key),
+) -> ClassifyResponse:
+    """Classify evidence that has no classification from the current version.
+
+    Creates no Monday task and touches no mailbox. Version 1 routes everything
+    to review, so this only populates the queue.
+    """
+    try:
+        with session_scope() as session:
+            result = classify_evidence(session)
+    except DatabaseNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return ClassifyResponse(
+        classifier_version=result.classifier_version,
+        scanned=result.scanned,
+        created=result.created,
+        unchanged=result.unchanged,
+    )
+
+
+@router.get("/review-queue", response_model=ReviewQueueResponse)
+def read_review_items(
+    _: None = Depends(require_api_key),
+    limit: int = Query(default=DEFAULT_REVIEW_LIMIT, ge=1, le=MAX_REVIEW_LIMIT),
+) -> ReviewQueueResponse:
+    """List the evidence awaiting a human decision, newest first."""
+    try:
+        with session_scope() as session:
+            items = [
+                ReviewItemResponse(
+                    classification_id=item.classification_id,
+                    evidence_id=item.evidence_id,
+                    source_thread_id=item.source_thread_id,
+                    subject=item.subject,
+                    received_at=item.received_at,
+                    disposition=item.disposition,
+                    rationale=item.rationale,
+                )
+                for item in read_review_queue(session, limit)
+            ]
+    except DatabaseNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return ReviewQueueResponse(count=len(items), items=items)
 
 
 def read_current_revision() -> str | None:

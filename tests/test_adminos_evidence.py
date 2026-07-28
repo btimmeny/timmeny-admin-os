@@ -11,7 +11,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from adminos.adapters.gmail import INBOX_LABEL_ID, GmailThread
-from adminos.db.models import Evidence
+from adminos.db.models import Classification, Evidence
+from adminos.domain.classification import classify_evidence
 from adminos.domain.evidence import (
     IntakeLabelMissing,
     PruneScanTruncated,
@@ -181,6 +182,31 @@ def test_prune_removes_evidence_that_left_the_inbox(session: Session) -> None:
 
     assert result.removed == 1
     assert [row.source_thread_id for row in session.query(Evidence)] == ["t1"]
+
+
+def test_prune_takes_classifications_with_it(session: Session) -> None:
+    """Without this the evidence foreign key would reject the delete outright."""
+    client = FakeGmailClient(labels={"financial/taxes": "Label_9"}, threads={})
+    asyncio.run(sync_gmail_evidence(client, session, "financial/taxes"))
+    session.commit()
+    session.add(
+        Evidence(
+            source_system="gmail",
+            source_thread_id="archived",
+            subject="Settled last year",
+            participants=[],
+            content_hash="stale",
+        )
+    )
+    session.commit()
+    classify_evidence(session)
+    session.commit()
+
+    result = asyncio.run(sync_gmail_evidence(client, session, "financial/taxes", prune=True))
+    session.commit()
+
+    assert result.removed == 1
+    assert session.query(Classification).count() == 0
 
 
 def test_prune_spares_other_source_systems(session: Session) -> None:

@@ -89,6 +89,46 @@ Evidence is keyed by thread, so re-running the sync updates existing rows rather
 
 `prune` returns `409` when the scan filled `limit`: a truncated listing cannot distinguish a thread that was archived from one that is simply further down the page, and pruning on that basis would delete everything past the first page.
 
+### `POST /admin/classify`
+
+Classifies evidence that the current classifier version has not seen. Requires `TIMMENY_OS_API_KEY` and `DATABASE_URL`.
+
+Classifier `v1-review-all` makes no inference: every thread is recorded as `needs_review` with zero confidence and an `undetermined` relationship, per [ADR-0004](docs/adr/ADR-0004-classification-boundary-and-review.md). No Monday task is created and no mailbox is touched.
+
+```json
+{
+  "classifier_version": "v1-review-all",
+  "scanned": 1,
+  "created": 1,
+  "unchanged": 0
+}
+```
+
+One classification per (evidence, classifier version), enforced by a unique constraint, so re-running changes nothing.
+
+### `GET /admin/review-queue`
+
+Lists the evidence awaiting a human decision, newest first. Requires `TIMMENY_OS_API_KEY` and `DATABASE_URL`. `limit` (query, 1–200, default 50) bounds the page.
+
+```json
+{
+  "count": 1,
+  "items": [
+    {
+      "classification_id": "…",
+      "evidence_id": "…",
+      "source_thread_id": "197b351c69d3613f",
+      "subject": "KPMG Activities",
+      "received_at": "2025-06-27T14:02:11+00:00",
+      "disposition": "needs_review",
+      "rationale": "Classifier v1 asserts nothing about intake threads and routes every one to human review."
+    }
+  ]
+}
+```
+
+Nothing resolves an item yet — resolution means creating a Monday task, which is the next increment.
+
 ### `POST /todos`
 
 Creates a todo item on a Monday.com board.

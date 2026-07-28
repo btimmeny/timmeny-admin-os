@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from adminos.adapters.monday import (
+    ACTION_DATE_COLUMN_ID,
     ADMIN_OS_ID_COLUMN_ID,
     MONDAY_API_URL,
     STATUS_COLUMN_ID,
@@ -14,6 +15,7 @@ from adminos.adapters.monday import (
     MondayAuthError,
     MondayClient,
     MondayError,
+    MondayWriter,
     build_item,
     build_rules,
     find_label_index,
@@ -318,3 +320,112 @@ def test_requests_go_to_the_monday_api() -> None:
     asyncio.run(run())
 
     assert seen == [MONDAY_API_URL]
+
+
+def test_the_read_only_client_cannot_create_an_item() -> None:
+    """Read paths hold a client with no mutation on it, not a convention."""
+    assert not hasattr(MondayClient("token", httpx.AsyncClient()), "create_item")
+    assert hasattr(MondayWriter("token", httpx.AsyncClient()), "create_item")
+
+
+def test_creating_an_item_stamps_the_admin_os_id() -> None:
+    requests: list[dict[str, Any]] = []
+
+    async def run() -> str:
+        async with client_returning([{"data": {"create_item": {"id": "42"}}}], requests) as http:
+            return await MondayWriter("token", http).create_item(
+                BOARD_ID, "Annual Taxes | KPMG", "ao-1", group_id="group_1"
+            )
+
+    item_id = asyncio.run(run())
+    variables = requests[0]["variables"]
+
+    assert item_id == "42"
+    assert variables["board_id"] == BOARD_ID
+    assert variables["group_id"] == "group_1"
+    assert json.loads(variables["column_values"])[ADMIN_OS_ID_COLUMN_ID] == "ao-1"
+
+
+def test_an_action_date_is_sent_as_a_date_value() -> None:
+    requests: list[dict[str, Any]] = []
+
+    async def run() -> None:
+        async with client_returning([{"data": {"create_item": {"id": "42"}}}], requests) as http:
+            await MondayWriter("token", http).create_item(
+                BOARD_ID, "Task", "ao-1", action_date="2026-08-15"
+            )
+
+    asyncio.run(run())
+    columns = json.loads(requests[0]["variables"]["column_values"])
+
+    assert columns[ACTION_DATE_COLUMN_ID] == {"date": "2026-08-15"}
+
+
+def test_a_create_that_returns_no_id_is_an_error() -> None:
+    async def run() -> None:
+        async with client_returning([{"data": {"create_item": {}}}]) as http:
+            await MondayWriter("token", http).create_item(BOARD_ID, "Task", "ao-1")
+
+    with pytest.raises(MondayError):
+        asyncio.run(run())
+
+
+def test_reading_an_item_back_reports_the_board_it_is_on() -> None:
+    raw = raw_item("42", "Annual Taxes | KPMG", admin_os_id="ao-1")
+    raw["board"] = {"id": BOARD_ID}
+
+    async def run() -> Any:
+        async with client_returning([{"data": {"items": [raw]}}]) as http:
+            return await MondayWriter("token", http).read_item("42")
+
+    item = asyncio.run(run())
+
+    assert item is not None
+    assert (item.item_id, item.board_id, item.admin_os_id) == ("42", BOARD_ID, "ao-1")
+
+
+def test_reading_a_missing_item_returns_nothing() -> None:
+    async def run() -> Any:
+        async with client_returning([{"data": {"items": []}}]) as http:
+            return await MondayWriter("token", http).read_item("42")
+
+    assert asyncio.run(run()) is None
+
+
+def test_an_item_can_be_recovered_by_its_admin_os_id() -> None:
+    requests: list[dict[str, Any]] = []
+    raw = raw_item("42", "Annual Taxes | KPMG", admin_os_id="ao-1")
+    response = {"data": {"items_page_by_column_values": {"items": [raw]}}}
+
+    async def run() -> Any:
+        async with client_returning([response], requests) as http:
+            return await MondayWriter("token", http).find_by_admin_os_id(BOARD_ID, "ao-1")
+
+    item = asyncio.run(run())
+
+    assert item is not None
+    assert item.item_id == "42"
+    assert requests[0]["variables"]["column_id"] == ADMIN_OS_ID_COLUMN_ID
+
+
+def test_an_unknown_admin_os_id_finds_nothing() -> None:
+    response = {"data": {"items_page_by_column_values": {"items": []}}}
+
+    async def run() -> Any:
+        async with client_returning([response]) as http:
+            return await MondayWriter("token", http).find_by_admin_os_id(BOARD_ID, "ao-1")
+
+    assert asyncio.run(run()) is None
+
+
+def test_an_admin_os_id_on_two_items_is_refused() -> None:
+    """An id that identifies two items identifies neither; a human must look."""
+    items = [raw_item("42", "One", admin_os_id="ao-1"), raw_item("43", "Two", admin_os_id="ao-1")]
+    response = {"data": {"items_page_by_column_values": {"items": items}}}
+
+    async def run() -> Any:
+        async with client_returning([response]) as http:
+            return await MondayWriter("token", http).find_by_admin_os_id(BOARD_ID, "ao-1")
+
+    with pytest.raises(MondayError):
+        asyncio.run(run())

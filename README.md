@@ -127,7 +127,7 @@ Lists the evidence awaiting a human decision, newest first. Requires `TIMMENY_OS
 }
 ```
 
-Nothing resolves an item yet — resolution means creating a Monday task, which is the next increment.
+An item leaves the queue when `POST /admin/monday/tasks` creates a verified Monday task from it. The classification is not rewritten: it records what the classifier inferred, and the workflow run records what was done about it.
 
 ### `GET /admin/monday/board`
 
@@ -202,6 +202,38 @@ Response. `score` runs 0–1; at or above `strong_match_score` the candidate alm
   ]
 }
 ```
+
+### `POST /admin/monday/tasks`
+
+Creates one To Do List item from one piece of evidence and verifies it landed. The only route in `adminos/` that writes to Monday. Requires `TIMMENY_OS_API_KEY`, `MONDAY_API_TOKEN`, and `DATABASE_URL`; `TODO_GROUP_ID` is optional and picks the group.
+
+```json
+{
+  "evidence_id": "…",
+  "title": "Taxes | Confirm KPMG scope for 2026",
+  "action_date": "2026-08-15",
+  "confirmed": false
+}
+```
+
+The approval gate, per [ADR-0006](docs/adr/ADR-0006-approval-gate-and-verified-writes.md): a task is created unprompted only when the classification is fully confident **and** the duplicate check finds nothing resembling the title. Anything else returns `409` with the duplicate report and creates nothing. `confirmed: true` is a human overriding that refusal. Classifier v1 has zero confidence on everything, so today every task needs confirmation.
+
+```json
+{
+  "run_id": "…",
+  "operational_object_id": "…",
+  "admin_os_id": "…",
+  "item_id": "12345",
+  "board_id": "8962223984",
+  "title": "Taxes | Confirm KPMG scope for 2026",
+  "adopted": false,
+  "confirmed": true,
+  "verified": true,
+  "duplicates": { "…": "the report the decision was made on" }
+}
+```
+
+`admin_os_id` is written into the board's Admin OS ID column and reserved in Postgres *before* Monday is called, so a retry finds and adopts the existing item (`adopted: true`) rather than creating a second one. `verified` means the item was read back and its board, name, and Admin OS ID all match what was asked for.
 
 ### `POST /todos`
 

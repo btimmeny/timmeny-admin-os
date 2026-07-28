@@ -21,23 +21,21 @@ Why it exists: Monday's API has no idempotency token, so Admin OS writes its own
 
 ## 2. Railway — provision PostgreSQL
 
-In the Railway project that hosts `timmeny-admin-os`:
+**Done.** The `timmeny-todo-os` project (production environment) now has a `Postgres` service running PostgreSQL 18.4, and the `timmeny-admin-os` service has:
 
-1. **New → Database → Add PostgreSQL.** This creates a `Postgres` service with its own `DATABASE_URL`.
-2. Open the **`timmeny-admin-os` service → Variables**, and add a *reference* variable rather than pasting a literal connection string:
+```text
+DATABASE_URL = ${{Postgres.DATABASE_URL}}
+```
 
-   ```text
-   DATABASE_URL = ${{Postgres.DATABASE_URL}}
-   ```
+It is a *reference*, not a literal connection string, so it keeps working if Railway rotates the credential. It resolves to `postgresql://postgres:***@postgres.railway.internal:5432/railway` — note the `postgresql://` scheme, which SQLAlchemy maps to psycopg 2; `normalize_database_url` rewrites it to `postgresql+psycopg://`.
 
-   The reference keeps working if Railway rotates the credential.
-3. Leave everything else alone. Until `DATABASE_URL` is present the service behaves exactly as it does today; the new code paths are gated on it.
+The baseline migration has already been applied, so the first deploy's pre-deploy step is a no-op.
 
-Migrations run as a pre-deploy step, not at import time, so a failed migration cannot take a running service down mid-request. That will be added to `railway.json` in the same PR that introduces Alembic:
+Migrations run as a pre-deploy step, not at import time, so a failed migration cannot take a running service down mid-request. `railway.json` calls a guard script that exits cleanly when no database is configured:
 
 ```json
 "deploy": {
-  "preDeployCommand": ["alembic upgrade head"],
+  "preDeployCommand": ["sh scripts/migrate.sh"],
   "startCommand": "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
 }
 ```
@@ -124,7 +122,8 @@ Treat the refresh token as a mailbox credential: it grants read, label, and arch
 
 - [x] `Admin OS ID` text column exists on the To Do List board and is hidden from the default view
 - [x] The board's `Status` done-labels are confirmed: completion is `Done`
-- [ ] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
+- [x] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
+- [x] Schema applied: `alembic_version` reports `0001_baseline`
 - [ ] Consent screen publishing status reads **In production**
 - [ ] Only `gmail.modify` is granted — check https://myaccount.google.com/permissions
 - [ ] `financial/taxes` label exists and contains the threads intended as evidence

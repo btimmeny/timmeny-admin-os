@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.9.1
+  version: 0.9.2
   description: API for the Timmeny Admin OS daily review workflow.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
@@ -31,44 +31,67 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewResponse"
+                type: object
+                additionalProperties: true
 
   /review/runs/{run_id}:
     get:
       operationId: readDailyReview
       summary: Read the current review state
       parameters:
-        - $ref: "#/components/parameters/RunId"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: Review returned.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewResponse"
+                type: object
+                additionalProperties: true
 
   /review/runs/{run_id}/groups/{capability_key}:
     get:
       operationId: readReviewGroup
       summary: Read one capability group
       parameters:
-        - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/CapabilityKey"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: capability_key
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: Group returned.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewResponse"
+                type: object
+                additionalProperties: true
 
   /review/runs/{run_id}/items/{item_id}/decision:
     post:
       operationId: decideReviewItem
       summary: Record a decision on one item
       parameters:
-        - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/ItemId"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -93,15 +116,24 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewResponse"
+                type: object
+                additionalProperties: true
 
   /review/runs/{run_id}/groups/{capability_key}/decisions:
     post:
       operationId: decideReviewGroup
       summary: Record one decision for several items
       parameters:
-        - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/CapabilityKey"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: capability_key
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -127,14 +159,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReviewResponse"
+                type: object
+                additionalProperties: true
 
   /review/runs/{run_id}/actions/prepare:
     post:
       operationId: prepareReviewActions
       summary: Prepare approved actions
       parameters:
-        - $ref: "#/components/parameters/RunId"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: false
         content:
@@ -158,15 +195,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericResponse"
+                type: object
+                additionalProperties: true
 
   /review/runs/{run_id}/actions/execute:
     post:
       operationId: executeReviewActions
       summary: Execute and verify prepared actions
-      description: Executes only after confirm is true and server-side permissions allow it.
+      description: Executes only after confirm is true and server permissions allow it.
       parameters:
-        - $ref: "#/components/parameters/RunId"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -189,16 +231,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericResponse"
+                type: object
+                additionalProperties: true
 
   /review/runs/{run_id}/items/{item_id}/send-draft:
     post:
       operationId: approveSendDraft
       summary: Approve sending one verified draft
-      description: Approves the exact draft; execution remains a separate operation.
+      description: Approves the exact draft; execution remains separate.
       parameters:
-        - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/ItemId"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item_id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -219,7 +270,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericResponse"
+                type: object
+                additionalProperties: true
 
   /learning/rules:
     post:
@@ -251,14 +303,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericResponse"
+                type: object
+                additionalProperties: true
 
   /learning/rules/{rule_id}/confirm:
     post:
       operationId: confirmCandidateRule
       summary: Confirm a rule for recommendations
       parameters:
-        - $ref: "#/components/parameters/RuleId"
+        - name: rule_id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: false
         content:
@@ -274,14 +331,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericResponse"
+                type: object
+                additionalProperties: true
 
   /learning/rules/{rule_id}/promote:
     post:
       operationId: promoteCandidateRule
       summary: Promote a confirmed rule to automatable
       parameters:
-        - $ref: "#/components/parameters/RuleId"
+        - name: rule_id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -300,57 +362,10 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenericResponse"
-
+                type: object
+                additionalProperties: true
 components:
   securitySchemes:
     ApiKeyAuth:
       type: http
       scheme: bearer
-  parameters:
-    RunId:
-      name: run_id
-      in: path
-      required: true
-      schema:
-        type: string
-    ItemId:
-      name: item_id
-      in: path
-      required: true
-      schema:
-        type: string
-    CapabilityKey:
-      name: capability_key
-      in: path
-      required: true
-      schema:
-        type: string
-    RuleId:
-      name: rule_id
-      in: path
-      required: true
-      schema:
-        type: string
-  schemas:
-    ReviewResponse:
-      type: object
-      additionalProperties: true
-      properties:
-        run_id:
-          type: string
-        state:
-          type: string
-        current_group:
-          type: object
-          additionalProperties: true
-        screen:
-          type: object
-          additionalProperties: true
-        warnings:
-          type: array
-          items:
-            type: string
-    GenericResponse:
-      type: object
-      additionalProperties: true

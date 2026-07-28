@@ -129,6 +129,80 @@ Lists the evidence awaiting a human decision, newest first. Requires `TIMMENY_OS
 
 Nothing resolves an item yet — resolution means creating a Monday task, which is the next increment.
 
+### `GET /admin/monday/board`
+
+Reads the To Do List board (`TODO_BOARD_ID`). Requires `TIMMENY_OS_API_KEY` and `MONDAY_API_TOKEN`. Both filters are applied by Monday, not after paging, so a filtered read is the whole answer rather than the first page of one.
+
+| Parameter | Meaning |
+|---|---|
+| `filter` | `open` (default), `done`, or `all`. An item with no status counts as open. |
+| `contains` | Case-insensitive substring of the item name. |
+| `limit` | 1–1500, default 200. |
+
+```json
+{
+  "board_id": "8962223984",
+  "filter": "open",
+  "contains": "KPMG",
+  "count": 1,
+  "items": [
+    {
+      "item_id": "11002016029",
+      "name": "Annual Taxes | KPMG",
+      "group": "Tasks | Action Items",
+      "status": "Not Yet Started",
+      "admin_os_id": null,
+      "action_date": null
+    }
+  ]
+}
+```
+
+### `POST /admin/monday/duplicate-check`
+
+Ranks existing board items against proposed task titles, so a candidate can be reviewed against what the board already holds before anything is created. Reads only; see [ADR-0005](docs/adr/ADR-0005-duplicate-review-before-monday-writes.md).
+
+Request. `titles` takes up to 20 candidates; `filter` defaults to `all` because completed work answers the recurring-obligation case ("you filed this last year").
+
+```json
+{
+  "titles": ["Annual Taxes | KPMG", "Renew the car registration"],
+  "filter": "all",
+  "match_limit": 5,
+  "threshold": 0.45
+}
+```
+
+Response. `score` runs 0–1; at or above `strong_match_score` the candidate almost certainly already exists.
+
+```json
+{
+  "board_id": "8962223984",
+  "filter": "all",
+  "compared": 1047,
+  "strong_match_score": 0.75,
+  "reports": [
+    {
+      "title": "Annual Taxes | KPMG",
+      "normalized_title": "annual taxes kpmg",
+      "has_strong_match": true,
+      "matches": [
+        {
+          "item_id": "11002016029",
+          "name": "Annual Taxes | KPMG",
+          "status": "Not Yet Started",
+          "group": "Tasks | Action Items",
+          "admin_os_id": null,
+          "score": 1.0,
+          "is_done": false,
+          "is_strong": true
+        }
+      ]
+    }
+  ]
+}
+```
+
 ### `POST /todos`
 
 Creates a todo item on a Monday.com board.

@@ -7,17 +7,32 @@ from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from adminos.adapters.gmail import GmailAuthError, GmailError, open_gmail_client
+from adminos.adapters.monday import (
+    ItemFilter,
+    MondayAuthError,
+    MondayError,
+    MondayItem,
+    open_monday_client,
+)
 from adminos.api.security import require_api_key
 from adminos.config import (
     get_database_url,
     get_gmail_credentials,
     get_gmail_intake_label,
+    get_monday_token,
+    get_todo_board_id,
     is_gmail_write_enabled,
     redact_database_url,
 )
 from adminos.db import engine
 from adminos.db.engine import DatabaseNotConfigured, session_scope
 from adminos.domain.classification import classify_evidence, read_review_queue
+from adminos.domain.duplicates import (
+    CANDIDATE_SCORE,
+    DEFAULT_MATCH_LIMIT,
+    STRONG_MATCH_SCORE,
+    find_duplicates,
+)
 from adminos.domain.evidence import (
     DEFAULT_SYNC_LIMIT,
     MAX_SYNC_LIMIT,
@@ -30,6 +45,9 @@ from adminos.logging import get_logger
 
 DEFAULT_REVIEW_LIMIT = 50
 MAX_REVIEW_LIMIT = 200
+DEFAULT_BOARD_LIMIT = 200
+MAX_BOARD_LIMIT = 1500
+MAX_DUPLICATE_TITLES = 20
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -255,6 +273,175 @@ def read_review_items(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return ReviewQueueResponse(count=len(items), items=items)
+
+
+class BoardItemResponse(BaseModel):
+    item_id: str
+    name: str
+    group: str | None
+    status: str | None
+    admin_os_id: str | None
+    action_date: str | None
+
+
+class BoardItemsResponse(BaseModel):
+    board_id: str
+    filter: ItemFilter
+    contains: str | None
+    count: int
+    items: list[BoardItemResponse]
+
+
+class DuplicateCheckRequest(BaseModel):
+    titles: list[str]
+    filter: ItemFilter = ItemFilter.ALL
+    match_limit: int = DEFAULT_MATCH_LIMIT
+    threshold: float = CANDIDATE_SCORE
+
+
+class DuplicateMatchResponse(BaseModel):
+    item_id: str
+    name: str
+    status: str | None
+    group: str | None
+    admin_os_id: str | None
+    score: float
+    is_done: bool
+    is_strong: bool
+
+
+class DuplicateReportResponse(BaseModel):
+    title: str
+    normalized_title: str
+    has_strong_match: bool
+    matches: list[DuplicateMatchResponse]
+
+
+class DuplicateCheckResponse(BaseModel):
+    board_id: str
+    filter: ItemFilter
+    compared: int
+    strong_match_score: float
+    reports: list[DuplicateReportResponse]
+
+
+@router.get("/monday/board", response_model=BoardItemsResponse)
+async def read_board_items(
+    _: None = Depends(require_api_key),
+    item_filter: ItemFilter = Query(default=ItemFilter.OPEN, alias="filter"),
+    contains: str | None = Query(default=None, min_length=1, max_length=200),
+    limit: int = Query(default=DEFAULT_BOARD_LIMIT, ge=1, le=MAX_BOARD_LIMIT),
+) -> BoardItemsResponse:
+    """List To Do List items, optionally filtered by status and name."""
+    board_id, items = await list_todo_items(item_filter, contains, limit)
+    return BoardItemsResponse(
+        board_id=board_id,
+        filter=item_filter,
+        contains=contains,
+        count=len(items),
+        items=[
+            BoardItemResponse(
+                item_id=item.item_id,
+                name=item.name,
+                group=item.group,
+                status=item.status,
+                admin_os_id=item.admin_os_id,
+                action_date=item.action_date,
+            )
+            for item in items
+        ],
+    )
+
+
+@router.post("/monday/duplicate-check", response_model=DuplicateCheckResponse)
+async def check_duplicates(
+    request: DuplicateCheckRequest,
+    _: None = Depends(require_api_key),
+) -> DuplicateCheckResponse:
+    """Rank existing board items against proposed task titles.
+
+    Reads the board and writes nothing. Completed items are compared too: on a
+    board of recurring obligations the useful answer is often "you did this
+    last year".
+    """
+    titles = [title.strip() for title in request.titles if title.strip()]
+    if not titles:
+        raise HTTPException(status_code=422, detail="Provide at least one non-empty title.")
+    if len(titles) > MAX_DUPLICATE_TITLES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Provide at most {MAX_DUPLICATE_TITLES} titles per request.",
+        )
+
+    board_id, items = await list_todo_items(request.filter, None, MAX_BOARD_LIMIT)
+
+    reports = []
+    for title in titles:
+        report = find_duplicates(
+            title,
+            items,
+            limit=request.match_limit,
+            threshold=request.threshold,
+        )
+        reports.append(
+            DuplicateReportResponse(
+                title=report.title,
+                normalized_title=report.normalized_title,
+                has_strong_match=report.has_strong_match,
+                matches=[
+                    DuplicateMatchResponse(
+                        item_id=match.item_id,
+                        name=match.name,
+                        status=match.status,
+                        group=match.group,
+                        admin_os_id=match.admin_os_id,
+                        score=match.score,
+                        is_done=match.is_done,
+                        is_strong=match.is_strong,
+                    )
+                    for match in report.matches
+                ],
+            )
+        )
+
+    return DuplicateCheckResponse(
+        board_id=board_id,
+        filter=request.filter,
+        compared=len(items),
+        strong_match_score=STRONG_MATCH_SCORE,
+        reports=reports,
+    )
+
+
+async def list_todo_items(
+    item_filter: ItemFilter,
+    contains: str | None,
+    limit: int,
+) -> tuple[str, list[MondayItem]]:
+    """Read the To Do List board, the only board in the slice's scope."""
+    token = get_monday_token()
+    if token is None:
+        raise HTTPException(status_code=503, detail="MONDAY_API_TOKEN is not configured.")
+
+    board_id = get_todo_board_id()
+    if board_id is None:
+        raise HTTPException(status_code=503, detail="TODO_BOARD_ID is not configured.")
+
+    try:
+        async with open_monday_client(token) as client:
+            items = await client.list_items(
+                board_id,
+                item_filter=item_filter,
+                contains=contains,
+                limit=limit,
+            )
+    except MondayAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except MondayError as exc:
+        logger.error("monday board read failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return board_id, items
 
 
 def read_current_revision() -> str | None:

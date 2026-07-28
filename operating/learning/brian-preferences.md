@@ -9,14 +9,41 @@ These preferences were learned through real inbox-review discussions. They remai
 - Present one ordered table rather than separate disconnected summaries.
 - Put items requiring Brian's action first.
 - Every email or thread must have a proposed next action, even when the recommendation is to wait, remind, archive, or move it to Trash.
-- During the bootstrap phase, expose rich metadata so Brian can correct outcomes, actions, entities, relationships, dependencies, and dispositions.
+- During the bootstrap phase, expose rich metadata so Brian can correct outcomes, actions, entities, relationships, dependencies, dispositions, confidence, and rule behavior.
 - Explicitly ask for feedback about groupings, entities, relationships, dependencies, and missing context.
+- Compress repeated items into a coherent capability group when item-level identity, confidence, exceptions, and audit remain visible.
 
 ## Source Grounding
 
 - Refresh Gmail when Brian requests an inbox or operational review; do not rely on remembered inbox contents.
 - Read the current Git operating state before making conclusions about current curated operational state.
+- Refresh Monday.com when current execution state or duplicate detection is relevant.
 - Treat screenshots as current evidence for systems without live integrations.
+
+## Advisor and Expert Calls
+
+Use `Career - Advisor/Expert Calls` as the Gmail label and morning-review group for expert-network consultations, advisor calls, paid expert interviews, and similar advisory opportunities.
+
+Confirmed operating preferences:
+
+- Apply or preserve the label using deterministic, versioned sender, domain, and phrase rules when the match is sufficiently clear.
+- Treat the label as a grouping signal, not as an acceptance decision or automatic task.
+- Present these opportunities together for bulk review while retaining each distinct opportunity as an individual item.
+- Show separate confidence for group classification and recommended action.
+- Permit bulk confirmation only when the items share the same proposed disposition and uncertain exceptions are excluded.
+- Record one final decision per opportunity even when confirmed in bulk.
+- Do not send replies, accept or decline engagements, archive messages, delete messages, or create Monday tasks solely because the deterministic label matched.
+- Retain corrections as structured learning and propose reusable rules explicitly rather than learning silently.
+
+For each opportunity assess separately:
+
+- capability fit: whether Brian can credibly advise based on his experience;
+- strategic fit: whether the topic reinforces where Brian wants to spend time and position himself;
+- compensation or commercial value when stated;
+- preparation and time effort;
+- relationship value;
+- urgency and response deadline;
+- compliance constraints or missing information.
 
 ## Executive Advisory Pipeline
 

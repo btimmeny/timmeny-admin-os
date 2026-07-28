@@ -48,6 +48,8 @@ Once the database is attached, `GET /admin/db-status` (authenticated) reports `{
 
 ## 3. Google — create the OAuth credential
 
+**Done.** The OAuth client exists, the refresh token is minted, and the five Gmail variables are set on the `timmeny-admin-os` service. `GET /admin/gmail/status` reports `configured: true` and `intake_label_found: true`. The steps below are kept for when the credential has to be rotated or rebuilt.
+
 This produces three values: `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`.
 
 A service account cannot be used. Domain-wide delegation requires a Workspace domain admin, and this is a personal `gmail.com` mailbox, so access must come from a credential the account owner consents to once.
@@ -144,9 +146,11 @@ The sync only reads. It creates no Monday task, changes no Gmail label, and arch
 - [x] The board's `Status` done-labels are confirmed: completion is `Done`
 - [x] Railway Postgres service exists and `DATABASE_URL` resolves on the app service
 - [x] Schema applied: `alembic_version` reports `0001_baseline`
-- [ ] Consent screen publishing status reads **In production**
+- [ ] Consent screen publishing status reads **In production** — verify this, since a `Testing` screen expires the refresh token weekly and the failure would not appear for seven days
 - [ ] Only `gmail.modify` is granted — check https://myaccount.google.com/permissions
-- [ ] `financial/taxes` label exists and contains the threads intended as evidence
-- [ ] `GMAIL_WRITE_ENABLED` is `false`
-- [ ] `GET /admin/gmail/status` reports `configured: true` and `intake_label_found: true`
-- [ ] `POST /admin/gmail/sync` returns a non-zero `scanned` count
+- [x] `financial/taxes` label exists and contains the threads intended as evidence
+- [x] `GMAIL_WRITE_ENABLED` is `false`
+- [x] `GET /admin/gmail/status` reports `configured: true` and `intake_label_found: true`
+- [x] `POST /admin/gmail/sync` returns a non-zero `scanned` count
+
+First production sync, 2026-07-28: 131 threads recorded as evidence, one row per thread, and an immediate re-run reported `created: 0, unchanged: 25` over the same page — the idempotency claim holds against the real mailbox.

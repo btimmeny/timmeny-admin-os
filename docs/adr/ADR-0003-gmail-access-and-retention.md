@@ -24,7 +24,9 @@ The mailbox also contains material the service has no reason to hold. `PRIVACY.m
 
 **Scope.** Exactly one: `https://www.googleapis.com/auth/gmail.modify` — read, label, and archive, with no ability to permanently delete. `gmail.readonly` is insufficient (cannot archive) and broader scopes are unnecessary. Permanent deletion is deliberately out of reach: the "move to Trash" disposition named in the domain model is implemented as `trash`, not `delete`, and is not part of this slice.
 
-**Intake scope.** The service reads only threads carrying the label **`financial/taxes`**. It does not read the inbox at large. The label is configuration (`GMAIL_INTAKE_LABEL`), so the intake set can be widened one label at a time as the loop proves reliable. Anything outside the configured label is invisible to Admin OS.
+**Intake scope.** The service reads only threads that are **in the inbox and carry the label `financial/taxes`** — Gmail ANDs the two label ids, so both must hold. It does not read the inbox at large. The label is configuration (`GMAIL_INTAKE_LABEL`), so the intake set can be widened one label at a time as the loop proves reliable. Anything outside that intersection is invisible to Admin OS.
+
+The `INBOX` half of the intersection was added after the first production sync recorded 131 threads reaching back to 2023, most of them long since archived. Archiving is how the mailbox owner says they are finished with something, so honouring it as a scope boundary means the intake set is what is actually outstanding rather than the full history of the label. `POST /admin/gmail/sync?prune=true` deletes evidence for threads that have left the set, which keeps that boundary true over time instead of only at first sync.
 
 **Transport.** The Gmail REST API is called directly with `httpx`, matching the existing Monday adapter, rather than pulling in `google-api-python-client`. Only `google-auth` is added, for token refresh.
 
@@ -48,7 +50,8 @@ The mailbox also contains material the service has no reason to hold. `PRIVACY.m
 
 - One manual consent step, performed once by the account owner, produces a refresh token that must be treated as a mailbox credential.
 - The refresh token is a single point of failure: revoking account access, changing the password, or removing the app from account permissions invalidates it. Token refresh failures must surface as a blocked workflow, not a silent no-op.
-- Only `financial/taxes` threads exist as far as Admin OS is concerned, so the Executive Review's coverage claims must be scoped to that label rather than presented as a whole-mailbox view.
+- Only inbox threads labelled `financial/taxes` exist as far as Admin OS is concerned, so the Executive Review's coverage claims must be scoped accordingly rather than presented as a whole-mailbox view.
+- Evidence is not an append-only archive. A pruned thread's provenance is deleted with it, so anything derived from evidence and intended to outlive it — a Monday task, a classification, an audit entry — must not depend on the evidence row still existing.
 - Classification cannot rely on body text, which reinforces a deterministic, explainable v1.
 - Because bodies are not stored, re-classification of historical evidence under improved rules requires re-fetching from Gmail.
 - The `gmail.modify` scope cannot permanently delete, so an accidental destructive action is bounded at "moved to Trash", which is recoverable for 30 days.

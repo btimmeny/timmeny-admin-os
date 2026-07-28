@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from adminos.adapters.gmail import (
+    INBOX_LABEL_ID,
     GmailAuthError,
     GmailClient,
     GmailError,
@@ -136,7 +137,7 @@ def test_list_thread_ids_follows_pagination_up_to_the_limit() -> None:
     )
     client, _ = build_client({"/threads": pages.__next__})
 
-    assert asyncio.run(client.list_thread_ids("Label_9", limit=5)) == ["t1", "t2", "t3"]
+    assert asyncio.run(client.list_thread_ids(["Label_9"], limit=5)) == ["t1", "t2", "t3"]
 
 
 def test_list_thread_ids_stops_at_the_limit() -> None:
@@ -144,7 +145,18 @@ def test_list_thread_ids_stops_at_the_limit() -> None:
         {"/threads": {"threads": [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}]}}
     )
 
-    assert asyncio.run(client.list_thread_ids("Label_9", limit=2)) == ["t1", "t2"]
+    assert asyncio.run(client.list_thread_ids(["Label_9"], limit=2)) == ["t1", "t2"]
+
+
+def test_list_thread_ids_sends_every_label() -> None:
+    """Gmail ANDs labelIds, which is how INBOX narrows the intake label."""
+    client, http_client = build_client({"/threads": {"threads": [{"id": "t1"}]}})
+
+    asyncio.run(client.list_thread_ids([INBOX_LABEL_ID, "Label_9"], limit=5))
+
+    _method, _url, params = http_client.requests[-1]
+    assert params is not None
+    assert params["labelIds"] == ["INBOX", "Label_9"]
 
 
 def test_fetch_thread_requests_metadata_only() -> None:
@@ -176,6 +188,16 @@ def test_gmail_http_error_is_wrapped() -> None:
 
     with pytest.raises(GmailError):
         asyncio.run(client.resolve_label_id("financial/taxes"))
+
+
+def test_gmail_error_carries_no_response_body() -> None:
+    """Upstream text can echo mailbox content, so only the status is surfaced."""
+    client, _ = build_client({"/labels": 500})
+
+    with pytest.raises(GmailError) as error:
+        asyncio.run(client.resolve_label_id("financial/taxes"))
+
+    assert str(error.value) == "Gmail returned HTTP 500."
 
 
 def test_build_thread_takes_the_subject_from_the_first_message() -> None:

@@ -49,7 +49,7 @@ Reports whether the operational database is reachable and migrated. Requires `TI
 
 ### `GET /admin/gmail/status`
 
-Reports whether Gmail is configured and whether the intake label resolves. Requires `TIMMENY_OS_API_KEY`.
+Reports whether Gmail is configured and whether the intake label resolves. Requires `TIMMENY_OS_API_KEY`. `configured` is false unless all three of `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN` are set.
 
 ```json
 {
@@ -63,11 +63,16 @@ Reports whether Gmail is configured and whether the intake label resolves. Requi
 
 ### `POST /admin/gmail/sync`
 
-Records every thread carrying the intake label as evidence. Requires `TIMMENY_OS_API_KEY`, `DATABASE_URL`, and the Gmail credentials.
+Records threads that are **in the inbox and carry the intake label** as evidence. Requires `TIMMENY_OS_API_KEY`, `DATABASE_URL`, and the Gmail credentials.
 
 Read-only with respect to both Gmail and Monday.com: no labels change, no mail is archived, and no task is created. Classification and task creation are separate steps.
 
-`limit` (query, 1–200, default 50) bounds how many threads are scanned.
+Intake is the intersection of `INBOX` and the label, not the label alone. Archiving a thread is how the mailbox owner says they are finished with it, so archived mail stays out of scope even when it still carries the label.
+
+| Query parameter | Default | Effect |
+|---|---|---|
+| `limit` | 50 | Threads to scan, 1–200 |
+| `prune` | `false` | Delete evidence for Gmail threads no longer in scope |
 
 ```json
 {
@@ -75,11 +80,14 @@ Read-only with respect to both Gmail and Monday.com: no labels change, no mail i
   "scanned": 12,
   "created": 3,
   "updated": 1,
-  "unchanged": 8
+  "unchanged": 8,
+  "removed": 0
 }
 ```
 
 Evidence is keyed by thread, so re-running the sync updates existing rows rather than duplicating them.
+
+`prune` returns `409` when the scan filled `limit`: a truncated listing cannot distinguish a thread that was archived from one that is simply further down the page, and pruning on that basis would delete everything past the first page.
 
 ### `POST /todos`
 

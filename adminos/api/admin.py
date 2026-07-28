@@ -20,6 +20,7 @@ from adminos.domain.evidence import (
     DEFAULT_SYNC_LIMIT,
     MAX_SYNC_LIMIT,
     IntakeLabelMissing,
+    PruneScanTruncated,
     sync_gmail_evidence,
 )
 from adminos.logging import get_logger
@@ -90,6 +91,7 @@ class GmailSyncResponse(BaseModel):
     created: int
     updated: int
     unchanged: int
+    removed: int
 
 
 @router.get("/gmail/status", response_model=GmailStatusResponse)
@@ -135,11 +137,13 @@ async def read_gmail_status(_: None = Depends(require_api_key)) -> GmailStatusRe
 async def sync_gmail(
     _: None = Depends(require_api_key),
     limit: int = Query(default=DEFAULT_SYNC_LIMIT, ge=1, le=MAX_SYNC_LIMIT),
+    prune: bool = Query(default=False),
 ) -> GmailSyncResponse:
-    """Record threads carrying the intake label as evidence.
+    """Record inbox threads carrying the intake label as evidence.
 
-    Reads only. No Gmail labels change, no Monday task is created, and no
-    classification happens here.
+    Reads only, as far as Gmail and Monday are concerned: no label changes, no
+    task, no classification. `prune` deletes local evidence for threads that
+    have left the inbox-scoped set.
     """
     credentials = get_gmail_credentials()
     if credentials is None:
@@ -153,11 +157,14 @@ async def sync_gmail(
                     session,
                     get_gmail_intake_label(),
                     limit=limit,
+                    prune=prune,
                 )
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except IntakeLabelMissing as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PruneScanTruncated as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except GmailAuthError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except GmailError as exc:
@@ -170,6 +177,7 @@ async def sync_gmail(
         created=result.created,
         updated=result.updated,
         unchanged=result.unchanged,
+        removed=result.removed,
     )
 
 

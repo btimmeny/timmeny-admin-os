@@ -51,6 +51,7 @@ class MondayItem:
     status: str | None
     admin_os_id: str | None
     action_date: str | None
+    board_id: str | None = None
 
     @property
     def is_done(self) -> bool:
@@ -63,14 +64,16 @@ ITEM_FIELDS = f"""
   group {{ title }}
   column_values(ids: {json.dumps(list(READ_COLUMN_IDS))}) {{ id text }}
 """
+VERIFY_FIELDS = f"{ITEM_FIELDS}  board {{ id }}\n"
 
 
 class MondayClient:
     """A read-only Monday GraphQL client for the coordination layer.
 
     Separate from the connector in `main.py`, which raises `HTTPException` from
-    inside the adapter and is therefore unusable outside a request. Writes are
-    deliberately absent until identity and verification exist; see ADR-0002.
+    inside the adapter and is therefore unusable outside a request. Mutation
+    lives in `MondayWriter`, so a caller that only needs to read holds an object
+    that cannot write.
     """
 
     def __init__(self, token: str, http_client: httpx.AsyncClient) -> None:
@@ -217,6 +220,50 @@ class MondayClient:
 
         return items[:limit]
 
+    async def read_item(self, item_id: str) -> MondayItem | None:
+        """Read one item back from Monday, including the board it landed on."""
+        data = await self.execute(
+            f"query Item($item_id: ID!) {{ items(ids: [$item_id]) {{{VERIFY_FIELDS}}} }}",
+            {"item_id": item_id},
+        )
+        items = data.get("items")
+        if not isinstance(items, list) or not items:
+            return None
+        return build_item(items[0]) if isinstance(items[0], dict) else None
+
+    async def find_by_admin_os_id(self, board_id: str, admin_os_id: str) -> MondayItem | None:
+        """Find the item carrying an Admin OS ID, if the board already has one.
+
+        This is the crash-recovery read from ADR-0002: a create that succeeded
+        at Monday but never returned leaves an item stamped with a reserved id,
+        and finding it is what makes the retry an adoption instead of a
+        duplicate.
+        """
+        query = f"""
+        query ByAdminOsId($board_id: ID!, $column_id: String!, $value: String!) {{
+          items_page_by_column_values(
+            limit: 2
+            board_id: $board_id
+            columns: [{{column_id: $column_id, column_values: [$value]}}]
+          ) {{
+            items {{{VERIFY_FIELDS}}}
+          }}
+        }}
+        """
+        data = await self.execute(
+            query,
+            {
+                "board_id": board_id,
+                "column_id": ADMIN_OS_ID_COLUMN_ID,
+                "value": admin_os_id,
+            },
+        )
+        page = data.get("items_page_by_column_values")
+        items = build_items(page.get("items")) if isinstance(page, dict) else []
+        if len(items) > 1:
+            raise MondayError(f"Admin OS ID {admin_os_id} is on more than one Monday item.")
+        return items[0] if items else None
+
     async def read_next_page(self, cursor: str, limit: int) -> dict[str, Any]:
         query = f"""
         query NextItems($cursor: String!, $limit: Int!) {{
@@ -233,10 +280,68 @@ class MondayClient:
         return page
 
 
+class MondayWriter(MondayClient):
+    """A Monday client that can also create items.
+
+    Writing is a separate class so that every read path — the board listing and
+    the duplicate check — holds a client with no mutation on it at all, rather
+    than relying on a caller not to reach for one.
+    """
+
+    async def create_item(
+        self,
+        board_id: str,
+        name: str,
+        admin_os_id: str,
+        group_id: str | None = None,
+        action_date: str | None = None,
+    ) -> str:
+        """Create an item stamped with its Admin OS ID and return the item id."""
+        column_values: dict[str, Any] = {ADMIN_OS_ID_COLUMN_ID: admin_os_id}
+        if action_date:
+            column_values[ACTION_DATE_COLUMN_ID] = {"date": action_date}
+
+        query = """
+        mutation CreateItem(
+          $board_id: ID!
+          $group_id: String
+          $item_name: String!
+          $column_values: JSON
+        ) {
+          create_item(
+            board_id: $board_id
+            group_id: $group_id
+            item_name: $item_name
+            column_values: $column_values
+          ) { id }
+        }
+        """
+        data = await self.execute(
+            query,
+            {
+                "board_id": board_id,
+                "group_id": group_id,
+                "item_name": name,
+                "column_values": json.dumps(column_values),
+            },
+        )
+        created = data.get("create_item")
+        item_id = created.get("id") if isinstance(created, dict) else None
+        if not item_id:
+            raise MondayError("Monday accepted the create but returned no item id.")
+        return str(item_id)
+
+
 @asynccontextmanager
 async def open_monday_client(token: str) -> AsyncIterator[MondayClient]:
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http_client:
         yield MondayClient(token, http_client)
+
+
+@asynccontextmanager
+async def open_monday_writer(token: str) -> AsyncIterator[MondayWriter]:
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as http_client:
+        yield MondayWriter(token, http_client)
 
 
 def find_label_index(settings: Any, label: str) -> int | None:
@@ -307,6 +412,7 @@ def build_item(raw: dict[str, Any]) -> MondayItem:
         if isinstance(column, dict)
     }
     group = raw.get("group")
+    board = raw.get("board")
     return MondayItem(
         item_id=str(raw.get("id") or ""),
         name=str(raw.get("name") or ""),
@@ -314,6 +420,7 @@ def build_item(raw: dict[str, Any]) -> MondayItem:
         status=read_text(columns.get(STATUS_COLUMN_ID)),
         admin_os_id=read_text(columns.get(ADMIN_OS_ID_COLUMN_ID)),
         action_date=read_text(columns.get(ACTION_DATE_COLUMN_ID)),
+        board_id=str(board.get("id")) if isinstance(board, dict) and board.get("id") else None,
     )
 
 

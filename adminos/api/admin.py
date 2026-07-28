@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -13,6 +13,7 @@ from adminos.adapters.monday import (
     MondayError,
     MondayItem,
     open_monday_client,
+    open_monday_writer,
 )
 from adminos.api.security import require_api_key
 from adminos.config import (
@@ -21,6 +22,7 @@ from adminos.config import (
     get_gmail_intake_label,
     get_monday_token,
     get_todo_board_id,
+    get_todo_group_id,
     is_gmail_write_enabled,
     redact_database_url,
 )
@@ -31,6 +33,7 @@ from adminos.domain.duplicates import (
     CANDIDATE_SCORE,
     DEFAULT_MATCH_LIMIT,
     STRONG_MATCH_SCORE,
+    DuplicateReport,
     find_duplicates,
 )
 from adminos.domain.evidence import (
@@ -39,6 +42,12 @@ from adminos.domain.evidence import (
     IntakeLabelMissing,
     PruneScanTruncated,
     sync_gmail_evidence,
+)
+from adminos.domain.tasks import (
+    EvidenceNotFound,
+    TaskCreationRefused,
+    VerificationFailed,
+    create_task_from_evidence,
 )
 from adminos.logging import get_logger
 
@@ -353,6 +362,105 @@ async def read_board_items(
     )
 
 
+class CreateTaskRequest(BaseModel):
+    evidence_id: str
+    title: str = Field(min_length=1, max_length=255)
+    action_date: str | None = None
+    confirmed: bool = False
+
+
+class CreateTaskResponse(BaseModel):
+    run_id: str
+    operational_object_id: str
+    admin_os_id: str
+    item_id: str
+    board_id: str
+    title: str
+    adopted: bool
+    confirmed: bool
+    verified: bool
+    duplicates: DuplicateReportResponse
+
+
+class TaskRefusedResponse(BaseModel):
+    detail: str
+    duplicates: DuplicateReportResponse
+
+
+@router.post(
+    "/monday/tasks",
+    response_model=CreateTaskResponse,
+    responses={409: {"model": TaskRefusedResponse}},
+)
+async def create_task(
+    request: CreateTaskRequest,
+    _: None = Depends(require_api_key),
+) -> CreateTaskResponse:
+    """Create one Monday task from one piece of evidence, and verify it landed.
+
+    Refuses with `409` unless the classifier is certain and the board holds
+    nothing resembling the title — `confirmed: true` is a human overriding that
+    refusal, and is the only way an uncertain task gets created.
+    """
+    title = request.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Provide a non-empty title.")
+
+    token = get_monday_token()
+    if token is None:
+        raise HTTPException(status_code=503, detail="MONDAY_API_TOKEN is not configured.")
+
+    board_id, items = await list_todo_items(ItemFilter.ALL, None, MAX_BOARD_LIMIT)
+
+    try:
+        async with open_monday_writer(token) as writer:
+            with session_scope() as session:
+                result = await create_task_from_evidence(
+                    session,
+                    writer,
+                    board_id,
+                    request.evidence_id,
+                    title,
+                    items,
+                    group_id=get_todo_group_id(),
+                    action_date=request.action_date,
+                    confirmed=request.confirmed,
+                )
+    except DatabaseNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except EvidenceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TaskCreationRefused as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=TaskRefusedResponse(
+                detail=exc.reason,
+                duplicates=build_report_response(exc.report),
+            ).model_dump(),
+        ) from exc
+    except VerificationFailed as exc:
+        logger.error("monday task verification failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except MondayAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except MondayError as exc:
+        logger.error("monday task creation failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return CreateTaskResponse(
+        run_id=result.run_id,
+        operational_object_id=result.operational_object_id,
+        admin_os_id=result.admin_os_id,
+        item_id=result.item_id,
+        board_id=result.board_id,
+        title=result.title,
+        adopted=result.adopted,
+        confirmed=result.confirmed,
+        verified=True,
+        duplicates=build_report_response(result.report),
+    )
+
+
 @router.post("/monday/duplicate-check", response_model=DuplicateCheckResponse)
 async def check_duplicates(
     request: DuplicateCheckRequest,
@@ -375,34 +483,17 @@ async def check_duplicates(
 
     board_id, items = await list_todo_items(request.filter, None, MAX_BOARD_LIMIT)
 
-    reports = []
-    for title in titles:
-        report = find_duplicates(
-            title,
-            items,
-            limit=request.match_limit,
-            threshold=request.threshold,
-        )
-        reports.append(
-            DuplicateReportResponse(
-                title=report.title,
-                normalized_title=report.normalized_title,
-                has_strong_match=report.has_strong_match,
-                matches=[
-                    DuplicateMatchResponse(
-                        item_id=match.item_id,
-                        name=match.name,
-                        status=match.status,
-                        group=match.group,
-                        admin_os_id=match.admin_os_id,
-                        score=match.score,
-                        is_done=match.is_done,
-                        is_strong=match.is_strong,
-                    )
-                    for match in report.matches
-                ],
+    reports = [
+        build_report_response(
+            find_duplicates(
+                title,
+                items,
+                limit=request.match_limit,
+                threshold=request.threshold,
             )
         )
+        for title in titles
+    ]
 
     return DuplicateCheckResponse(
         board_id=board_id,
@@ -410,6 +501,27 @@ async def check_duplicates(
         compared=len(items),
         strong_match_score=STRONG_MATCH_SCORE,
         reports=reports,
+    )
+
+
+def build_report_response(report: DuplicateReport) -> DuplicateReportResponse:
+    return DuplicateReportResponse(
+        title=report.title,
+        normalized_title=report.normalized_title,
+        has_strong_match=report.has_strong_match,
+        matches=[
+            DuplicateMatchResponse(
+                item_id=match.item_id,
+                name=match.name,
+                status=match.status,
+                group=match.group,
+                admin_os_id=match.admin_os_id,
+                score=match.score,
+                is_done=match.is_done,
+                is_strong=match.is_strong,
+            )
+            for match in report.matches
+        ],
     )
 
 

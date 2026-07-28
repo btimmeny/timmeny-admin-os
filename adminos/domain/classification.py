@@ -5,7 +5,8 @@ from enum import StrEnum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from adminos.db.models import Classification, Evidence
+from adminos.db.models import Classification, Evidence, WorkflowRun
+from adminos.domain.workflow import WORKFLOW_NAME, RunState
 from adminos.logging import get_logger
 
 
@@ -116,11 +117,28 @@ def classify_evidence(session: Session) -> ClassificationRunResult:
 
 
 def read_review_queue(session: Session, limit: int) -> list[ReviewItem]:
-    """Return the evidence awaiting a human decision, newest first."""
+    """Return the evidence awaiting a human decision, newest first.
+
+    Evidence that has produced a verified Monday task is no longer awaiting
+    anything, so it leaves the queue. The classification itself is untouched:
+    it records what v1 inferred, and rewriting it to mean "handled" would
+    conflate an inference with a workflow outcome.
+    """
+    resolved = (
+        select(WorkflowRun.evidence_id)
+        .where(
+            WorkflowRun.workflow_name == WORKFLOW_NAME,
+            WorkflowRun.state == RunState.SUCCEEDED,
+        )
+        .scalar_subquery()
+    )
     rows = session.execute(
         select(Classification, Evidence)
         .join(Evidence, Evidence.id == Classification.evidence_id)
-        .where(Classification.requires_review.is_(True))
+        .where(
+            Classification.requires_review.is_(True),
+            Classification.evidence_id.not_in(resolved),
+        )
         .order_by(Evidence.received_at.desc().nullslast())
         .limit(limit)
     ).all()

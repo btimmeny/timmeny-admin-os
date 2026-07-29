@@ -114,6 +114,7 @@ def add_evidence(
         received_at=received_at or NOW,
         content_hash=content_hash or f"hash-{thread_id}",
         capability_keys=list(capabilities),
+        label_ids=["INBOX"],
     )
     session.add(evidence)
     session.flush()

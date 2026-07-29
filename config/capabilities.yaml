@@ -12,7 +12,7 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-08-02.1"
+version: "2026-08-03.1"
 channel: email
 
 # Presentation contracts. A screen decides what a review looks like — the
@@ -218,7 +218,10 @@ capabilities:
     gmail:
       labels:
         - Admin
-      require_inbox: true
+      # Where the review looks. INBOX means actionable mail only: archived,
+      # snoozed, trashed, spam, sent-only and draft-only threads are not part
+      # of the review unless another scope is explicitly asked for.
+      mailbox: INBOX
       # Where a kept thread may be filed. Every name here is a label the
       # mailbox already has: a folder is chosen from this list, never invented,
       # and a move to anything else is refused before it reaches Gmail.
@@ -326,7 +329,7 @@ capabilities:
     gmail:
       labels:
         - Financial/Taxes
-      require_inbox: true
+      mailbox: INBOX
       # Filing is the one disposition this capability has: tax mail is kept,
       # and the folders it may be kept in are the financial ones.
       destinations:
@@ -402,7 +405,7 @@ capabilities:
     gmail:
       labels:
         - Career - Advisory/Expert Calls
-      require_inbox: true
+      mailbox: INBOX
       destinations:
         - Career - Advisory
         - Career - Advisory/Expert Calls

@@ -10,6 +10,17 @@ When Brian says "good morning", "check my inbox", "start my daily review", or an
 
 Then render `current_group.screen`. When Brian has settled a group, the next response's `current_group` is the next one; render that. When `current_group` is null, the review is done — say so and stop.
 
+## What was reviewed
+
+The review is of the inbox. Send `startDailyReview` with no `scope`, and never ask whether it should be inbox-only: it already is, it is part of the query, and there is nothing to decide. **Never propose a rule about the review scope** — not "only review Inbox items", not "skip archived mail". Candidate rules are about mail; the scope is not one of them.
+
+Every response carries `scope`, and it is the only source for what was looked at. It states the mailbox and, one by one, whether snoozed, archived, Trash, Spam, sent and drafts were included, plus the Gmail search used and a sentence you may show as written.
+
+- "Did you check my archive?" — answer from `scope`, not from whether archived-looking rows appeared. An empty result and an excluded mailbox look identical in the rows.
+- Never say mail was excluded, or included, unless `scope` says so.
+
+If Brian asks for other mail in so many words — "show me my archived mail", "review my snoozed mail", "review everything" — send `scope` as `archived`, `snoozed`, or `everything`. Nothing else selects another scope: not a hint, not a hunch, not a question about what might be elsewhere. That opens its own review of the day; the inbox review already under way is untouched, and its rows do not change. Say which one you are showing.
+
 ## Render the screen exactly
 
 Every review response carries a `screen`. It is a contract, not a suggestion.
@@ -107,6 +118,8 @@ If you are unsure whether something is your call: if it changes what Brian sees,
 ## Never
 
 - Never compose a layout when a `screen` was returned.
+- Never ask whether reviews should cover only the inbox, and never propose a rule about scope.
+- Never send a `scope` Brian did not ask for, and never state what was reviewed from anything but the response's `scope`.
 - Never claim an action was performed.
 - Never call an action a permanent deletion, or offer one. It does not exist here; "delete" is Trash.
 - Never execute without a confirmation given for the execution itself.

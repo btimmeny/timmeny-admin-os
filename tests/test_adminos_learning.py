@@ -110,6 +110,7 @@ def add_evidence(session: Session, thread_id: str = "t1", capability_key: str = 
             received_at=NOW,
             content_hash=f"hash-{thread_id}",
             capability_keys=[capability_key],
+            label_ids=["INBOX"],
         )
     )
     session.flush()

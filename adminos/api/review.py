@@ -27,6 +27,15 @@ from adminos.domain.evidence import (
     PruneScanTruncated,
     sync_gmail_evidence,
 )
+from adminos.domain.mailboxes import (
+    DEFAULT_SCOPE,
+    SCOPE_NAMES,
+    ReviewScope,
+    UnknownScope,
+    capability_scope,
+    read_scope,
+    read_stored_scope,
+)
 from adminos.domain.presentation import ScreenView, render_group
 from adminos.domain.review import (
     Assessment,
@@ -57,6 +66,51 @@ class StartReviewRequest(BaseModel):
     review_date: date | None = None
     sync: bool = True
     limit: int = Field(default=DEFAULT_SYNC_LIMIT, ge=1, le=MAX_SYNC_LIMIT)
+    scope: str | None = Field(
+        default=None,
+        description=(
+            "Which mail to review. Omit it for the default, which is the inbox: "
+            f"actionable mail only. Naming one of {SCOPE_NAMES} reviews that "
+            "instead, and only ever because it was asked for."
+        ),
+    )
+
+
+class ReviewScopeResponse(BaseModel):
+    """What was reviewed, stated rather than left to be inferred.
+
+    Returned on every review response so that "did you look at my archive?" is
+    answered from the run itself. Nothing here is a preference or a learned
+    rule: it is the query the review was built from.
+    """
+
+    name: str
+    mailbox: str
+    include_snoozed: bool
+    include_archived: bool
+    include_trash: bool
+    include_spam: bool
+    include_sent: bool
+    include_drafts: bool
+    requested: bool
+    gmail_query: str
+    description: str
+
+
+def build_scope_response(scope: ReviewScope) -> ReviewScopeResponse:
+    return ReviewScopeResponse(
+        name=scope.name,
+        mailbox=scope.mailbox.value,
+        include_snoozed=scope.include_snoozed,
+        include_archived=scope.include_archived,
+        include_trash=scope.include_trash,
+        include_spam=scope.include_spam,
+        include_sent=scope.include_sent,
+        include_drafts=scope.include_drafts,
+        requested=scope.requested,
+        gmail_query=scope.query(),
+        description=scope.describes(),
+    )
 
 
 class ItemResponse(BaseModel):
@@ -159,6 +213,7 @@ class GroupResponse(BaseModel):
     allowed_actions: list[str]
     allow_bulk_decisions: bool
     counts: dict[str, int]
+    scope: ReviewScopeResponse
     screen: ScreenResponse
     items: list[ItemResponse]
     restorable: list[RestorableItemResponse] = Field(default_factory=list)
@@ -176,6 +231,7 @@ class RunResponse(BaseModel):
     run_id: str
     review_date: date
     channel: str
+    scope: ReviewScopeResponse
     state: str
     config_version: str
     config_digest: str
@@ -266,16 +322,30 @@ async def start_review(
     One call answers "good morning": it refreshes the mailbox, builds or
     resumes the run, and hands back a single capability group rather than an
     undifferentiated inbox.
+
+    The review is of the inbox unless another scope is named. That is not a
+    preference to be confirmed or a rule to be learned; it is the query, and
+    the scope that was used comes back in the response.
     """
     loaded = read_capability_config()
     warnings: list[str] = []
 
+    try:
+        scope = read_scope(request.scope)
+    except UnknownScope as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     if request.sync:
-        warnings.extend(await refresh_evidence(loaded, request.limit))
+        warnings.extend(await refresh_evidence(loaded, request.limit, scope))
 
     try:
         with session_scope() as session:
-            view = start_or_resume_review(session, loaded, review_date=request.review_date)
+            view = start_or_resume_review(
+                session,
+                loaded,
+                review_date=request.review_date,
+                scope=scope,
+            )
             return build_run_response(view, warnings, loaded)
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -444,7 +514,11 @@ def assess_item(
         return build_item_response(assessed, capability)
 
 
-async def refresh_evidence(loaded: LoadedCapabilities, limit: int) -> list[str]:
+async def refresh_evidence(
+    loaded: LoadedCapabilities,
+    limit: int,
+    scope: ReviewScope = DEFAULT_SCOPE,
+) -> list[str]:
     """Pull new mail before the review runs. Never fatal to the review itself."""
     credentials = get_gmail_credentials()
     if credentials is None:
@@ -457,6 +531,7 @@ async def refresh_evidence(loaded: LoadedCapabilities, limit: int) -> list[str]:
                     client,
                     session,
                     loaded.enabled(),
+                    scope=scope,
                     limit=limit,
                 )
     except DatabaseNotConfigured as exc:
@@ -516,12 +591,14 @@ def build_run_response(
     warnings: list[str],
     loaded: LoadedCapabilities,
 ) -> RunResponse:
+    scope = read_stored_scope(view.run.scope)
     current = view.current_group()
     rendered = build_group_response(current, loaded, view.run) if current else None
     return RunResponse(
         run_id=view.run.id,
         review_date=view.run.review_date,
         channel=view.run.channel,
+        scope=build_scope_response(scope),
         state=view.run.state,
         config_version=view.run.config_version,
         config_digest=view.run.config_digest,
@@ -547,6 +624,7 @@ def build_group_response(
     run: ReviewRun,
 ) -> GroupResponse:
     screen = build_screen_response(view, loaded, run)
+    scope = capability_scope(read_stored_scope(run.scope), view.capability)
     return GroupResponse(
         capability_key=view.group.capability_key,
         capability_name=view.group.capability_name,
@@ -557,6 +635,7 @@ def build_group_response(
         allowed_actions=[action.value for action in view.capability.allowed_actions],
         allow_bulk_decisions=view.capability.approval.allow_bulk_decisions,
         counts=count_states(view.items),
+        scope=build_scope_response(scope),
         screen=screen,
         items=[build_item_response(item, view.capability) for item in view.items],
         restorable=build_restorable(view, run),

@@ -94,6 +94,14 @@ class Evidence(Base):
     snippet: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str | None] = mapped_column(String(DIGEST_LENGTH))
     capability_keys: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    label_ids: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    """Where the thread was when it was last seen, in Gmail's own terms.
+
+    What decides whether a thread belongs in a review: the scope is checked
+    against these labels, so a thread that has left the inbox drops out of the
+    next review without anything having to remember that it used to be there.
+    Null means never seen in any scope, which is not the same as being in one.
+    """
     created_at: Mapped[datetime] = created_at_column()
 
 
@@ -211,18 +219,24 @@ class WorkflowStep(Base):
 class ReviewRun(Base):
     """One daily review: the session Brian starts with "good morning".
 
-    Identity is the review date, so "start my review" twice in a day resumes
-    rather than restarts.
+    Identity is the review date and the scope, so "start my review" twice in a
+    day resumes rather than restarts, while "show me my archive" is a separate
+    review of a different set of mail rather than a change to today's.
     """
 
     __tablename__ = "review_runs"
     __table_args__ = (
-        UniqueConstraint("review_date", "channel", name="uq_review_run_date_channel"),
+        UniqueConstraint(
+            "review_date", "channel", "scope_name", name="uq_review_run_date_channel_scope"
+        ),
     )
 
     id: Mapped[str] = id_column()
     review_date: Mapped[date] = mapped_column(Date, nullable=False)
     channel: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    scope_name: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    scope: Mapped[JsonObject] = mapped_column(JSON_TYPE, nullable=False)
+    """The scope this run was started with, kept so it can be reported exactly."""
     state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     config_version: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     config_digest: Mapped[str] = mapped_column(String(DIGEST_LENGTH), nullable=False)

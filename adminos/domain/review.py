@@ -297,11 +297,18 @@ def is_finished_with(session: Session, run: ReviewRun) -> bool:
 
 
 def was_worked(session: Session, run: ReviewRun) -> bool:
-    """Whether anything in this review was ever decided."""
+    """Whether Brian himself ever decided anything in this review.
+
+    Only a human decision counts. A review can complete with every row
+    settled and no morning's work in it at all — threads withdrawn as they
+    left the inbox are signed `scope:`, and an automatable rule signs its own
+    approvals — and such a review is one to top up with the mail that has
+    arrived since, not one to protect from it.
+    """
     return (
         session.execute(
-            select(ReviewItem.id)
-            .where(ReviewItem.run_id == run.id, ReviewItem.state != ItemState.PENDING)
+            select(ReviewDecision.id)
+            .where(ReviewDecision.run_id == run.id, ReviewDecision.actor == HUMAN_ACTOR)
             .limit(1)
         ).scalar_one_or_none()
         is not None

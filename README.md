@@ -512,7 +512,7 @@ A review is an object rather than a scratchpad: `review_id`, `review_date`, its 
 
 Abandoning a review supersedes every action scope prepared in it, so a preparation from a review Brian has set aside can never execute, and every mutating route refuses an abandoned review outright. A restart is the only thing that produces revision 2 of a date; the calendar turning over opens revision 1 of the new one.
 
-A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up by `start` rather than fenced off. Only a completed review carrying at least one decision needs a deliberate restart.
+A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up by `start` rather than fenced off, and so is one whose rows were all withdrawn as their threads left the inbox. Only a completed review carrying a decision Brian made needs a deliberate restart.
 
 ### What a review looks at
 

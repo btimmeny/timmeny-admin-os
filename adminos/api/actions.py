@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from adminos.adapters.gmail import GmailError, open_gmail_client
 from adminos.api.deps import read_capability, read_capability_config
-from adminos.api.review import lookup_item, open_review
+from adminos.api.review import lookup_item, open_review, refuse_abandoned
 from adminos.api.security import require_api_key
 from adminos.capabilities.config import LoadedCapabilities
 from adminos.config import GmailCredentials, get_gmail_credentials, is_gmail_write_enabled
@@ -207,6 +207,7 @@ def prepare_actions(
     loaded = read_capability_config()
 
     with open_review(run_id) as (session, run):
+        refuse_abandoned(run)
         requested = requested_item_ids(session, loaded, run, request)
         prepared, excluded = prepare_selected(session, loaded, run, request, requested)
         scope = open_scope(
@@ -345,6 +346,7 @@ def approve_send_draft(
 
     loaded = read_capability_config()
     with open_review(run_id) as (session, run):
+        refuse_abandoned(run)
         item = lookup_item(session, run, item_id)
         capability = read_capability(loaded, read_item_capability(session, item))
         try:
@@ -377,6 +379,7 @@ async def run_actions(
 
     async with open_gmail_client(credentials) as client:
         with open_review(run_id) as (session, run):
+            refuse_abandoned(run)
             scope, actions = select_actions(session, run, request, retry_action_id)
             executed: list[ReviewAction] = []
             for action in actions:

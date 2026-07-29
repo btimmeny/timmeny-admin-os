@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -45,8 +46,11 @@ from adminos.domain.review import (
     DecisionRefused,
     GroupView,
     ItemState,
+    ReviewClosed,
     ReviewNotFound,
+    RunState,
     RunView,
+    continue_review,
     decide_group,
     read_group,
     read_item,
@@ -54,6 +58,7 @@ from adminos.domain.review import (
     record_assessment,
     record_decision,
     refresh_states,
+    restart_review,
     start_or_resume_review,
 )
 from adminos.logging import get_logger
@@ -75,6 +80,19 @@ class StartReviewRequest(BaseModel):
             "instead, and only ever because it was asked for."
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceRefresh:
+    """What a sync produced, and whether the mailbox was read at all.
+
+    `read_at` is set only where Gmail actually answered, so a review records a
+    refresh it had rather than one it attempted: an unconfigured or unreachable
+    mailbox leaves the review's freshness where it was.
+    """
+
+    warnings: list[str]
+    read_at: datetime | None
 
 
 class ReviewScopeResponse(BaseModel):
@@ -228,17 +246,52 @@ class GroupSummaryResponse(BaseModel):
     counts: dict[str, int]
 
 
+class ReviewChoiceResponse(BaseModel):
+    """One thing that can be done next, with the request that does it."""
+
+    operation: str
+    label: str
+    method: str
+    path: str
+    body: JsonObject
+
+
+class ReviewPromptResponse(BaseModel):
+    """A question for Brian that Admin OS will not answer on his behalf.
+
+    Returned instead of a resumed review when today's is already finished:
+    what happens next is a choice between leaving it as it stands and
+    reviewing the day again on refreshed mail, and both of those are his to
+    make. The choices carry their own requests, so nothing has to be guessed.
+    """
+
+    reason: str
+    message: str
+    choices: list[ReviewChoiceResponse]
+
+
 class RunResponse(BaseModel):
+    review_id: str
     run_id: str
+    """The same identifier as `review_id`, kept for callers written before a
+    review had a name of its own."""
     review_date: date
+    revision: int
     channel: str
     scope: ReviewScopeResponse
+    status: str
     state: str
+    """The same value as `status`, under the older name."""
+    started_at: datetime | None
+    completed_at: datetime | None
+    abandoned_at: datetime | None
+    evidence_refresh_at: datetime | None
     config_version: str
     config_digest: str
     screen_id: str | None
     groups: list[GroupSummaryResponse]
     current_group: GroupResponse | None
+    prompt: ReviewPromptResponse | None = None
     warnings: list[str]
 
 
@@ -318,38 +371,129 @@ async def start_review(
     request: StartReviewRequest,
     _: None = Depends(require_api_key),
 ) -> RunResponse:
-    """Start or resume today's review, and return the first group to work.
+    """Start today's review, or resume the one still under way.
 
     One call answers "good morning": it refreshes the mailbox, builds or
-    resumes the run, and hands back a single capability group rather than an
-    undifferentiated inbox.
+    resumes the review, and hands back a single capability group rather than
+    an undifferentiated inbox.
+
+    A review already finished is not reopened. Mail that arrived since would
+    otherwise turn a morning's completed work back into an unfinished list, so
+    the finished review comes back with the choice — leave it, or review the
+    day again on refreshed mail — and the choice is Brian's.
 
     The review is of the inbox unless another scope is named. That is not a
     preference to be confirmed or a rule to be learned; it is the query, and
     the scope that was used comes back in the response.
     """
     loaded = read_capability_config()
-    warnings: list[str] = []
-
-    try:
-        scope = read_scope(request.scope)
-    except UnknownScope as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    if request.sync:
-        warnings.extend(await refresh_evidence(loaded, request.limit, scope))
+    scope = requested_scope(request.scope)
+    refresh = await sync_if_asked(loaded, request, scope)
 
     try:
         with session_scope() as session:
-            view = start_or_resume_review(
+            try:
+                view = start_or_resume_review(
+                    session,
+                    loaded,
+                    review_date=request.review_date,
+                    scope=scope,
+                    evidence_refresh_at=refresh.read_at,
+                )
+            except ReviewClosed as exc:
+                return build_closed_response(session, loaded, exc.run, request, refresh.warnings)
+            return build_run_response(view, refresh.warnings, loaded)
+    except DatabaseNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/continue", response_model=RunResponse)
+async def continue_daily_review(
+    request: StartReviewRequest,
+    _: None = Depends(require_api_key),
+) -> RunResponse:
+    """Pick up the review under way, and never open a new one.
+
+    "Where was I?" and "start my review" are different questions, and this one
+    has an honest answer when there is nothing to resume: a review that does
+    not exist, or one already finished with, is reported rather than created.
+    """
+    loaded = read_capability_config()
+    scope = requested_scope(request.scope)
+    refresh = await sync_if_asked(loaded, request, scope)
+
+    try:
+        with session_scope() as session:
+            try:
+                view = continue_review(
+                    session,
+                    loaded,
+                    review_date=request.review_date,
+                    scope=scope,
+                    evidence_refresh_at=refresh.read_at,
+                )
+            except ReviewNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ReviewClosed as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "ReviewClosed",
+                        "review_id": exc.run.id,
+                        "status": exc.run.state,
+                        "message": str(exc),
+                    },
+                ) from exc
+            return build_run_response(view, refresh.warnings, loaded)
+    except DatabaseNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/restart", response_model=RunResponse)
+async def restart_daily_review(
+    request: StartReviewRequest,
+    _: None = Depends(require_api_key),
+) -> RunResponse:
+    """Put today's review aside and open a fresh one on refreshed mail.
+
+    The review being replaced is abandoned rather than deleted: its decisions
+    and the actions they ran are what happened, and they stay readable. What
+    it loses is any preparation still open in it, which stops being executable
+    the moment it is set aside.
+    """
+    loaded = read_capability_config()
+    scope = requested_scope(request.scope)
+    refresh = await sync_if_asked(loaded, request, scope)
+
+    try:
+        with session_scope() as session:
+            view = restart_review(
                 session,
                 loaded,
                 review_date=request.review_date,
                 scope=scope,
+                evidence_refresh_at=refresh.read_at,
             )
-            return build_run_response(view, warnings, loaded)
+            return build_run_response(view, refresh.warnings, loaded)
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def requested_scope(name: str | None) -> ReviewScope:
+    try:
+        return read_scope(name)
+    except UnknownScope as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def sync_if_asked(
+    loaded: LoadedCapabilities,
+    request: StartReviewRequest,
+    scope: ReviewScope,
+) -> EvidenceRefresh:
+    if not request.sync:
+        return EvidenceRefresh(warnings=[], read_at=None)
+    return await refresh_evidence(loaded, request.limit, scope)
 
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
@@ -390,6 +534,7 @@ def decide_item(
     loaded = read_capability_config()
 
     with open_review(run_id) as (session, run):
+        refuse_abandoned(run)
         item = lookup_item(session, run, item_id)
         group = session.get(ReviewGroup, item.group_id)
         if group is None:
@@ -433,6 +578,7 @@ def decide_items(
     capability = read_capability(loaded, capability_key)
 
     with open_review(run_id) as (session, run):
+        refuse_abandoned(run)
         group = lookup_group(session, run, capability_key)
         try:
             decided = decide_group(
@@ -490,6 +636,7 @@ def assess_item(
     loaded = read_capability_config()
 
     with open_review(run_id) as (session, run):
+        refuse_abandoned(run)
         item = lookup_item(session, run, item_id)
         group = session.get(ReviewGroup, item.group_id)
         if group is None:
@@ -519,11 +666,16 @@ async def refresh_evidence(
     loaded: LoadedCapabilities,
     limit: int,
     scope: ReviewScope = DEFAULT_SCOPE,
-) -> list[str]:
+) -> EvidenceRefresh:
     """Pull new mail before the review runs. Never fatal to the review itself."""
     credentials = get_gmail_credentials()
     if credentials is None:
-        return ["Gmail is not configured, so the review shows only evidence already recorded."]
+        return EvidenceRefresh(
+            warnings=[
+                "Gmail is not configured, so the review shows only evidence already recorded."
+            ],
+            read_at=None,
+        )
 
     try:
         async with open_gmail_client(credentials) as client:
@@ -541,9 +693,12 @@ async def refresh_evidence(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except GmailError as exc:
         logger.error("review sync failed: %s", type(exc).__name__)
-        return [f"Gmail could not be read, so the review may be out of date: {exc}"]
+        return EvidenceRefresh(
+            warnings=[f"Gmail could not be read, so the review may be out of date: {exc}"],
+            read_at=None,
+        )
 
-    return result.warnings
+    return EvidenceRefresh(warnings=result.warnings, read_at=datetime.now(UTC))
 
 
 @contextmanager
@@ -558,6 +713,30 @@ def open_review(run_id: str) -> Iterator[tuple[Session, ReviewRun]]:
             yield session, run
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def refuse_abandoned(run: ReviewRun) -> None:
+    """Nothing is decided, prepared, or executed in a review that was set aside.
+
+    The review that was restarted still exists and still reads back, which is
+    the point of abandoning rather than deleting it. What it must not do is
+    accept work: a decision made in yesterday's abandoned review, or a scope
+    prepared before a restart, would act on a table nobody is looking at.
+    """
+    if RunState(run.state) is not RunState.ABANDONED:
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error": "ReviewAbandoned",
+            "review_id": run.id,
+            "status": run.state,
+            "message": (
+                f"Review {run.id} was abandoned, so it takes no further "
+                "decisions or actions. Work in the current review instead."
+            ),
+        },
+    )
 
 
 def lookup_group(session: Session, run: ReviewRun, capability_key: str) -> ReviewGroup:
@@ -587,20 +766,69 @@ def requires_confirmation(capability: CapabilityConfig, item: ReviewItem) -> boo
     )
 
 
+def build_closed_response(
+    session: Session,
+    loaded: LoadedCapabilities,
+    run: ReviewRun,
+    request: StartReviewRequest,
+    warnings: list[str],
+) -> RunResponse:
+    """Report the finished review, and offer the two honest ways on."""
+    body: JsonObject = {"sync": True, "limit": request.limit}
+    if run.scope_name != DEFAULT_SCOPE.name:
+        body["scope"] = run.scope_name
+    return build_run_response(
+        refresh_states(session, loaded, run),
+        warnings,
+        loaded,
+        prompt=ReviewPromptResponse(
+            reason=f"review_{run.state}",
+            message=(
+                f"The {run.scope_name} review for {run.review_date.isoformat()} is "
+                f"already {run.state}. Nothing has been reopened."
+            ),
+            choices=[
+                ReviewChoiceResponse(
+                    operation="readDailyReview",
+                    label="Leave it as it stands, and read what was decided",
+                    method="GET",
+                    path=f"/review/runs/{run.id}",
+                    body={},
+                ),
+                ReviewChoiceResponse(
+                    operation="restartDailyReview",
+                    label="Review the day again, on refreshed mail",
+                    method="POST",
+                    path="/review/restart",
+                    body=body,
+                ),
+            ],
+        ),
+    )
+
+
 def build_run_response(
     view: RunView,
     warnings: list[str],
     loaded: LoadedCapabilities,
+    prompt: ReviewPromptResponse | None = None,
 ) -> RunResponse:
     scope = read_stored_scope(view.run.scope)
     current = view.current_group()
     rendered = build_group_response(current, loaded, view.run) if current else None
     return RunResponse(
+        review_id=view.run.id,
         run_id=view.run.id,
         review_date=view.run.review_date,
+        revision=view.run.revision,
         channel=view.run.channel,
         scope=build_scope_response(scope),
+        status=view.run.state,
         state=view.run.state,
+        started_at=view.run.started_at,
+        completed_at=view.run.completed_at,
+        abandoned_at=view.run.abandoned_at,
+        evidence_refresh_at=view.run.evidence_refresh_at,
         config_version=view.run.config_version,
         config_digest=view.run.config_digest,
         screen_id=rendered.screen_id if rendered else None,
@@ -615,6 +843,7 @@ def build_run_response(
             for group in view.groups
         ],
         current_group=rendered,
+        prompt=prompt,
         warnings=warnings,
     )
 

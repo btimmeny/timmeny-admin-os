@@ -570,3 +570,180 @@ def test_a_decision_response_returns_the_next_screen(
     assert decided["run"]["current_group"]["screen"]["rows"][0]["cells"][1] == (
         "Newsletter: weekly"
     )
+
+
+def test_starting_a_completed_review_offers_the_choice_rather_than_reopening_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The morning's work stays finished, and the next move is Brian's."""
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    body = start(client)
+    item_id = body["current_group"]["items"][0]["item_id"]
+    client.post(
+        f"/review/runs/{body['review_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    )
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities"), thread("t2", "IRS notice")])
+
+    again = start(client)
+
+    assert again["review_id"] == body["review_id"]
+    assert again["status"] == "completed"
+    assert again["prompt"]["reason"] == "review_completed"
+    assert [choice["operation"] for choice in again["prompt"]["choices"]] == [
+        "readDailyReview",
+        "restartDailyReview",
+    ]
+    assert again["current_group"] is None
+
+
+def test_restarting_opens_a_second_revision_of_the_same_day(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    first = start(client)
+    item_id = first["current_group"]["items"][0]["item_id"]
+    client.post(
+        f"/review/runs/{first['review_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    )
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities"), thread("t2", "IRS notice")])
+
+    response = client.post("/review/restart", headers=AUTH, json={})
+
+    assert response.status_code == 200, response.text
+    second = response.json()
+    assert second["review_id"] != first["review_id"]
+    assert second["revision"] == 2
+    assert second["review_date"] == first["review_date"]
+    assert second["status"] == "not_started"
+    assert second["evidence_refresh_at"] is not None
+    assert [item["thread_id"] for item in second["current_group"]["items"]] == ["t2"]
+
+    abandoned = client.get(f"/review/runs/{first['review_id']}", headers=AUTH).json()
+    assert abandoned["status"] == "abandoned"
+    assert abandoned["abandoned_at"] is not None
+
+
+def test_continuing_resumes_the_review_under_way(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(
+        monkeypatch,
+        taxes=[thread("t1", "KPMG Activities"), thread("t2", "IRS notice")],
+    )
+    first = start(client)
+    item_id = first["current_group"]["items"][0]["item_id"]
+    client.post(
+        f"/review/runs/{first['review_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    )
+
+    response = client.post("/review/continue", headers=AUTH, json={})
+
+    assert response.status_code == 200, response.text
+    resumed = response.json()
+    assert resumed["review_id"] == first["review_id"]
+    assert resumed["status"] == "in_progress"
+    assert resumed["current_group"]["counts"] | {"total": 2, "dismissed": 1, "pending": 1} == (
+        resumed["current_group"]["counts"]
+    )
+
+
+def test_continuing_when_there_is_no_review_says_so(client: TestClient) -> None:
+    response = client.post("/review/continue", headers=AUTH, json={"sync": False})
+
+    assert response.status_code == 404
+    assert "Start one" in response.json()["detail"]
+
+
+def test_continuing_a_finished_review_refuses_and_names_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    body = start(client)
+    item_id = body["current_group"]["items"][0]["item_id"]
+    client.post(
+        f"/review/runs/{body['review_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    )
+
+    response = client.post("/review/continue", headers=AUTH, json={})
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["error"] == "ReviewClosed"
+    assert detail["review_id"] == body["review_id"]
+
+
+def test_an_abandoned_review_takes_no_further_decisions(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row of a review nobody is in cannot be answered by accident."""
+    mailbox(
+        monkeypatch,
+        taxes=[thread("t1", "KPMG Activities"), thread("t2", "IRS notice")],
+    )
+    first = start(client)
+    item_id = first["current_group"]["items"][0]["item_id"]
+    client.post("/review/restart", headers=AUTH, json={})
+
+    response = client.post(
+        f"/review/runs/{first['review_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "ReviewAbandoned"
+
+
+def test_a_review_reports_its_identity_and_its_timestamps(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+
+    body = start(client)
+
+    assert body["review_id"] == body["run_id"]
+    assert body["status"] == body["state"] == "not_started"
+    assert body["revision"] == 1
+    assert body["started_at"] is not None
+    assert body["evidence_refresh_at"] is not None
+    assert body["completed_at"] is None
+    assert body["abandoned_at"] is None
+
+
+def test_an_unread_mailbox_does_not_claim_a_refresh(client: TestClient) -> None:
+    """Freshness is when Gmail answered, not when it was asked."""
+    body = start(client)
+
+    assert "not configured" in body["warnings"][0]
+    assert body["evidence_refresh_at"] is None
+
+
+def test_an_abandoned_review_records_no_assessment(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "Quarterly note")])
+    first = start(client)
+    item_id = first["current_group"]["items"][0]["item_id"]
+    client.post("/review/restart", headers=AUTH, json={})
+
+    response = client.post(
+        f"/review/runs/{first['review_id']}/items/{item_id}/assessment",
+        headers=AUTH,
+        json={
+            "category": "reference",
+            "confidence": 0.6,
+            "rationale": "Background only.",
+            "model_version": "gpt-test",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "ReviewAbandoned"

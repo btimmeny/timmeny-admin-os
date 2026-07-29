@@ -1247,3 +1247,35 @@ def test_a_scope_can_be_read_back_to_see_whether_it_still_stands(
 
     assert reread.json()["state"] == "superseded"
     assert gmail.writes == []
+
+
+def test_a_scope_prepared_before_a_restart_cannot_execute(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """Restarting the day disarms the confirmation that was already in hand."""
+    run_id, _ = approved_run(client, gmail)
+    prepared = prepare(client, run_id)
+
+    restarted = client.post("/review/restart", headers=AUTH, json={})
+    assert restarted.status_code == 200, restarted.text
+
+    response = execute(client, run_id, prepared)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "ReviewAbandoned"
+    assert gmail.writes == []
+
+
+def test_an_abandoned_review_prepares_nothing(client: TestClient, gmail: FakeGmail) -> None:
+    run_id, item_id = approved_run(client, gmail)
+    client.post("/review/restart", headers=AUTH, json={})
+
+    response = client.post(
+        f"/review/runs/{run_id}/actions/prepare",
+        headers=AUTH,
+        json={"capability_key": "admin", "item_ids": [item_id]},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "ReviewAbandoned"
+    assert gmail.writes == []

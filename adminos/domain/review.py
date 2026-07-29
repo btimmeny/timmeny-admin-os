@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from adminos.capabilities.config import (
@@ -33,6 +33,7 @@ from adminos.domain.decisions import (
 from adminos.domain.learning import record_learning
 from adminos.domain.mailboxes import DEFAULT_SCOPE, ReviewScope, capability_scope
 from adminos.domain.rules import LearnedRule, read_active_rules
+from adminos.domain.scopes import supersede_open_scopes
 from adminos.logging import get_logger
 
 
@@ -59,6 +60,24 @@ class ReviewNotFound(ReviewError):
 
 class DecisionRefused(ReviewError):
     """Raised when configuration forbids the decision that was asked for."""
+
+
+class ReviewClosed(ReviewError):
+    """Raised when the review for this day and scope is finished with.
+
+    Carries the review itself, because the useful answer to "start my review"
+    on a day already reviewed is that day's review and the choice between
+    leaving it alone and starting a fresh one — not a bare refusal, and not
+    silently reopening what was closed.
+    """
+
+    def __init__(self, run: ReviewRun) -> None:
+        self.run = run
+        super().__init__(
+            f"The {run.scope_name} review for {run.review_date.isoformat()} is "
+            f"{run.state}. Continue it to look again, or restart to review the "
+            "day on refreshed mail."
+        )
 
 
 @dataclass(frozen=True)
@@ -88,9 +107,11 @@ class BulkDecisionRefused(DecisionRefused):
 
 
 class RunState(StrEnum):
+    NOT_STARTED = "not_started"
     IN_PROGRESS = "in_progress"
     AWAITING_ACTIONS = "awaiting_actions"
     COMPLETED = "completed"
+    ABANDONED = "abandoned"
 
 
 class GroupState(StrEnum):
@@ -173,63 +194,230 @@ def start_or_resume_review(
     review_date: date | None = None,
     now: datetime | None = None,
     scope: ReviewScope = DEFAULT_SCOPE,
+    evidence_refresh_at: datetime | None = None,
 ) -> RunView:
     """Return today's review, creating it or topping it up with new mail.
 
     Resuming is the normal case: a second "start my review" on the same day
-    returns the same run, keeps decisions already made, and adds only threads
-    that have arrived since.
+    returns the same review, keeps decisions already made, and adds only
+    threads that have arrived since.
 
-    A run belongs to one scope. "Show me my archive" is therefore a second run
-    of the same day rather than an addition to the first, so that a request to
-    see mail outside the inbox cannot widen the review that was already made.
+    A review that is finished with is not resumed. Answering "start my review"
+    with a review Brian has already worked through — reopened by whatever mail
+    arrived since — is how a morning's work is made to look unfinished, so a
+    completed or abandoned review raises `ReviewClosed` and the choice between
+    leaving it and starting a fresh one is his.
+
+    A review belongs to one scope. "Show me my archive" is therefore a second
+    review of the same day rather than an addition to the first, so that a
+    request to see mail outside the inbox cannot widen the review that was
+    already made.
     """
     moment = now or datetime.now(UTC)
     day = review_date or moment.date()
+    run = read_current_review(session, loaded, day, scope)
 
-    run = session.execute(
-        select(ReviewRun).where(
+    if run is None:
+        run = open_review(session, loaded, day, scope, moment, evidence_refresh_at)
+    elif is_finished_with(session, run):
+        raise ReviewClosed(run)
+
+    return fill_review(session, loaded, run, scope, moment, evidence_refresh_at)
+
+
+def continue_review(
+    session: Session,
+    loaded: LoadedCapabilities,
+    review_date: date | None = None,
+    now: datetime | None = None,
+    scope: ReviewScope = DEFAULT_SCOPE,
+    evidence_refresh_at: datetime | None = None,
+) -> RunView:
+    """Pick up the review already under way, and never start one.
+
+    The difference from starting is what happens when there is nothing to
+    resume: continuing says so rather than quietly opening a review Brian did
+    not ask for, which is the whole point of the two being separate sentences.
+    """
+    moment = now or datetime.now(UTC)
+    day = review_date or moment.date()
+    run = read_current_review(session, loaded, day, scope)
+
+    if run is None:
+        raise ReviewNotFound(
+            f"No {scope.name} review of {day.isoformat()} to continue. Start one."
+        )
+    if is_finished_with(session, run):
+        raise ReviewClosed(run)
+
+    return fill_review(session, loaded, run, scope, moment, evidence_refresh_at)
+
+
+def restart_review(
+    session: Session,
+    loaded: LoadedCapabilities,
+    review_date: date | None = None,
+    now: datetime | None = None,
+    scope: ReviewScope = DEFAULT_SCOPE,
+    evidence_refresh_at: datetime | None = None,
+) -> RunView:
+    """Put the current review aside and open the next revision of the day.
+
+    The abandoned review keeps everything it recorded: its decisions, its
+    actions, and what they did to the mailbox are history, not a draft. What
+    it stops being is the review that "my review" means, and any preparation
+    still open in it stops being executable, so a confirmation given before
+    the restart cannot run afterwards.
+    """
+    moment = now or datetime.now(UTC)
+    day = review_date or moment.date()
+    current = read_current_review(session, loaded, day, scope)
+
+    if current is not None:
+        abandon_review(session, current, moment)
+
+    run = open_review(session, loaded, day, scope, moment, evidence_refresh_at)
+    return fill_review(session, loaded, run, scope, moment, evidence_refresh_at)
+
+
+def is_finished_with(session: Session, run: ReviewRun) -> bool:
+    """Whether this review is one to leave alone rather than top up.
+
+    An abandoned review always is. A completed one is finished with only if
+    Brian actually worked it: a review that completed because the inbox was
+    empty is not a morning's work to protect, and refusing to add the mail
+    that has arrived since would be pedantry rather than care.
+    """
+    state = RunState(run.state)
+    if state is RunState.ABANDONED:
+        return True
+    if state is not RunState.COMPLETED:
+        return False
+    return was_worked(session, run)
+
+
+def was_worked(session: Session, run: ReviewRun) -> bool:
+    """Whether anything in this review was ever decided."""
+    return (
+        session.execute(
+            select(ReviewItem.id)
+            .where(ReviewItem.run_id == run.id, ReviewItem.state != ItemState.PENDING)
+            .limit(1)
+        ).scalar_one_or_none()
+        is not None
+    )
+
+
+def read_current_review(
+    session: Session,
+    loaded: LoadedCapabilities,
+    day: date,
+    scope: ReviewScope,
+) -> ReviewRun | None:
+    """The review "my review" refers to: the latest one nobody abandoned."""
+    return session.execute(
+        select(ReviewRun)
+        .where(
+            ReviewRun.review_date == day,
+            ReviewRun.channel == loaded.channel,
+            ReviewRun.scope_name == scope.name,
+            ReviewRun.state != RunState.ABANDONED,
+        )
+        .order_by(ReviewRun.revision.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+
+def open_review(
+    session: Session,
+    loaded: LoadedCapabilities,
+    day: date,
+    scope: ReviewScope,
+    now: datetime,
+    evidence_refresh_at: datetime | None,
+) -> ReviewRun:
+    """Create the next revision of this day's review in this scope."""
+    run = ReviewRun(
+        review_date=day,
+        channel=loaded.channel,
+        scope_name=scope.name,
+        revision=next_revision(session, loaded, day, scope),
+        scope=scope.as_json(),
+        state=RunState.NOT_STARTED,
+        config_version=loaded.version,
+        config_digest=loaded.digest,
+        started_at=now,
+        evidence_refresh_at=evidence_refresh_at,
+    )
+    session.add(run)
+    session.flush()
+    logger.info(
+        "review %s opened for %s in the %s scope, revision %s, on capabilities %s",
+        run.id,
+        day,
+        scope.name,
+        run.revision,
+        loaded.version,
+    )
+    return run
+
+
+def next_revision(
+    session: Session,
+    loaded: LoadedCapabilities,
+    day: date,
+    scope: ReviewScope,
+) -> int:
+    """One past the highest revision of this day and scope, abandoned or not."""
+    highest = session.execute(
+        select(func.max(ReviewRun.revision)).where(
             ReviewRun.review_date == day,
             ReviewRun.channel == loaded.channel,
             ReviewRun.scope_name == scope.name,
         )
     ).scalar_one_or_none()
+    return (highest or 0) + 1
 
-    if run is None:
-        run = ReviewRun(
-            review_date=day,
-            channel=loaded.channel,
-            scope_name=scope.name,
-            scope=scope.as_json(),
-            state=RunState.IN_PROGRESS,
-            config_version=loaded.version,
-            config_digest=loaded.digest,
-        )
-        session.add(run)
-        session.flush()
-        logger.info(
-            "review run opened for %s in the %s scope on capabilities %s",
-            day,
-            scope.name,
-            loaded.version,
-        )
+
+def abandon_review(session: Session, run: ReviewRun, now: datetime) -> ReviewRun:
+    """Close a review without answering it, and disarm what it had prepared."""
+    supersede_open_scopes(session, run, capability_key=None, now=now)
+    run.state = RunState.ABANDONED
+    run.abandoned_at = now
+    run.completed_at = None
+    session.flush()
+    logger.info("review %s abandoned for %s", run.id, run.review_date)
+    return run
+
+
+def fill_review(
+    session: Session,
+    loaded: LoadedCapabilities,
+    run: ReviewRun,
+    scope: ReviewScope,
+    now: datetime,
+    evidence_refresh_at: datetime | None,
+) -> RunView:
+    """Bring one review up to date with the mailbox, and report where it is."""
+    if evidence_refresh_at is not None:
+        run.evidence_refresh_at = evidence_refresh_at
 
     for capability in loaded.enabled():
         watched = capability_scope(scope, capability)
         group = get_or_create_group(session, run, capability)
-        withdraw_out_of_scope(session, run, group, capability, watched, moment)
+        withdraw_out_of_scope(session, run, group, capability, watched, now)
         populate_group(
             session,
             run,
             group,
             capability,
-            moment,
+            now,
             read_active_rules(session, capability),
             watched,
         )
 
     session.flush()
-    return refresh_states(session, loaded, run)
+    return refresh_states(session, loaded, run, now)
 
 
 def get_or_create_group(
@@ -909,9 +1097,26 @@ def refresh_states(
     run: ReviewRun,
     now: datetime | None = None,
 ) -> RunView:
-    """Recompute group and run state from the items, and return the view."""
+    """Recompute group and run state from the items, and return the view.
+
+    An abandoned review is reported as it was left: recomputing it would let
+    mail that arrived afterwards decide the state of a review nobody is in.
+    """
     moment = now or datetime.now(UTC)
     views: list[GroupView] = []
+
+    if RunState(run.state) is RunState.ABANDONED:
+        return RunView(
+            run=run,
+            groups=[
+                GroupView(
+                    group=group,
+                    capability=loaded.get(group.capability_key),
+                    items=read_group_items(session, group),
+                )
+                for group in read_groups(session, run)
+            ],
+        )
 
     for group in read_groups(session, run):
         capability = loaded.get(group.capability_key)
@@ -926,9 +1131,14 @@ def refresh_states(
         views.append(GroupView(group=group, capability=capability, items=items))
 
     states = {view.group.state for view in views}
+    decided = any(item.state != ItemState.PENDING for view in views for item in view.items)
+
     if states and states == {GroupState.COMPLETED}:
         run.state = RunState.COMPLETED
         run.completed_at = run.completed_at or moment
+    elif not decided:
+        run.state = RunState.NOT_STARTED
+        run.completed_at = None
     elif states and states <= {GroupState.COMPLETED, GroupState.AWAITING_ACTIONS}:
         run.state = RunState.AWAITING_ACTIONS
         run.completed_at = None

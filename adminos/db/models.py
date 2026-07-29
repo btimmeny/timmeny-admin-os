@@ -227,15 +227,21 @@ class WorkflowStep(Base):
 class ReviewRun(Base):
     """One daily review: the session Brian starts with "good morning".
 
-    Identity is the review date and the scope, so "start my review" twice in a
-    day resumes rather than restarts, while "show me my archive" is a separate
-    review of a different set of mail rather than a change to today's.
+    Identity is the review date, the scope, and the revision, so "start my
+    review" twice in a day resumes rather than restarts, while "show me my
+    archive" is a separate review of a different set of mail rather than a
+    change to today's. A second revision exists only where the first was
+    deliberately abandoned.
     """
 
     __tablename__ = "review_runs"
     __table_args__ = (
         UniqueConstraint(
-            "review_date", "channel", "scope_name", name="uq_review_run_date_channel_scope"
+            "review_date",
+            "channel",
+            "scope_name",
+            "revision",
+            name="uq_review_run_date_channel_scope_revision",
         ),
     )
 
@@ -243,6 +249,13 @@ class ReviewRun(Base):
     review_date: Mapped[date] = mapped_column(Date, nullable=False)
     channel: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     scope_name: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    """Which attempt at this date and scope this is.
+
+    A day can be reviewed twice: the first review is abandoned and a second
+    one opened on refreshed mail. The earlier revision keeps its decisions and
+    its history, and the later one starts from what the mailbox says now.
+    """
     scope: Mapped[JsonObject] = mapped_column(JSON_TYPE, nullable=False)
     """The scope this run was started with, kept so it can be reported exactly."""
     state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
@@ -250,6 +263,14 @@ class ReviewRun(Base):
     config_digest: Mapped[str] = mapped_column(String(DIGEST_LENGTH), nullable=False)
     started_at: Mapped[datetime] = created_at_column()
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evidence_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """When the mailbox was last read into this review.
+
+    What makes "resume" and "start again" different questions: a review whose
+    evidence was refreshed an hour ago is a stale view of the inbox, and
+    saying when it was read is how that can be told without guessing.
+    """
     updated_at: Mapped[datetime] = updated_at_column()
 
 

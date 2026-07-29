@@ -446,7 +446,7 @@ If one update fails, the service keeps processing the rest and reports the per-i
 The daily review is what "good morning" calls. One request refreshes the mailbox, opens or resumes today's review, and hands back a single capability group to work through — not an undifferentiated inbox. See [ADR-0007](docs/adr/ADR-0007-daily-review-engine.md).
 
 ```text
-run (one per day)
+review (one per date, mailbox scope and revision)
  └── group (one per enabled capability, in configured order)
       └── item (one Gmail thread, with the recommendation shown for it)
            └── decision (append-only record of what a human chose)
@@ -462,9 +462,16 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
 
 ```json
 {
+  "review_id": "…",
   "run_id": "…",
   "review_date": "2026-07-28",
+  "revision": 1,
+  "status": "in_progress",
   "state": "in_progress",
+  "started_at": "2026-07-28T08:02:11Z",
+  "completed_at": null,
+  "abandoned_at": null,
+  "evidence_refresh_at": "2026-07-28T08:02:11Z",
   "config_version": "2026-07-28.1",
   "config_digest": "…",
   "screen_id": "tax-review-v1",
@@ -489,9 +496,23 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
 }
 ```
 
-Identity is the review date and the scope, so calling it twice in a day resumes rather than restarts: decisions already made are kept and only mail that has arrived since is added. Gmail being unreachable is a warning, not a failure — the review still opens over the evidence already recorded.
+Identity is the review date, the mailbox scope and the revision, so calling it twice in a day resumes rather than restarts: decisions already made are kept and only mail that has arrived since is added. Gmail being unreachable is a warning, not a failure — the review still opens over the evidence already recorded.
 
 A thread settled in an earlier review does not come back, unless its content has changed since. A reply reopens a conversation; sitting in the inbox does not.
+
+### The life of a review
+
+A review is an object rather than a scratchpad: `review_id`, `review_date`, its scope, a `status` of `not_started`, `in_progress`, `awaiting_actions`, `completed` or `abandoned`, and the times it started, completed, was abandoned, and last read Gmail. `run_id` and `state` are the older names for the id and the status, kept because the routes are addressed by run. See [ADR-0017](docs/adr/ADR-0017-a-review-is-an-object-with-a-life.md).
+
+| Request | What it does |
+| --- | --- |
+| `POST /review/start` | Opens today's review, or resumes the one under way. A review already worked through and completed is **not** re-served: the response carries a `prompt` saying so and offering to read it again or start a fresh one. |
+| `POST /review/continue` | Resumes, and only resumes. `404` where there is no review of today, `409` where today's is finished. It never opens one. |
+| `POST /review/restart` | Abandons the review that exists — keeping its decisions, its actions and its audit — refreshes Gmail, and opens the next revision of the same date. |
+
+Abandoning a review supersedes every action scope prepared in it, so a preparation from a review Brian has set aside can never execute, and every mutating route refuses an abandoned review outright. A restart is the only thing that produces revision 2 of a date; the calendar turning over opens revision 1 of the new one.
+
+A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up by `start` rather than fenced off. Only a completed review carrying at least one decision needs a deliberate restart.
 
 ### What a review looks at
 

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.12.1
+  version: 0.13.0
   description: >-
     API for the Timmeny Admin OS daily review workflow.
 
@@ -52,10 +52,55 @@ paths:
               schema:
                 type: object
                 properties:
+                  review_id:
+                    type: string
+                    description: >-
+                      The review this response is about. Every decision,
+                      preparation and execution belongs to one review, so carry
+                      this id from here rather than one remembered from
+                      earlier in the conversation.
                   run_id:
                     type: string
+                    description: The same id, under the name the routes use.
+                  review_date:
+                    type: string
+                    format: date
+                  revision:
+                    type: integer
+                    description: >-
+                      Which review of that date this is. A second revision
+                      exists only where a finished review was deliberately
+                      restarted.
+                  status:
+                    type: string
+                    enum:
+                      [
+                        not_started,
+                        in_progress,
+                        awaiting_actions,
+                        completed,
+                        abandoned,
+                      ]
                   state:
                     type: string
+                    description: The same value, under its older name.
+                  started_at:
+                    type: string
+                    format: date-time
+                  completed_at:
+                    type: string
+                    format: date-time
+                  abandoned_at:
+                    type: string
+                    format: date-time
+                  evidence_refresh_at:
+                    type: string
+                    format: date-time
+                    description: >-
+                      When Gmail was last read for this review. Answer "how
+                      fresh is this?" from here, never from the clock.
+                  prompt:
+                    $ref: "#/components/schemas/ReviewPrompt"
                   scope:
                     $ref: "#/components/schemas/ReviewScope"
                   current_group:
@@ -104,6 +149,82 @@ paths:
                     items:
                       type: string
                 additionalProperties: true
+  /review/continue:
+    post:
+      operationId: continueDailyReview
+      summary: Resume the review already under way
+      description: >-
+        For "where was I?" and "carry on". It never opens a review: if there is
+        none today it answers 404, and if today's is finished it answers 409
+        rather than reopening it. Say what it says; do not fall back to
+        startDailyReview to make an answer appear.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sync:
+                  type: boolean
+                  default: true
+                limit:
+                  type: integer
+                  default: 50
+                scope:
+                  type: string
+                  enum: [inbox, archived, snoozed, everything]
+                  description: >-
+                    Which review to resume. Omit it for the inbox review.
+      responses:
+        "200":
+          description: The review under way.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: There is no review of today to continue.
+        "409":
+          description: Today's review is finished with, and was not reopened.
+  /review/restart:
+    post:
+      operationId: restartDailyReview
+      summary: Set today's review aside and open a fresh one
+      description: >-
+        Only when Brian has said he wants to review the day again. It abandons
+        the review that exists, refreshes Gmail, and opens the next revision of
+        the same date, with a new review_id. The abandoned review keeps its
+        decisions and its actions; what it loses is any preparation still open
+        in it, which stops being executable at once. Never call this to clear a
+        confusing state, and never call it without being asked.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sync:
+                  type: boolean
+                  default: true
+                limit:
+                  type: integer
+                  default: 50
+                scope:
+                  type: string
+                  enum: [inbox, archived, snoozed, everything]
+                  description: >-
+                    Which review to restart. Omit it for the inbox review.
+      responses:
+        "200":
+          description: A new review of the same date.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /review/runs/{run_id}:
     get:
       operationId: readDailyReview
@@ -122,10 +243,55 @@ paths:
               schema:
                 type: object
                 properties:
+                  review_id:
+                    type: string
+                    description: >-
+                      The review this response is about. Every decision,
+                      preparation and execution belongs to one review, so carry
+                      this id from here rather than one remembered from
+                      earlier in the conversation.
                   run_id:
                     type: string
+                    description: The same id, under the name the routes use.
+                  review_date:
+                    type: string
+                    format: date
+                  revision:
+                    type: integer
+                    description: >-
+                      Which review of that date this is. A second revision
+                      exists only where a finished review was deliberately
+                      restarted.
+                  status:
+                    type: string
+                    enum:
+                      [
+                        not_started,
+                        in_progress,
+                        awaiting_actions,
+                        completed,
+                        abandoned,
+                      ]
                   state:
                     type: string
+                    description: The same value, under its older name.
+                  started_at:
+                    type: string
+                    format: date-time
+                  completed_at:
+                    type: string
+                    format: date-time
+                  abandoned_at:
+                    type: string
+                    format: date-time
+                  evidence_refresh_at:
+                    type: string
+                    format: date-time
+                    description: >-
+                      When Gmail was last read for this review. Answer "how
+                      fresh is this?" from here, never from the clock.
+                  prompt:
+                    $ref: "#/components/schemas/ReviewPrompt"
                   scope:
                     $ref: "#/components/schemas/ReviewScope"
                   current_group:
@@ -836,6 +1002,37 @@ paths:
                 additionalProperties: true
 components:
   schemas:
+    ReviewPrompt:
+      type: object
+      description: >-
+        Admin OS asking rather than deciding. Present the choices as they are
+        written and wait: a prompt is returned exactly where the next step is
+        Brian's, and calling one of the choices without being told which is
+        deciding for him.
+      properties:
+        reason:
+          type: string
+          enum: [review_completed, review_abandoned]
+        message:
+          type: string
+          description: One sentence, safe to show as written.
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              operation:
+                type: string
+                description: The operationId to call if Brian chooses this.
+              label:
+                type: string
+              method:
+                type: string
+              path:
+                type: string
+              body:
+                type: object
+                additionalProperties: true
     ReviewScope:
       type: object
       description: >-

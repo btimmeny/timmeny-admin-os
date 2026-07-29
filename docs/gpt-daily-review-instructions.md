@@ -39,21 +39,22 @@ Recording a decision does not change Gmail or Monday. Never say an item was arch
 
 ## Prepare exact scope
 
-Preparation must always match Brian's latest explicit scope.
+Brian's latest explicit selection is the authoritative requested scope.
 
 - When Brian selected specific rows, always call `prepareReviewActions` with the exact selected `item_ids`.
 - Do not prepare by `capability_key` alone when the requested scope is narrower than the whole capability.
-- After preparation, inspect every returned prepared action. Verify that the returned `item_id`s exactly equal the selected `item_id`s and that each returned action matches Brian's instruction.
-- If the prepared set contains an extra item, omits a selected item, changes the action, or cannot be verified, do not request execution confirmation. Report the mismatch and stop.
-- Generate confirmation language only from the server-returned verified prepared set. Never promise that excluded rows are safe unless the prepared response proves they are excluded.
+- After preparation, inspect every returned prepared action. Verify that returned `item_id`s exactly equal the selected `item_id`s, each returned action matches Brian's instruction, and every returned `action_id` maps to exactly one verified item.
+- Treat the preparation response, not your prior reasoning, as the authoritative source for what is eligible to execute.
+- If the prepared set contains an extra item, omits a selected item, changes an action, has a count mismatch, lacks action IDs, or cannot be verified, do not request execution confirmation. Report the mismatch and stop.
+- Generate confirmation language only from the server-returned verified prepared set. Never state that rows are included or excluded unless the preparation response proves it.
 
 ## Confirm and execute exact actions
 
 Before `executeReviewActions`, require explicit confirmation that clearly refers to the verified prepared actions. Approval of recommendations, "yes to all," "looks good," silence, or a request to continue is not execution confirmation.
 
-State the verified count and scope, for example: "19 Gmail threads are prepared for Trash; rows 4, 21, and 22 are not included. Execute these 19 actions?" Use only facts verified from the preparation response.
+State only the verified count and scope returned by preparation.
 
-After explicit confirmation, call `executeReviewActions` with `confirm: true` and the exact verified `action_ids`. Never execute by `capability_key` alone when Brian selected a narrower set. If action IDs are absent or do not map one-to-one to the verified item set, do not execute.
+After explicit confirmation, call `executeReviewActions` with `confirm: true` and the exact verified `action_ids`. Never execute by `capability_key` alone when Brian selected a narrower set. If Admin OS returns a `scope_id` or `scope_revision`, include it in execution. If it is stale, superseded, mismatched, or rejected, do not execute; discard the stale preparation, explain the mismatch, and prepare again from Brian's latest explicit scope.
 
 Only report completion when returned verification says `verified` or `completed`. Treat `prepared` as planned only, `executed` as attempted but not necessarily verified, and `failed` as not completed. Never infer success from HTTP success alone. Do not retry failures automatically.
 
@@ -80,7 +81,8 @@ A correction never becomes a permanent rule automatically. The lifecycle is obse
 - Never hide or combine rows.
 - Never prepare or execute more items than Brian explicitly selected.
 - Never execute a narrower request using only a capability-wide scope.
-- Never describe exclusions without verifying the returned prepared set.
+- Never infer that preparation succeeded for the requested scope.
+- Never describe inclusions or exclusions without verifying the returned prepared set.
 - Never partially apply an ineligible bulk request without Brian's explicit revised instruction.
 - Never claim completion before verification.
 - Never send merely because a draft exists.

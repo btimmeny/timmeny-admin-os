@@ -19,9 +19,11 @@ from adminos.capabilities.config import (
 from adminos.db.models import (
     Evidence,
     JsonObject,
+    ReviewAction,
     ReviewDecision,
     ReviewGroup,
     ReviewItem,
+    ReviewPlan,
     ReviewRun,
 )
 from adminos.domain.decisions import (
@@ -32,6 +34,17 @@ from adminos.domain.decisions import (
 )
 from adminos.domain.learning import record_learning
 from adminos.domain.mailboxes import DEFAULT_SCOPE, ReviewScope, capability_scope
+from adminos.domain.plan import (
+    NOTHING_OWED,
+    PlanStatus,
+    ReviewStanding,
+    ReviewSummary,
+    activate_plan,
+    plan_for,
+    actions_by_capability,
+    count_standing,
+    review_summary,
+)
 from adminos.domain.rules import LearnedRule, read_active_rules
 from adminos.domain.scopes import supersede_open_scopes
 from adminos.logging import get_logger
@@ -171,6 +184,8 @@ class GroupView:
     group: ReviewGroup
     capability: CapabilityConfig
     items: list[ReviewItem]
+    standing: ReviewStanding = NOTHING_OWED
+    """What this group's actions have and have not done to the mailbox."""
 
 
 @dataclass(frozen=True)
@@ -178,9 +193,38 @@ class RunView:
     run: ReviewRun
     groups: list[GroupView]
     warnings: list[str] = field(default_factory=list)
+    plan: ReviewPlan | None = None
+    summary: ReviewSummary | None = None
+    """What the review has done, counted from actions Gmail confirmed."""
+
+    def planned_groups(self) -> list[GroupView]:
+        """The groups this review will work, in the order it agreed to.
+
+        A group set aside for the day is left out rather than ordered last:
+        counting something nobody is going to look at among what remains is
+        how "two groups left" stops meaning anything.
+        """
+        if self.plan is None:
+            return list(self.groups)
+
+        order = {key: index for index, key in enumerate(self.plan.sequence)}
+        skipped = set(self.plan.skipped)
+        return sorted(
+            (view for view in self.groups if view.group.capability_key not in skipped),
+            key=lambda view: order.get(view.group.capability_key, len(order)),
+        )
+
+    def begun(self) -> bool:
+        """Whether the plan for this review has been agreed."""
+        return self.plan is None or self.plan.status == PlanStatus.ACTIVE
 
     def current_group(self) -> GroupView | None:
-        """The first group not finished with, in configured order.
+        """The first group not finished with, in the planned order.
+
+        Nothing is current until the plan has been begun. What the morning
+        consists of — which groups, how many rows each, and what will be asked
+        of him — is Brian's to agree before the first table is in front of him,
+        and a review that presents rows first has made that agreement implicit.
 
         A group whose rows are approved but not executed is not finished with,
         and moving past it is how "I decided" comes to read as "it happened":
@@ -190,7 +234,9 @@ class RunView:
 
         Working out of order is still possible by naming a group directly.
         """
-        for view in self.groups:
+        if not self.begun():
+            return None
+        for view in self.planned_groups():
             if view.group.state != GroupState.COMPLETED:
                 return view
         return None
@@ -906,6 +952,8 @@ def record_decision(
     )
     session.add(record)
     session.flush()
+    if actor == HUMAN_ACTOR:
+        activate_plan(session, run, actor, moment)
     record_learning(session, capability, run, item, record, now=moment)
     return item
 
@@ -1132,18 +1180,24 @@ def refresh_states(
     """
     moment = now or datetime.now(UTC)
     views: list[GroupView] = []
+    plan = plan_for(
+        session,
+        loaded,
+        run,
+        begun=RunState(run.state) is not RunState.NOT_STARTED,
+        now=moment,
+    )
+    actions = actions_by_capability(session, run)
 
     if RunState(run.state) is RunState.ABANDONED:
         return RunView(
             run=run,
             groups=[
-                GroupView(
-                    group=group,
-                    capability=loaded.get(group.capability_key),
-                    items=read_group_items(session, group),
-                )
+                as_left(session, loaded, group, actions)
                 for group in read_groups(session, run)
             ],
+            plan=plan,
+            summary=review_summary(session, run),
         )
 
     for group in read_groups(session, run):
@@ -1156,10 +1210,21 @@ def refresh_states(
             group.completed_at = group.completed_at or moment
         else:
             group.completed_at = None
-        views.append(GroupView(group=group, capability=capability, items=items))
+        views.append(
+            GroupView(
+                group=group,
+                capability=capability,
+                items=items,
+                standing=count_standing(items, actions.get(group.capability_key, [])),
+            )
+        )
 
-    states = {view.group.state for view in views}
-    decided = any(item.state != ItemState.PENDING for view in views for item in view.items)
+    view = RunView(
+        run=run, groups=views, plan=plan, summary=review_summary(session, run)
+    )
+    planned = view.planned_groups()
+    states = {group.group.state for group in planned}
+    decided = any(item.state != ItemState.PENDING for group in planned for item in group.items)
 
     if states and states == {GroupState.COMPLETED}:
         run.state = RunState.COMPLETED
@@ -1175,7 +1240,23 @@ def refresh_states(
         run.completed_at = None
 
     session.flush()
-    return RunView(run=run, groups=views)
+    return view
+
+
+def as_left(
+    session: Session,
+    loaded: LoadedCapabilities,
+    group: ReviewGroup,
+    actions: dict[str, list[ReviewAction]],
+) -> GroupView:
+    """A group of an abandoned review, reported as it stood when it was left."""
+    items = read_group_items(session, group)
+    return GroupView(
+        group=group,
+        capability=loaded.get(group.capability_key),
+        items=items,
+        standing=count_standing(items, actions.get(group.capability_key, [])),
+    )
 
 
 def group_state(capability: CapabilityConfig, items: Sequence[ReviewItem]) -> GroupState:

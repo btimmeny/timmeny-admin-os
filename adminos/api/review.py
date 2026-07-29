@@ -32,18 +32,36 @@ from adminos.domain.evidence import (
 from adminos.domain.mailboxes import (
     DEFAULT_SCOPE,
     SCOPE_NAMES,
+    Mailbox,
     ReviewScope,
     UnknownScope,
     capability_scope,
     read_scope,
     read_stored_scope,
 )
-from adminos.domain.presentation import ScreenView, render_group, shown_items
+from adminos.domain.plan import (
+    NOTHING_OWED,
+    PlanRefused,
+    PlanStatus,
+    ReviewStanding,
+    ReviewSummary,
+    begin_plan,
+)
+from adminos.domain.presentation import (
+    NOTHING_HAPPENS_ON_APPROVAL,
+    PLAN_STEPS,
+    ScreenView,
+    render_group,
+    render_group_standing,
+    shown_items,
+    tally,
+)
 from adminos.domain.review import (
     Assessment,
     BulkDecisionRefused,
     DecisionKind,
     DecisionRefused,
+    GroupState,
     GroupView,
     ItemState,
     ReviewClosed,
@@ -80,6 +98,31 @@ class StartReviewRequest(BaseModel):
             f"actionable mail only. Naming one of {SCOPE_NAMES} reviews that "
             "instead, and only ever because it was asked for."
         ),
+    )
+
+
+class BeginPlanRequest(BaseModel):
+    """How Brian wants this review worked, if not as it was proposed.
+
+    Every field names capability keys, and all three are about today only: a
+    review worked in an unusual order or with a group set aside has not
+    changed what a review is.
+    """
+
+    order: list[str] | None = Field(
+        default=None,
+        description=(
+            "Capability keys to work first, in this order. Groups not named keep "
+            "their configured order behind them."
+        ),
+    )
+    only: list[str] | None = Field(
+        default=None,
+        description="Work only these capability keys today; set the rest aside.",
+    )
+    skip: list[str] | None = Field(
+        default=None,
+        description="Set these capability keys aside for today.",
     )
 
 
@@ -266,6 +309,9 @@ class GroupResponse(BaseModel):
     items: list[ItemResponse]
     restorable: list[RestorableItemResponse] = Field(default_factory=list)
     outstanding_execution: OutstandingExecutionResponse | None = None
+    standing: str = ""
+    """Where this group has got to, in one sentence: decided, prepared,
+    executed and verified are four different things and this says which."""
 
 
 class GroupSummaryResponse(BaseModel):
@@ -274,6 +320,82 @@ class GroupSummaryResponse(BaseModel):
     position: int
     state: str
     counts: dict[str, int]
+
+
+class ReviewStandingResponse(BaseModel):
+    """What a review owes, in three kinds of unfinished.
+
+    Decided and not prepared, prepared and not confirmed, and attempted
+    without a verified result. They are reported apart because what to do
+    about each of them differs, and none of them is a thing done.
+    """
+
+    decided_not_executed: int
+    prepared_awaiting_confirmation: int
+    failed_or_unverified: int
+
+
+class PlannedGroupResponse(BaseModel):
+    """One group in the plan, and what working it will involve."""
+
+    capability_key: str
+    capability_name: str
+    position: int
+    state: str
+    items: int
+    remaining: int
+    """Rows still on the table, decided-but-not-carried-out ones included.
+    `standing` says which of them is which."""
+    empty: bool
+    skipped: bool
+    standing: ReviewStandingResponse
+
+
+class ReviewPlanResponse(BaseModel):
+    """What this review consists of, stated before any of it is presented.
+
+    A plan is `proposed` until Brian has begun it, and no group is presented
+    while it is: which groups, how many rows, what will be asked of him and
+    what will not happen on its own are the operating contract for the
+    morning, and a review that shows the first table first has agreed it on
+    his behalf.
+    """
+
+    status: str
+    version: int
+    title: str
+    message: str
+    steps: list[str]
+    resumed: bool
+    groups: list[PlannedGroupResponse]
+    working: list[str]
+    skipped: list[str]
+    completed: list[str]
+    remaining: list[str]
+    current: str | None
+    group_number: int | None
+    group_count: int
+    items: int
+    empty_groups: list[str]
+    excluded: list[str]
+    standing: ReviewStandingResponse
+
+
+class ReviewSummaryResponse(BaseModel):
+    """What the review did, counted from verified execution.
+
+    `done` counts completed actions only: a thread appears under
+    `moved_to_trash` because Gmail was read back and said so, never because a
+    row was approved.
+    """
+
+    reviewed: int
+    done: dict[str, int]
+    deferred: int
+    dismissed: int
+    rule_matched: int
+    standing: ReviewStandingResponse
+    message: str
 
 
 class ReviewChoiceResponse(BaseModel):
@@ -319,6 +441,11 @@ class RunResponse(BaseModel):
     config_version: str
     config_digest: str
     screen_id: str | None
+    plan: ReviewPlanResponse
+    """What this review consists of. While `plan.status` is `proposed`,
+    `current_group` is withheld: the plan is shown and agreed first."""
+    summary: ReviewSummaryResponse
+    """What the review has actually done, counted from verified execution."""
     groups: list[GroupSummaryResponse]
     current_group: GroupResponse | None
     outstanding_execution: list[OutstandingExecutionResponse] = Field(default_factory=list)
@@ -527,6 +654,36 @@ async def sync_if_asked(
     if not request.sync:
         return EvidenceRefresh(warnings=[], read_at=None)
     return await refresh_evidence(loaded, request.limit, scope)
+
+
+@router.post("/runs/{run_id}/plan", response_model=RunResponse)
+def begin_review_plan(
+    run_id: str,
+    request: BeginPlanRequest,
+    _: None = Depends(require_api_key),
+) -> RunResponse:
+    """Agree the plan for this review, and get the first group.
+
+    Ordering and setting aside are decisions about today: `order` brings the
+    named groups to the front, `only` works those and no others, and `skip`
+    leaves the named ones for another day. None of them changes what a review
+    normally consists of, which is configuration and stays where it is.
+    """
+    loaded = read_capability_config()
+    with open_review(run_id) as (session, run):
+        refuse_abandoned(run)
+        try:
+            begin_plan(
+                session,
+                loaded,
+                run,
+                order=request.order,
+                only=request.only,
+                skip=request.skip,
+            )
+        except PlanRefused as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return build_run_response(refresh_states(session, loaded, run), [], loaded)
 
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
@@ -865,6 +1022,8 @@ def build_run_response(
         config_version=view.run.config_version,
         config_digest=view.run.config_digest,
         screen_id=rendered.screen_id if rendered else None,
+        plan=build_plan_response(view, loaded, scope),
+        summary=build_summary_response(view),
         groups=[
             GroupSummaryResponse(
                 capability_key=group.group.capability_key,
@@ -883,8 +1042,227 @@ def build_run_response(
             )
             if outstanding is not None
         ],
-        prompt=prompt,
+        prompt=prompt or plan_prompt(view),
         warnings=warnings,
+    )
+
+
+def build_plan_response(
+    view: RunView,
+    loaded: LoadedCapabilities,
+    scope: ReviewScope,
+) -> ReviewPlanResponse:
+    """The shape of the morning: which groups, how big, and in what order."""
+    plan = view.plan
+    planned = view.planned_groups()
+    skipped = set(plan.skipped) if plan else set()
+    current = view.current_group()
+    completed = [
+        group.group.capability_name
+        for group in planned
+        if group.group.state == GroupState.COMPLETED
+    ]
+    remaining = [
+        group.group.capability_name
+        for group in planned
+        if group.group.state != GroupState.COMPLETED
+    ]
+    standing = total_standing(view)
+    resumed = RunState(view.run.state) is not RunState.NOT_STARTED
+    number = (
+        next(
+            (
+                index
+                for index, group in enumerate(planned, start=1)
+                if current is not None
+                and group.group.capability_key == current.group.capability_key
+            ),
+            None,
+        )
+        if current
+        else None
+    )
+
+    return ReviewPlanResponse(
+        status=plan.status if plan else PlanStatus.ACTIVE,
+        version=plan.version if plan else 1,
+        title="Resuming today's review" if resumed else "Today's review plan",
+        message=plan_message(view, planned, scope, resumed, current, number),
+        steps=list(PLAN_STEPS),
+        resumed=resumed,
+        groups=[
+            PlannedGroupResponse(
+                capability_key=group.group.capability_key,
+                capability_name=group.group.capability_name,
+                position=group.group.position,
+                state=group.group.state,
+                items=len(group.items),
+                remaining=len(shown_items(lookup_screen(group, loaded), group.items)),
+                empty=not group.items,
+                skipped=group.group.capability_key in skipped,
+                standing=build_standing_response(group.standing),
+            )
+            for group in sorted(
+                view.groups,
+                key=lambda group: (
+                    group.group.capability_key in skipped,
+                    planned_position(planned, group),
+                ),
+            )
+        ],
+        working=[group.group.capability_key for group in planned],
+        skipped=sorted(skipped),
+        completed=completed,
+        remaining=remaining,
+        current=current.group.capability_key if current else None,
+        group_number=number,
+        group_count=len(planned),
+        items=sum(len(group.items) for group in planned),
+        empty_groups=[
+            group.group.capability_name for group in planned if not group.items
+        ],
+        excluded=excluded_mailboxes(scope),
+        standing=build_standing_response(standing),
+    )
+
+
+def planned_position(planned: list[GroupView], group: GroupView) -> int:
+    for index, candidate in enumerate(planned):
+        if candidate.group.capability_key == group.group.capability_key:
+            return index
+    return len(planned)
+
+
+def plan_message(
+    view: RunView,
+    planned: list[GroupView],
+    scope: ReviewScope,
+    resumed: bool,
+    current: GroupView | None,
+    number: int | None,
+) -> str:
+    """The plan said in the order it will be worked, and what it will not do."""
+    sizes = ", ".join(
+        f"{group.group.capability_name} ({len(group.items)})" for group in planned
+    ) or "nothing"
+    standing = total_standing(view)
+    owed = (
+        f"{tally(standing.decided_not_executed, 'decision')} recorded and not carried "
+        f"out, {tally(standing.prepared_awaiting_confirmation, 'action')} prepared and "
+        f"awaiting your confirmation, "
+        f"{tally(standing.failed_or_unverified, 'action')} attempted without a "
+        "verified result."
+    )
+
+    if not view.begun():
+        return (
+            f"{len(planned)} groups, in this order: {sizes}. {scope.describes()} "
+            f"{NOTHING_HAPPENS_ON_APPROVAL} Begin this review plan?"
+        )
+    if current is None:
+        return f"Every planned group is finished with. {owed}"
+    if not resumed:
+        return (
+            f"Group {number} of {len(planned)}: {current.group.capability_name}. "
+            f"Groups: {sizes}."
+        )
+    return (
+        f"Group {number} of {len(planned)}: {current.group.capability_name}. "
+        f"Groups: {sizes}. {owed} Resume from this group?"
+    )
+
+
+def excluded_mailboxes(scope: ReviewScope) -> list[str]:
+    """The mailboxes this review is not of, named rather than implied."""
+    excluded = []
+    if not scope.include_archived and scope.mailbox is not Mailbox.ARCHIVE:
+        excluded.append("archived")
+    if not scope.include_snoozed and scope.mailbox is not Mailbox.SNOOZED:
+        excluded.append("snoozed")
+    if not scope.include_trash:
+        excluded.append("Trash")
+    if not scope.include_spam:
+        excluded.append("Spam")
+    if not scope.include_sent:
+        excluded.append("Sent-only threads")
+    if not scope.include_drafts:
+        excluded.append("Drafts")
+    return excluded
+
+
+def total_standing(view: RunView) -> ReviewStanding:
+    return view.summary.standing if view.summary else NOTHING_OWED
+
+
+def build_standing_response(standing: ReviewStanding) -> ReviewStandingResponse:
+    return ReviewStandingResponse(
+        decided_not_executed=standing.decided_not_executed,
+        prepared_awaiting_confirmation=standing.prepared_awaiting_confirmation,
+        failed_or_unverified=standing.failed_or_unverified,
+    )
+
+
+def build_summary_response(view: RunView) -> ReviewSummaryResponse:
+    """What the review did, in counts nothing but execution can raise."""
+    summary = view.summary
+    if summary is None:
+        return ReviewSummaryResponse(
+            reviewed=0,
+            done={},
+            deferred=0,
+            dismissed=0,
+            rule_matched=0,
+            standing=build_standing_response(NOTHING_OWED),
+            message="Nothing has been reviewed.",
+        )
+    return ReviewSummaryResponse(
+        reviewed=summary.reviewed,
+        done=dict(summary.done),
+        deferred=summary.deferred,
+        dismissed=summary.dismissed,
+        rule_matched=summary.rule_matched,
+        standing=build_standing_response(summary.standing),
+        message=summary_message(summary),
+    )
+
+
+def summary_message(summary: ReviewSummary) -> str:
+    done = (
+        ", ".join(f"{count} {name.replace('_', ' ')}" for name, count in summary.done.items())
+        or "nothing carried out"
+    )
+    owed = summary.standing.outstanding()
+    tail = (
+        f" {tally(owed, 'action')} still outstanding, so the review is not finished."
+        if owed
+        else ""
+    )
+    return (
+        f"{tally(summary.reviewed, 'item')} reviewed: {done}; {summary.deferred} put "
+        f"off, {summary.dismissed} left alone. Counted from verified execution.{tail}"
+    )
+
+
+def plan_prompt(view: RunView) -> ReviewPromptResponse | None:
+    """Ask before the first group, because the plan is Brian's to agree."""
+    if view.plan is None or view.plan.status == PlanStatus.ACTIVE:
+        return None
+    return ReviewPromptResponse(
+        reason="plan_proposed",
+        message=(
+            "This is the plan for today's review. Nothing is presented and nothing is "
+            "decided until you begin it. Say so to begin, or name the order you want, "
+            "the only groups you want, or the ones to skip."
+        ),
+        choices=[
+            ReviewChoiceResponse(
+                operation="beginReviewPlan",
+                label="Begin this review plan",
+                method="POST",
+                path=f"/review/runs/{view.run.id}/plan",
+                body={},
+            ),
+        ],
     )
 
 
@@ -910,6 +1288,9 @@ def build_group_response(
         items=[build_item_response(item, view.capability) for item in view.items],
         restorable=build_restorable(view, run),
         outstanding_execution=build_outstanding(view, run),
+        standing=render_group_standing(
+            view, sum(1 for item in view.items if item.state == ItemState.PENDING)
+        ),
     )
 
 

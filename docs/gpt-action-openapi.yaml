@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.14.0
+  version: 0.15.0
   description: >-
     API for the Timmeny Admin OS daily review workflow.
 
@@ -21,6 +21,10 @@ paths:
     post:
       operationId: startDailyReview
       summary: Start or resume the daily review
+      description: >-
+        Returns the review's plan and no group: what the morning consists of
+        is stated before any of it is presented. Show plan.message and
+        plan.groups, then call beginReviewPlan when Brian says to begin.
       requestBody:
         required: false
         content:
@@ -101,6 +105,10 @@ paths:
                       fresh is this?" from here, never from the clock.
                   prompt:
                     $ref: "#/components/schemas/ReviewPrompt"
+                  plan:
+                    $ref: "#/components/schemas/ReviewPlan"
+                  summary:
+                    $ref: "#/components/schemas/ReviewSummary"
                   scope:
                     $ref: "#/components/schemas/ReviewScope"
                   outstanding_execution:
@@ -206,7 +214,9 @@ paths:
                     Which review to resume. Omit it for the inbox review.
       responses:
         "200":
-          description: The review under way.
+          description: >-
+            The review under way, with its plan. A plan already begun is
+            returned active, and the review resumes from plan.current.
           content:
             application/json:
               schema:
@@ -253,6 +263,63 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /review/runs/{run_id}/plan:
+    post:
+      operationId: beginReviewPlan
+      summary: Agree the plan for this review, and get the first group
+      description: >-
+        startDailyReview returns the plan and no group: what the morning
+        consists of is Brian's to agree before the first table appears. Show
+        plan.message and plan.groups, then call this when he says to begin.
+        Send order, only or skip only where he named groups - "do Financial
+        first" is order, "only Admin" is only, "skip Legal today" is skip - and
+        name capability keys, never screen titles or policy versions. All three
+        are about today; none of them changes what a review normally consists
+        of.
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Capability keys to work first, in this order. Groups not
+                    named keep their configured order behind them.
+                only:
+                  type: array
+                  items:
+                    type: string
+                  description: Work only these groups today; set the rest aside.
+                skip:
+                  type: array
+                  items:
+                    type: string
+                  description: Set these groups aside for today.
+      responses:
+        "200":
+          description: The plan, begun, with the first group to work.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: No such review.
+        "422":
+          description: >-
+            A named group is not in this review, or every group was set aside.
+            Say which; do not retry with a guess.
   /review/runs/{run_id}:
     get:
       operationId: readDailyReview
@@ -320,6 +387,10 @@ paths:
                       fresh is this?" from here, never from the clock.
                   prompt:
                     $ref: "#/components/schemas/ReviewPrompt"
+                  plan:
+                    $ref: "#/components/schemas/ReviewPlan"
+                  summary:
+                    $ref: "#/components/schemas/ReviewSummary"
                   scope:
                     $ref: "#/components/schemas/ReviewScope"
                   outstanding_execution:
@@ -1164,6 +1235,145 @@ components:
           type: object
           description: The exact request body to send, already scoped to these rows.
           additionalProperties: true
+    ReviewPlan:
+      type: object
+      description: >-
+        What this review consists of, said before any of it is presented.
+        While status is proposed, current_group is absent and nothing has been
+        decided: show message, the groups with their counts, and the steps,
+        then call beginReviewPlan when Brian says to begin. Never present rows
+        or ask for a decision while a plan is proposed.
+      properties:
+        status:
+          type: string
+          enum: [proposed, active]
+        version:
+          type: integer
+          description: >-
+            Raised whenever the order or the set-aside groups change. Quote it
+            if asked which plan is being worked.
+        title:
+          type: string
+        message:
+          type: string
+          description: One paragraph, safe to show as written.
+        steps:
+          type: array
+          items:
+            type: string
+          description: >-
+            What working each group will consist of, in order. Show them on the
+            first plan of a review.
+        resumed:
+          type: boolean
+          description: >-
+            True where the review was already under way. The message then says
+            where it stands and asks whether to resume from the current group.
+        groups:
+          type: array
+          items:
+            type: object
+            properties:
+              capability_key:
+                type: string
+              capability_name:
+                type: string
+              items:
+                type: integer
+              remaining:
+                type: integer
+                description: >-
+                  Rows still on the table, which includes rows decided and
+                  not yet carried out. standing says which is which.
+              empty:
+                type: boolean
+              skipped:
+                type: boolean
+                description: Set aside for today, and not counted as remaining.
+              standing:
+                $ref: "#/components/schemas/ReviewStanding"
+        working:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: string
+        completed:
+          type: array
+          items:
+            type: string
+        remaining:
+          type: array
+          items:
+            type: string
+        current:
+          type: string
+        group_number:
+          type: integer
+        group_count:
+          type: integer
+        items:
+          type: integer
+        empty_groups:
+          type: array
+          items:
+            type: string
+        excluded:
+          type: array
+          items:
+            type: string
+          description: >-
+            The mailboxes this review is not of. Answer "did you look at my
+            archive?" from here.
+        standing:
+          $ref: "#/components/schemas/ReviewStanding"
+    ReviewStanding:
+      type: object
+      description: >-
+        What the review owes the mailbox, counted from actions rather than
+        decisions. Any of these above zero means work is unfinished, whatever
+        the tables show.
+      properties:
+        decided_not_executed:
+          type: integer
+          description: Decided, not prepared. Nothing has changed in Gmail.
+        prepared_awaiting_confirmation:
+          type: integer
+          description: Prepared and waiting on Brian's confirmation.
+        failed_or_unverified:
+          type: integer
+          description: Attempted with no verified result. Not done.
+    ReviewSummary:
+      type: object
+      description: >-
+        What the review has done, counted from verified execution only. Report
+        completion from here and from nowhere else: a decision never raises
+        one of these counts.
+      properties:
+        reviewed:
+          type: integer
+        done:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >-
+            Completed actions by name - archived, filed, moved_to_trash,
+            replies_drafted, replies_sent, tasks_created. Absent means it did
+            not happen.
+        deferred:
+          type: integer
+        dismissed:
+          type: integer
+        rule_matched:
+          type: integer
+          description: Rows whose recommendation came from a learned rule.
+        standing:
+          $ref: "#/components/schemas/ReviewStanding"
+        message:
+          type: string
+          description: The end-of-review summary, safe to show as written.
     ReviewPrompt:
       type: object
       description: >-
@@ -1174,7 +1384,7 @@ components:
       properties:
         reason:
           type: string
-          enum: [review_completed, review_abandoned]
+          enum: [review_completed, review_abandoned, plan_proposed]
         message:
           type: string
           description: One sentence, safe to show as written.

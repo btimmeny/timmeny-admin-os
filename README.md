@@ -514,6 +514,28 @@ Abandoning a review supersedes every action scope prepared in it, so a preparati
 
 A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up by `start` rather than fenced off, and so is one whose rows were all withdrawn as their threads left the inbox. Only a completed review carrying a decision Brian made needs a deliberate restart.
 
+### The plan a review states before it works
+
+A review says what it is going to do before it does any of it. `POST /review/start` returns a `plan` and **no** `current_group`: the ordered groups with their item counts, which of them are empty, the mailboxes left out, whether this is a new review or one being resumed, the ten steps working a group consists of, and what the review already owes the mailbox. Nothing is presented and nothing is decided until `POST /review/runs/{run_id}/plan` says to begin. See [ADR-0019](docs/adr/ADR-0019-a-review-states-its-plan.md).
+
+```json
+{"order": ["financial_taxes"], "only": null, "skip": ["admin"]}
+```
+
+`order` brings named groups to the front, `only` works those and sets the rest aside, `skip` sets named ones aside — all three about that review and nothing else, so "skip Admin today" is recorded as a decision about today rather than as a group that never existed. A group set aside is not counted among the groups remaining, and the review can complete without it. Naming a group that is not in the review is `422` rather than a silent no-op, and so is setting every group aside. Changing the order or the set-aside groups raises the plan's `version`.
+
+Deciding a row begins the plan without being asked: working the review is a stronger answer than agreeing to work it, so a resumed review does not ask permission it has already been given. `plan.status` is `proposed` until then, and `active` afterwards.
+
+Every response carries what the review owes, counted from the rows and their actions rather than from anything said about them:
+
+| Count | Means |
+| --- | --- |
+| `decided_not_executed` | Decided and not prepared. Nothing has changed in Gmail. |
+| `prepared_awaiting_confirmation` | Prepared, waiting on a confirmation that has not come. |
+| `failed_or_unverified` | Attempted with no verified result. Not done. |
+
+The same three appear per group, in `plan.groups[].standing` and in a sentence on the group itself, and the end-of-review `summary` counts completions from verified execution alone: `summary.done` is keyed by what actually happened — `archived`, `filed`, `moved_to_trash`, `replies_drafted`, `replies_sent`, `tasks_created` — and a decision never raises one of them.
+
 ### What a review looks at
 
 The default review is the inbox, and that is a property of the query rather than a preference anyone was asked about. Intake asks Gmail for threads carrying `INBOX` *and* the capability's label, with `-in:snoozed`, and every thread is checked again against the labels it actually carries before it enters a review. Nothing archived, snoozed, trashed, spam, sent-only or draft-only reaches the table, and a thread that loses `INBOX` — because it was archived, in the review or in Gmail — is off the table by the next review.

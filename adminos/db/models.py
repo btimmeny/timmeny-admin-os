@@ -274,6 +274,43 @@ class ReviewRun(Base):
     updated_at: Mapped[datetime] = updated_at_column()
 
 
+class ReviewPlan(Base):
+    """The order a review will be worked in, agreed before it is worked.
+
+    A plan exists from the moment a review is opened, and is `proposed` until
+    Brian has seen it and said to begin: the groups, their sizes and what will
+    happen to each are the operating contract for the morning, and a review
+    that starts presenting rows before it has stated its plan has made that
+    contract implicit again.
+
+    `sequence` is the whole order including anything set aside, and `skipped`
+    says which of those are not for today, so "skip Legal" is recorded as a
+    decision about this review rather than as a group that never existed.
+    """
+
+    __tablename__ = "review_plans"
+    __table_args__ = (UniqueConstraint("run_id", name="uq_review_plan_run"),)
+
+    id: Mapped[str] = id_column()
+    run_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    """Raised whenever the order or the set-aside groups change.
+
+    A review worked in an order nobody agreed to is the thing this counts
+    against: each change is a version, and the version is reported.
+    """
+    sequence: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    skipped: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    config_version: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    begun_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    begun_by: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
+
+
 class ReviewGroup(Base):
     """One capability's slice of a review run, presented on its own."""
 

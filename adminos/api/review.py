@@ -34,6 +34,7 @@ from adminos.domain.review import (
     DecisionKind,
     DecisionRefused,
     GroupView,
+    ItemState,
     ReviewNotFound,
     RunView,
     decide_group,
@@ -130,6 +131,24 @@ class ScreenResponse(BaseModel):
     empty_text: str
 
 
+class RestorableItemResponse(BaseModel):
+    """A thread that was moved to Trash and can be taken back out of it.
+
+    Listed separately because the table shows what still needs deciding, and a
+    trashed thread does not. It carries the exact request that restores it, so
+    undoing a Trash never depends on anyone reconstructing one.
+    """
+
+    item_id: str
+    thread_id: str
+    subject: str | None
+    trashed_at: datetime | None
+    action: str
+    method: str
+    path: str
+    body: dict[str, str]
+
+
 class GroupResponse(BaseModel):
     capability_key: str
     capability_name: str
@@ -142,6 +161,7 @@ class GroupResponse(BaseModel):
     counts: dict[str, int]
     screen: ScreenResponse
     items: list[ItemResponse]
+    restorable: list[RestorableItemResponse] = Field(default_factory=list)
 
 
 class GroupSummaryResponse(BaseModel):
@@ -164,6 +184,9 @@ class RunResponse(BaseModel):
     current_group: GroupResponse | None
     warnings: list[str]
 
+
+RESTORE_ACTION = "restore_gmail_thread_from_trash"
+"""The spoken name of the one decision a settled item still accepts."""
 
 ACTION_DESCRIPTION = (
     "The action to take, by its stored name or its spoken one: "
@@ -536,7 +559,33 @@ def build_group_response(
         counts=count_states(view.items),
         screen=screen,
         items=[build_item_response(item, view.capability) for item in view.items],
+        restorable=build_restorable(view, run),
     )
+
+
+def build_restorable(view: GroupView, run: ReviewRun) -> list[RestorableItemResponse]:
+    """The trashed threads this capability may take back out of Trash.
+
+    Empty unless the capability is granted `gmail.untrash`: what can be undone
+    is a permission like any other, not an assumption.
+    """
+    if not view.capability.permits(ActionKind.GMAIL_UNTRASH):
+        return []
+    return [
+        RestorableItemResponse(
+            item_id=item.id,
+            thread_id=item.source_thread_id,
+            subject=item.subject,
+            trashed_at=item.decided_at,
+            action=RESTORE_ACTION,
+            method="POST",
+            path=f"/review/runs/{run.id}/items/{item.id}/decision",
+            body={"decision": DecisionKind.OVERRIDE.value, "action": RESTORE_ACTION},
+        )
+        for item in view.items
+        if item.state == ItemState.EXECUTED
+        and item.approved_action == ActionKind.GMAIL_TRASH.value
+    ]
 
 
 def build_screen_response(

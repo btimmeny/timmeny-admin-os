@@ -253,6 +253,16 @@ class GmailClient:
         await self.post(f"/threads/{thread_id}/trash", {})
         return await self.fetch_thread(thread_id)
 
+    async def untrash_thread(self, thread_id: str) -> GmailThread:
+        """Take a whole thread back out of Trash, where trashing put it.
+
+        The counterpart of `trash_thread`, and the reason trashing is safe to
+        offer: a thread Gmail still holds can be returned to where it was.
+        Idempotent in Gmail's own terms, like trashing.
+        """
+        await self.post(f"/threads/{thread_id}/untrash", {})
+        return await self.fetch_thread(thread_id)
+
     async def create_draft(
         self,
         thread_id: str,

@@ -372,6 +372,39 @@ class ReviewAction(Base):
     failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ActionScope(Base):
+    """Exactly what was selected for execution, frozen when it was prepared.
+
+    Preparation and execution are separate requests, and between them the only
+    thing tying "these nineteen" to what actually runs is this row. It records
+    the items asked for, the items prepared, the actions those became, and the
+    items left out with the reason. Execution names the scope by id and runs
+    its actions, so a narrower selection cannot widen on the way through.
+    """
+
+    __tablename__ = "action_scopes"
+    __table_args__ = (Index("ix_action_scopes_run", "run_id", "capability_key", "state"),)
+
+    id: Mapped[str] = id_column()
+    run_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    capability_key: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    entire_capability: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    requested_item_ids: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    prepared_item_ids: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    action_ids: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    excluded: Mapped[list[dict[str, str]]] = mapped_column(JSON_TYPE, nullable=False)
+    executed_item_ids: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    verified_item_ids: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    superseded_by: Mapped[str | None] = mapped_column(String(ID_LENGTH))
+    actor: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ActionEvent(Base):
     """Append-only audit of everything that happened to one action."""
 

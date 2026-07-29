@@ -532,3 +532,94 @@ def render_footer(
             "review_date": run.review_date.isoformat(),
         }
     )
+
+
+PLAN_STEPS: tuple[str, ...] = (
+    "Show every item in the group.",
+    "Show the recommended action and the reason for it.",
+    "Say whether the recommendation came from a confirmed rule.",
+    "Ask for your decision.",
+    "Record the decision.",
+    "Prepare the exact rows you selected.",
+    "Show the execution scope that came back.",
+    "Ask you to confirm it.",
+    "Execute only what you confirmed.",
+    "Read Gmail back, and only then report it done.",
+)
+"""What working a group consists of, said before any of it is done.
+
+The order is the safety property: every step between deciding and reporting
+exists because the one before it can be skipped silently, and a review that
+states them has made skipping one visible.
+"""
+
+NOTHING_HAPPENS_ON_APPROVAL = (
+    "Nothing will be archived, filed, moved to Trash, drafted or sent because you "
+    "approved a recommendation. Execution is a separate step, and it needs your "
+    "confirmation."
+)
+
+
+def render_group_standing(view: GroupView, pending: int) -> str:
+    """Where this group has got to, in a sentence that cannot be misread.
+
+    Decided, prepared, executed and verified are four different states of the
+    same row, and only the last of them means the mailbox has changed. Each
+    that a group is in is said, rather than only the first: a group can owe
+    Brian a decision and owe the mailbox a write at the same time, and hiding
+    either behind the other is how a group comes to look finished with.
+    """
+    name = view.capability.name
+    standing = view.standing
+    said: list[str] = []
+    if pending:
+        said.append(f"{tally(pending, 'item')} still needing you")
+    if standing.decided_not_executed:
+        said.append(
+            f"{tally(standing.decided_not_executed, 'decision')} recorded and not carried out"
+        )
+    if standing.prepared_awaiting_confirmation:
+        said.append(
+            f"{tally(standing.prepared_awaiting_confirmation, 'action')} prepared and "
+            "awaiting your confirmation"
+        )
+    if standing.failed_or_unverified:
+        said.append(
+            f"{tally(standing.failed_or_unverified, 'action')} attempted with no "
+            "verified result"
+        )
+
+    if said:
+        owed = (
+            " Nothing has changed in Gmail for those: prepare them, check the scope "
+            "that comes back, and confirm."
+            if standing.outstanding()
+            else ""
+        )
+        return f"{name} has {listed(said)}.{owed}"
+
+    done = sum(1 for item in view.items if item.state == ItemState.EXECUTED)
+    if done:
+        was = "was" if done == 1 else "were"
+        return f"{name} is complete. {tally(done, 'action')} {was} executed and verified."
+    settled = sum(
+        1
+        for item in view.items
+        if item.state in {ItemState.DEFERRED, ItemState.DISMISSED}
+    )
+    if settled:
+        return (
+            f"{name} is complete for today. {tally(settled, 'item')} were left alone or "
+            "put off, and no Gmail actions were executed."
+        )
+    return f"{name} has nothing in it today."
+
+
+def tally(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def listed(said: list[str]) -> str:
+    if len(said) == 1:
+        return said[0]
+    return f"{', '.join(said[:-1])} and {said[-1]}"

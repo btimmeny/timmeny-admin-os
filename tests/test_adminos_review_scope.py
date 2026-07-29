@@ -162,7 +162,18 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 
 def start(client: TestClient, **body: Any) -> dict[str, Any]:
+    """Open today's review and begin its plan.
+
+    A review states its plan before it presents a group, so getting to a table
+    takes the two calls a morning takes.
+    """
     response = client.post("/review/start", headers=AUTH, json=body)
+    assert response.status_code == 200, response.text
+    return begin(client, response.json()["run_id"])
+
+
+def begin(client: TestClient, run_id: str, **plan: Any) -> dict[str, Any]:
+    response = client.post(f"/review/runs/{run_id}/plan", headers=AUTH, json=plan)
     assert response.status_code == 200, response.text
     return response.json()
 

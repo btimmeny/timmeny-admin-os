@@ -21,6 +21,23 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPOSITORY_ROOT / "tests/data/capabilities_actions.yaml"
 API_KEY = "test-api-key"
 AUTH = {"X-API-Key": API_KEY}
+
+
+def opened(client: TestClient, **body: Any) -> dict[str, Any]:
+    """Start today's review and begin its plan, which is where rows appear.
+
+    A review states its plan before it presents anything, so a test that wants
+    a table needs the two calls a morning needs.
+    """
+    started = client.post("/review/start", headers=AUTH, json=body)
+    assert started.status_code == 200, started.text
+    return begin(client, started.json()["run_id"])
+
+
+def begin(client: TestClient, run_id: str, **plan: Any) -> dict[str, Any]:
+    response = client.post(f"/review/runs/{run_id}/plan", headers=AUTH, json=plan)
+    assert response.status_code == 200, response.text
+    return response.json()
 ADMIN_LABEL_ID = "Label_admin"
 
 
@@ -170,7 +187,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 def approved_run(client: TestClient, gmail: FakeGmail, **decision: Any) -> tuple[str, str]:
     """Start a review, approve the one newsletter, and return run and item ids."""
     gmail.serve("t1", "Newsletter: weekly")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     run_id = body["run_id"]
     item_id = body["current_group"]["items"][0]["item_id"]
 
@@ -559,7 +576,7 @@ def test_an_eligible_row_offers_both_dispositions_by_their_canonical_names(
     """The row carries the permission, so nothing has to be assumed about it."""
     gmail.serve("t1", "Newsletter: weekly")
 
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
 
     row = body["current_group"]["screen"]["rows"][0]
     assert "archive_gmail_thread" in row["actions"]
@@ -586,7 +603,7 @@ def test_delete_all_of_them_moves_every_thread_to_trash(
     """\"Delete all 11\": one bulk decision, one confirmation, eleven verified moves."""
     for number in range(1, 12):
         gmail.serve(f"t{number}", f"Newsletter: issue {number}")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     run_id = body["run_id"]
 
     decided = client.post(
@@ -628,7 +645,7 @@ def test_a_bulk_delete_naming_one_ineligible_row_records_nothing(
     """One refusal answers for the whole request, and names itself."""
     for number in (1, 2, 3):
         gmail.serve(f"t{number}", f"Newsletter: issue {number}")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     run_id = body["run_id"]
     rows = {row["thread_id"]: row["item_id"] for row in body["current_group"]["screen"]["rows"]}
     client.post(
@@ -698,7 +715,7 @@ def test_a_row_offers_filing_with_the_folders_it_would_accept(
     """The folder list comes from Admin OS, so the GPT never invents one."""
     gmail.serve("t1", "Newsletter: weekly")
 
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
 
     screen = body["current_group"]["screen"]
     filing = next(
@@ -752,7 +769,7 @@ def test_filing_all_of_them_puts_every_thread_in_the_named_folder(
 ) -> None:
     for number in (1, 2, 3):
         gmail.serve(f"t{number}", f"Newsletter: issue {number}")
-    run_id = client.post("/review/start", headers=AUTH, json={}).json()["run_id"]
+    run_id = opened(client)["run_id"]
 
     decided = client.post(
         f"/review/runs/{run_id}/groups/admin/decisions",
@@ -779,7 +796,7 @@ def test_filing_without_naming_a_folder_is_refused(
     client: TestClient, gmail: FakeGmail
 ) -> None:
     gmail.serve("t1", "Newsletter: weekly")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     item_id = body["current_group"]["items"][0]["item_id"]
 
     refused = client.post(
@@ -797,7 +814,7 @@ def test_a_folder_outside_the_capabilitys_list_is_refused(
     client: TestClient, gmail: FakeGmail
 ) -> None:
     gmail.serve("t1", "Newsletter: weekly")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     item_id = body["current_group"]["items"][0]["item_id"]
 
     refused = client.post(
@@ -820,7 +837,7 @@ def test_nothing_can_ask_for_a_thread_to_be_destroyed(
 ) -> None:
     """Trash is as far as it goes: permanent deletion is not a nameable action."""
     gmail.serve("t1", "Newsletter: weekly")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     item_id = body["current_group"]["items"][0]["item_id"]
 
     for action in ("gmail.delete", "delete_gmail_thread", "gmail.destroy"):
@@ -840,7 +857,7 @@ def start_with_threads(
     """A review of `count` Admin threads, and its rows in the order shown."""
     for number in range(1, count + 1):
         gmail.serve(f"t{number}", f"Newsletter: issue {number}")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     return body["run_id"], body["current_group"]["screen"]["rows"]
 
 
@@ -1218,7 +1235,7 @@ def test_a_capability_that_may_not_restore_offers_nothing_to_restore(
 ) -> None:
     """What can be undone is a permission, not an assumption about Gmail."""
     gmail.serve("t1", "Newsletter: weekly")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
 
     taxes = client.get(
         f"/review/runs/{body['run_id']}/groups/financial_taxes", headers=AUTH
@@ -1291,7 +1308,7 @@ def test_deciding_three_rows_holds_the_review_until_they_are_carried_out(
     """
     for number in (1, 2, 3):
         gmail.serve(f"t{number}", f"Newsletter: issue {number}")
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     run_id = body["run_id"]
 
     decided = client.post(
@@ -1325,3 +1342,52 @@ def test_deciding_three_rows_holds_the_review_until_they_are_carried_out(
 
     assert after["outstanding_execution"] == []
     assert after["state"] == "completed"
+
+
+def test_a_group_says_it_is_decided_then_prepared_then_done(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """Four states of the same row, and a sentence that tells them apart.
+
+    Deciding, preparing, executing and verifying are steps, and a review that
+    describes them all the same way is how three threads came to be reported
+    as deleted while sitting in the inbox.
+    """
+    run_id, _ = approved_run(client, gmail)
+
+    decided = client.get(f"/review/runs/{run_id}/groups/admin", headers=AUTH).json()
+    assert "1 decision recorded and not carried out" in decided["standing"]
+
+    prepared = prepare(client, run_id)
+    waiting = client.get(f"/review/runs/{run_id}/groups/admin", headers=AUTH).json()
+    assert "1 action prepared and awaiting your confirmation" in waiting["standing"]
+
+    execute(client, run_id, prepared)
+    done = client.get(f"/review/runs/{run_id}/groups/admin", headers=AUTH).json()
+    assert done["standing"] == "Admin is complete. 1 action was executed and verified."
+
+
+def test_the_summary_counts_the_archive_only_once_gmail_confirms_it(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """Every completion count comes from verified execution, or from nothing."""
+    run_id, _ = approved_run(client, gmail)
+
+    summary = client.get(f"/review/runs/{run_id}", headers=AUTH).json()["summary"]
+    assert summary["done"] == {}
+    assert summary["standing"]["decided_not_executed"] == 1
+
+    prepared = prepare(client, run_id)
+    waiting = client.get(f"/review/runs/{run_id}", headers=AUTH).json()["summary"]
+    assert waiting["done"] == {}
+    assert waiting["standing"] == {
+        "decided_not_executed": 0,
+        "prepared_awaiting_confirmation": 1,
+        "failed_or_unverified": 0,
+    }
+
+    execute(client, run_id, prepared)
+    finished = client.get(f"/review/runs/{run_id}", headers=AUTH).json()["summary"]
+    assert finished["done"] == {"archived": 1}
+    assert finished["standing"]["prepared_awaiting_confirmation"] == 0
+    assert "not finished" not in finished["message"]

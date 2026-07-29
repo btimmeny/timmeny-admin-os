@@ -19,6 +19,23 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_PATH = REPOSITORY_ROOT / "tests/data/capabilities_actions.yaml"
 API_KEY = "test-api-key"
 AUTH = {"X-API-Key": API_KEY}
+
+
+def opened(client: TestClient, **body: Any) -> dict[str, Any]:
+    """Start today's review and begin its plan, which is where rows appear.
+
+    A review states its plan before it presents anything, so a test that wants
+    a table needs the two calls a morning needs.
+    """
+    started = client.post("/review/start", headers=AUTH, json=body)
+    assert started.status_code == 200, started.text
+    return begin(client, started.json()["run_id"])
+
+
+def begin(client: TestClient, run_id: str, **plan: Any) -> dict[str, Any]:
+    response = client.post(f"/review/runs/{run_id}/plan", headers=AUTH, json=plan)
+    assert response.status_code == 200, response.text
+    return response.json()
 ADMIN_LABEL_ID = "Label_admin"
 SENDER = "billing@utility.example"
 RULE = {
@@ -95,7 +112,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 
 def override(client: TestClient) -> dict[str, Any]:
-    body = client.post("/review/start", headers=AUTH, json={}).json()
+    body = opened(client)
     item_id = body["current_group"]["items"][0]["item_id"]
     response = client.post(
         f"/review/runs/{body['run_id']}/items/{item_id}/decision",
@@ -245,7 +262,7 @@ def test_a_confirmed_rule_recommends_on_the_next_review(
     rule_id = propose(client)["rule_id"]
     client.post(f"/learning/rules/{rule_id}/confirm", headers=AUTH, json={})
 
-    item = client.post("/review/start", headers=AUTH, json={}).json()["current_group"]["items"][0]
+    item = opened(client)["current_group"]["items"][0]
 
     assert item["recommendation"] == "gmail.archive"
     assert item["recommendation_source"] == "learned_rule"
@@ -259,7 +276,7 @@ def test_a_promoted_rule_approves_without_being_asked(
     client.post(f"/learning/rules/{rule_id}/confirm", headers=AUTH, json={})
     client.post(f"/learning/rules/{rule_id}/promote", headers=AUTH, json={"confirm": True})
 
-    item = client.post("/review/start", headers=AUTH, json={}).json()["current_group"]["items"][0]
+    item = opened(client)["current_group"]["items"][0]
 
     assert item["state"] == "approved"
     assert item["approved_action"] == "gmail.archive"
@@ -276,7 +293,7 @@ def test_retiring_a_rule_stops_it_recommending(
         headers=AUTH,
         json={"reason": "The account is closed."},
     )
-    item = client.post("/review/start", headers=AUTH, json={}).json()["current_group"]["items"][0]
+    item = opened(client)["current_group"]["items"][0]
 
     assert retired.json()["state"] == "retired"
     assert retired.json()["retired_reason"] == "The account is closed."
@@ -296,7 +313,7 @@ def test_a_rule_that_files_mail_names_the_folder_it_files_into(
     client.post(f"/learning/rules/{rule_id}/confirm", headers=AUTH, json={})
 
     rule = client.get(f"/learning/rules/{rule_id}", headers=AUTH).json()
-    item = client.post("/review/start", headers=AUTH, json={}).json()["current_group"]["items"][0]
+    item = opened(client)["current_group"]["items"][0]
 
     assert rule["action_params"] == {"label": "Later"}
     assert item["recommendation"] == "gmail.move"

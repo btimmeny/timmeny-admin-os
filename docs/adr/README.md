@@ -34,6 +34,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0016 — The Contract the GPT Holds Is the One This Service Serves](./ADR-0016-a-contract-that-cannot-go-stale.md)
 - [ADR-0017 — A Review Is an Object With a Life, and Ending One Is a Decision](./ADR-0017-a-review-is-an-object-with-a-life.md)
 - [ADR-0018 — A Decision Is Not a Done Thing, and the Review Says So](./ADR-0018-a-decision-is-not-a-done-thing.md)
+- [ADR-0019 — A Review States Its Plan Before It Works](./ADR-0019-a-review-states-its-plan.md)
 
 ## Candidate Decisions
 

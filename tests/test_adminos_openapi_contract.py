@@ -22,6 +22,7 @@ REQUIRED_OPERATIONS = {
     ("/review/start", "post"),
     ("/review/continue", "post"),
     ("/review/restart", "post"),
+    ("/review/runs/{run_id}/plan", "post"),
     ("/review/runs/{run_id}", "get"),
     ("/review/runs/{run_id}/groups/{capability_key}", "get"),
     ("/review/runs/{run_id}/items/{item_id}/decision", "post"),

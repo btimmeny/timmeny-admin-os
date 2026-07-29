@@ -127,7 +127,25 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
 
 
 def start(client: TestClient, **body: Any) -> dict[str, Any]:
+    """Open today's review and begin its plan.
+
+    A review states its plan before it presents a group, so getting to a table
+    takes the two calls a morning takes.
+    """
     response = client.post("/review/start", headers=AUTH, json=body)
+    assert response.status_code == 200, response.text
+    return begin(client, response.json()["run_id"])
+
+
+def proposed(client: TestClient, **body: Any) -> dict[str, Any]:
+    """Open today's review without beginning it, as a morning's first call does."""
+    response = client.post("/review/start", headers=AUTH, json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def begin(client: TestClient, run_id: str, **plan: Any) -> dict[str, Any]:
+    response = client.post(f"/review/runs/{run_id}/plan", headers=AUTH, json=plan)
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -176,7 +194,7 @@ def test_start_is_idempotent_within_a_day(
 
 
 def test_start_without_gmail_credentials_still_opens_the_review(client: TestClient) -> None:
-    body = start(client)
+    body = proposed(client)
 
     assert body["state"] == "completed"
     assert "not configured" in body["warnings"][0]
@@ -187,7 +205,7 @@ def test_a_gmail_failure_warns_rather_than_failing_the_review(
 ) -> None:
     install_client(monkeypatch, FakeGmailClient(error=GmailAuthError("token rejected")))
 
-    body = start(client)
+    body = proposed(client)
 
     assert "token rejected" in body["warnings"][0]
 
@@ -586,7 +604,7 @@ def test_starting_a_completed_review_offers_the_choice_rather_than_reopening_it(
     )
     mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities"), thread("t2", "IRS notice")])
 
-    again = start(client)
+    again = proposed(client)
 
     assert again["review_id"] == body["review_id"]
     assert again["status"] == "completed"
@@ -620,7 +638,10 @@ def test_restarting_opens_a_second_revision_of_the_same_day(
     assert second["review_date"] == first["review_date"]
     assert second["status"] == "not_started"
     assert second["evidence_refresh_at"] is not None
-    assert [item["thread_id"] for item in second["current_group"]["items"]] == ["t2"]
+    assert second["current_group"] is None, "a fresh review states its plan first"
+
+    begun = begin(client, second["review_id"])
+    assert [item["thread_id"] for item in begun["current_group"]["items"]] == ["t2"]
 
     abandoned = client.get(f"/review/runs/{first['review_id']}", headers=AUTH).json()
     assert abandoned["status"] == "abandoned"
@@ -720,7 +741,7 @@ def test_a_review_reports_its_identity_and_its_timestamps(
 
 def test_an_unread_mailbox_does_not_claim_a_refresh(client: TestClient) -> None:
     """Freshness is when Gmail answered, not when it was asked."""
-    body = start(client)
+    body = proposed(client)
 
     assert "not configured" in body["warnings"][0]
     assert body["evidence_refresh_at"] is None

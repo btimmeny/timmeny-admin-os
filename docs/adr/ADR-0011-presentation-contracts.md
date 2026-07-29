@@ -64,7 +64,7 @@ There is a real argument for the other side, and it should be stated. A language
 - [README](../../README.md) — Presentation
 - [ADR-0009](./ADR-0009-review-engine-implementation.md) — the review this renders
 - [docs/gpt-action-openapi.yaml](../gpt-action-openapi.yaml) — the screen schemas
-- [82 — Daily Review GPT Instructions](../gpt-instructions/daily-review-gpt-instructions.md)
+- [82 — Daily Review GPT Instructions](../gpt-daily-review-instructions.md)
 
 ## Validation
 

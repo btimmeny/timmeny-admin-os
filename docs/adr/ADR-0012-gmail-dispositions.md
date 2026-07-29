@@ -53,7 +53,7 @@ There is also a permission question that archiving alone did not force. Archivin
 - [README](../../README.md) — Actions, Presentation
 - [ADR-0010](./ADR-0010-action-lifecycle-and-learning.md) — the lifecycle these two actions run through
 - [81 — Action Execution Runbook](../81-Action-Execution-Runbook.md)
-- [82 — Daily Review GPT Instructions](../gpt-instructions/daily-review-gpt-instructions.md)
+- [82 — Daily Review GPT Instructions](../gpt-daily-review-instructions.md)
 - [docs/gpt-action-openapi.yaml](../gpt-action-openapi.yaml)
 
 ## Validation

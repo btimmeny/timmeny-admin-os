@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.12.0
+  version: 0.12.1
   description: >-
     API for the Timmeny Admin OS daily review workflow.
 
@@ -431,21 +431,9 @@ paths:
       operationId: prepareReviewActions
       summary: Prepare the selected rows, and fix the scope
       description: >-
-        Resolves each approval into the exact parameters that would be sent.
-        Nothing is written to Gmail here.
-
-
-        Send the exact item_ids the user named. A request with no item_ids is
-        refused unless entire_capability is true, which means the user asked
-        for every approved row in that capability; it is never an assumption.
-
-
-        The response returns a server-generated scope_id, the prepared
-        item_ids, the corresponding action_ids, and every requested row that
-        was left out with the reason. Compare prepared_item_ids with the rows
-        the user actually named before asking for confirmation: if they differ,
-        or scope_matches_request is false, show the difference and stop.
-        Preparing again supersedes the previous scope_id.
+        Prepare only the exact selected item_ids, or the full capability only
+        when entire_capability is explicitly true. Returns scope_id,
+        prepared_item_ids, action_ids, exclusions, and whether scope matched.
       parameters:
         - name: run_id
           in: path
@@ -555,27 +543,9 @@ paths:
       operationId: executeReviewActions
       summary: Execute one prepared scope, and verify it
       description: >-
-        The only operation that changes the mailbox. All four fields are
-        required: the scope_id returned by prepareReviewActions, the exact
-        prepared_item_ids and action_ids it returned alongside it, restated,
-        and confirm: true given for the execution itself rather than inherited
-        from the decision. It runs that scope's action_ids and nothing else:
-        there is no capability-wide execution.
-
-
-        A request missing any of them is refused as invalid and writes
-        nothing: a caller that cannot restate the scope has not read it. A
-        scope that has been superseded by a later preparation, already
-        executed, or whose rows were decided again since, answers 409
-        ScopeMismatch and writes nothing; so does a restatement that disagrees
-        with what was prepared.
-
-
-        Every action is read back from Gmail: an archive is complete only once
-        INBOX is absent, a move to Trash only once the thread is in TRASH, and
-        a restore only once TRASH is gone. A thread already in the requested
-        state completes without a write. A failure stays visible and
-        retryable; nothing retries itself.
+        Execute only the prepared scope. Requires scope_id, the exact prepared
+        item_ids and action_ids, and confirm: true. Reject stale or mismatched
+        scopes without writing to Gmail, then verify each result.
       parameters:
         - name: run_id
           in: path

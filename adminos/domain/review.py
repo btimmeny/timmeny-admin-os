@@ -454,11 +454,15 @@ def next_revision(
 
 
 def abandon_review(session: Session, run: ReviewRun, now: datetime) -> ReviewRun:
-    """Close a review without answering it, and disarm what it had prepared."""
+    """Close a review without answering it, and disarm what it had prepared.
+
+    A review that had been finished keeps the hour it was finished at. Setting
+    a completed morning aside to review the day again is a statement about
+    which review is current, not a claim that the first one never ended.
+    """
     supersede_open_scopes(session, run, capability_key=None, now=now)
     run.state = RunState.ABANDONED
     run.abandoned_at = now
-    run.completed_at = None
     session.flush()
     logger.info("review %s abandoned for %s", run.id, run.review_date)
     return run

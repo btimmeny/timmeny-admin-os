@@ -5,6 +5,7 @@ it drifting from the routes it claims to describe — and a GPT calling a route
 that has moved fails in front of Brian, not in CI.
 """
 
+import re
 from pathlib import Path
 
 import yaml
@@ -98,6 +99,58 @@ def test_the_gpt_instructions_fit_the_field_they_are_pasted_into() -> None:
         f"{len(instructions)} characters, {len(instructions) - INSTRUCTION_LIMIT} over. "
         "Cut prose rather than a safeguard."
     )
+
+
+def test_every_operation_the_instructions_name_is_one_the_contract_publishes() -> None:
+    """An instruction naming an operation the GPT was never given is a dead end.
+
+    Brian's GPT read "call restartDailyReview" and had no such tool, because
+    the schema it held predated the route. Named operations and published ones
+    are checked against each other here so the mismatch is CI's problem.
+    """
+    document = yaml.safe_load(CONTRACT_PATH.read_text())
+    published = {
+        operation["operationId"]
+        for path in document["paths"].values()
+        for method, operation in path.items()
+        if method in METHODS and "operationId" in operation
+    }
+    instructions = INSTRUCTIONS_PATH.read_text()
+    named = {
+        token
+        for token in re.findall(r"`([a-z][A-Za-z]+)`", instructions)
+        if re.search(r"[A-Z]", token)
+    }
+
+    assert named, "The instructions name no operations at all."
+    assert named <= published, (
+        f"The instructions call {sorted(named - published)}, which the schema does not "
+        "publish. Either add the operation or stop naming it."
+    )
+    for lifecycle in ("startDailyReview", "continueDailyReview", "restartDailyReview"):
+        assert lifecycle in named
+
+
+def test_the_contract_says_refreshing_mail_is_a_restart() -> None:
+    """"Check again" answered by starting again is a check that never happened."""
+    document = yaml.safe_load(CONTRACT_PATH.read_text())
+    schemas = document["components"]["schemas"]
+    restart = document["paths"]["/review/restart"]["post"]["description"]
+    instructions = INSTRUCTIONS_PATH.read_text()
+
+    assert "RestartAction" in schemas
+    assert schemas["RestartAction"]["properties"]["name"]["enum"] == ["restartDailyReview"]
+    for phrase in ("refresh mail", "check again"):
+        assert phrase in restart.lower()
+        assert phrase in instructions.lower()
+    for response in ("/review/start", "/review/runs/{run_id}"):
+        properties = document["paths"][response][
+            "post" if response == "/review/start" else "get"
+        ]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
+        assert properties["restart_available"]["type"] == "boolean"
+        assert (
+            properties["restart_action"]["$ref"] == "#/components/schemas/RestartAction"
+        )
 
 
 def test_the_contract_and_the_instructions_open_with_the_playbook() -> None:

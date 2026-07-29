@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.13.0
+  version: 0.14.0
   description: >-
     API for the Timmeny Admin OS daily review workflow.
 
@@ -103,11 +103,33 @@ paths:
                     $ref: "#/components/schemas/ReviewPrompt"
                   scope:
                     $ref: "#/components/schemas/ReviewScope"
+                  outstanding_execution:
+                    type: array
+                    description: >-
+                      Groups holding decisions the mailbox has not seen. Not
+                      empty means nothing has happened yet in those groups,
+                      whatever the table shows: say so, and offer to prepare
+                      them. A review with anything here is not finished.
+                    items:
+                      $ref: "#/components/schemas/OutstandingExecution"
                   current_group:
                     type: object
                     properties:
                       capability_key:
                         type: string
+                        description: >-
+                          The only name a group is addressed by. policy_version
+                          and screen_id are versions of what it recommends and
+                          how it is drawn; sending either as a key is refused.
+                      state:
+                        type: string
+                        enum:
+                          [pending, in_progress, awaiting_actions, completed]
+                        description: >-
+                          awaiting_actions means every row is decided and none
+                          of it has been carried out.
+                      outstanding_execution:
+                        $ref: "#/components/schemas/OutstandingExecution"
                       screen:
                         type: object
                         properties:
@@ -139,6 +161,12 @@ paths:
                             type: string
                           empty_text:
                             type: string
+                          notice:
+                            type: string
+                            description: >-
+                              Show it above the table, as written, whenever it
+                              is present. It is where the review says that
+                              decisions taken have not reached Gmail.
                   screen:
                     type: object
                     properties:
@@ -294,11 +322,33 @@ paths:
                     $ref: "#/components/schemas/ReviewPrompt"
                   scope:
                     $ref: "#/components/schemas/ReviewScope"
+                  outstanding_execution:
+                    type: array
+                    description: >-
+                      Groups holding decisions the mailbox has not seen. Not
+                      empty means nothing has happened yet in those groups,
+                      whatever the table shows: say so, and offer to prepare
+                      them. A review with anything here is not finished.
+                    items:
+                      $ref: "#/components/schemas/OutstandingExecution"
                   current_group:
                     type: object
                     properties:
                       capability_key:
                         type: string
+                        description: >-
+                          The only name a group is addressed by. policy_version
+                          and screen_id are versions of what it recommends and
+                          how it is drawn; sending either as a key is refused.
+                      state:
+                        type: string
+                        enum:
+                          [pending, in_progress, awaiting_actions, completed]
+                        description: >-
+                          awaiting_actions means every row is decided and none
+                          of it has been carried out.
+                      outstanding_execution:
+                        $ref: "#/components/schemas/OutstandingExecution"
                       screen:
                         type: object
                         properties:
@@ -330,6 +380,12 @@ paths:
                             type: string
                           empty_text:
                             type: string
+                          notice:
+                            type: string
+                            description: >-
+                              Show it above the table, as written, whenever it
+                              is present. It is where the review says that
+                              decisions taken have not reached Gmail.
                 additionalProperties: true
   /review/runs/{run_id}/groups/{capability_key}:
     get:
@@ -356,8 +412,15 @@ paths:
                 properties:
                   capability_key:
                     type: string
+                    description: >-
+                      The only name this group is addressed by. policy_version
+                      and screen_id name its policy and its layout, and a
+                      request sending either as the key is refused with 404.
                   state:
                     type: string
+                    enum: [pending, in_progress, awaiting_actions, completed]
+                  outstanding_execution:
+                    $ref: "#/components/schemas/OutstandingExecution"
                   scope:
                     $ref: "#/components/schemas/ReviewScope"
                   screen:
@@ -391,6 +454,12 @@ paths:
                         type: string
                       empty_text:
                         type: string
+                      notice:
+                        type: string
+                        description: >-
+                          Show it above the table, as written, whenever it is
+                          present. It is where the review says that decisions
+                          taken have not reached Gmail.
                   restorable:
                     type: array
                     description: >-
@@ -478,20 +547,49 @@ paths:
               schema:
                 type: object
                 properties:
-                  run_id:
-                    type: string
-                  state:
-                    type: string
-                  current_group:
+                  run:
                     type: object
+                    description: >-
+                      The review as it now stands. Recording a decision is not
+                      taking the action it authorises: read
+                      run.outstanding_execution before saying anything about
+                      what has happened, and never report a decision as done.
                     properties:
-                      capability_key:
+                      review_id:
                         type: string
-                      screen:
+                      state:
+                        type: string
+                      outstanding_execution:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/OutstandingExecution"
+                      current_group:
                         type: object
                         properties:
-                          title:
+                          capability_key:
                             type: string
+                          state:
+                            type: string
+                          screen:
+                            type: object
+                            properties:
+                              title:
+                                type: string
+                              notice:
+                                type: string
+                    additionalProperties: true
+                  decided:
+                    type: array
+                    description: The rows this call decided, in their new state.
+                    items:
+                      type: object
+                      properties:
+                        item_id:
+                          type: string
+                        state:
+                          type: string
+                        approved_action:
+                          type: string
                 additionalProperties: true
   /review/runs/{run_id}/groups/{capability_key}/decisions:
     post:
@@ -550,20 +648,49 @@ paths:
               schema:
                 type: object
                 properties:
-                  run_id:
-                    type: string
-                  state:
-                    type: string
-                  current_group:
+                  run:
                     type: object
+                    description: >-
+                      The review as it now stands. Recording a decision is not
+                      taking the action it authorises: read
+                      run.outstanding_execution before saying anything about
+                      what has happened, and never report a decision as done.
                     properties:
-                      capability_key:
+                      review_id:
                         type: string
-                      screen:
+                      state:
+                        type: string
+                      outstanding_execution:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/OutstandingExecution"
+                      current_group:
                         type: object
                         properties:
-                          title:
+                          capability_key:
                             type: string
+                          state:
+                            type: string
+                          screen:
+                            type: object
+                            properties:
+                              title:
+                                type: string
+                              notice:
+                                type: string
+                    additionalProperties: true
+                  decided:
+                    type: array
+                    description: The rows this call decided, in their new state.
+                    items:
+                      type: object
+                      properties:
+                        item_id:
+                          type: string
+                        state:
+                          type: string
+                        approved_action:
+                          type: string
                 additionalProperties: true
         "409":
           description: >-
@@ -1002,6 +1129,41 @@ paths:
                 additionalProperties: true
 components:
   schemas:
+    OutstandingExecution:
+      type: object
+      description: >-
+        Decisions that have been recorded and have not happened. A decision
+        authorises an action; preparing, confirming and executing it is what
+        changes the mailbox. Until this is gone, the threads are where they
+        were: say "decided, not yet done", never "deleted" or "filed".
+      properties:
+        capability_key:
+          type: string
+        capability_name:
+          type: string
+        item_ids:
+          type: array
+          description: The exact rows waiting, and the ones to prepare.
+          items:
+            type: string
+        approved:
+          type: integer
+        failed:
+          type: integer
+        message:
+          type: string
+          description: One sentence, safe to show as written.
+        operation:
+          type: string
+          description: The operationId that carries this out - prepareReviewActions.
+        method:
+          type: string
+        path:
+          type: string
+        body:
+          type: object
+          description: The exact request body to send, already scoped to these rows.
+          additionalProperties: true
     ReviewPrompt:
       type: object
       description: >-

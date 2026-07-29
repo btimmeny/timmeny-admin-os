@@ -1279,3 +1279,49 @@ def test_an_abandoned_review_prepares_nothing(client: TestClient, gmail: FakeGma
     assert response.status_code == 409
     assert response.json()["detail"]["error"] == "ReviewAbandoned"
     assert gmail.writes == []
+
+def test_deciding_three_rows_holds_the_review_until_they_are_carried_out(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """Brian's incident, end to end: decided, still in the inbox, then done.
+
+    Three rows are told to go to Trash and the review stays on Admin, saying
+    what has not happened and how to make it happen. Only the execution
+    empties the group and lets the review move on.
+    """
+    for number in (1, 2, 3):
+        gmail.serve(f"t{number}", f"Newsletter: issue {number}")
+    body = client.post("/review/start", headers=AUTH, json={}).json()
+    run_id = body["run_id"]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/admin/decisions",
+        headers=AUTH,
+        json={"decision": "override", "action": "move_gmail_thread_to_trash"},
+    ).json()
+
+    run = decided["run"]
+    outstanding = run["outstanding_execution"][0]
+    assert run["current_group"]["capability_key"] == "admin"
+    assert run["current_group"]["state"] == "awaiting_actions"
+    assert len(outstanding["item_ids"]) == 3
+    assert "Nothing has changed in Gmail" in outstanding["message"]
+    assert gmail.writes == []
+
+    prepared = client.post(
+        outstanding["path"], headers=AUTH, json=outstanding["body"]
+    ).json()
+
+    assert sorted(prepared["prepared_item_ids"]) == sorted(outstanding["item_ids"])
+    assert prepared["scope_matches_request"] is True
+    assert gmail.writes == []
+
+    executed = execute(client, run_id, prepared)
+
+    assert executed.status_code == 200, executed.text
+    assert sorted(gmail.writes) == sorted(("trash", f"t{number}") for number in (1, 2, 3))
+
+    after = client.get(f"/review/runs/{run_id}", headers=AUTH).json()
+
+    assert after["outstanding_execution"] == []
+    assert after["state"] == "completed"

@@ -106,3 +106,44 @@ def test_the_gpt_instructions_name_the_lifecycle_operations() -> None:
     for operation in ("startDailyReview", "continueDailyReview", "restartDailyReview"):
         assert operation in instructions
     assert "review_id" in instructions
+
+def test_the_contract_says_a_decision_is_not_a_done_thing() -> None:
+    """The GPT reported three threads deleted on the strength of a decision.
+
+    What it read was a decision response and a review that had moved on, so
+    the contract now names the place that says otherwise, in every response
+    the GPT sees after deciding.
+    """
+    document = yaml.safe_load(CONTRACT_PATH.read_text())
+    schemas = document["components"]["schemas"]
+
+    assert "OutstandingExecution" in schemas
+    outstanding = schemas["OutstandingExecution"]
+    assert set(outstanding["properties"]) >= {
+        "capability_key",
+        "item_ids",
+        "operation",
+        "method",
+        "path",
+        "body",
+        "message",
+    }
+
+    start = document["paths"]["/review/start"]["post"]["responses"]["200"]
+    started = start["content"]["application/json"]["schema"]["properties"]
+    assert "outstanding_execution" in started
+
+    decisions = document["paths"]["/review/runs/{run_id}/groups/{capability_key}/decisions"]
+    decided = decisions["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "outstanding_execution" in decided["properties"]["run"]["properties"]
+
+
+def test_the_contract_says_which_name_addresses_a_group() -> None:
+    """`admin.v2` was sent as a capability key, and it is a policy version."""
+    document = yaml.safe_load(CONTRACT_PATH.read_text())
+    group = document["paths"]["/review/runs/{run_id}/groups/{capability_key}"]["get"]
+    schema = group["responses"]["200"]["content"]["application/json"]["schema"]
+
+    described = schema["properties"]["capability_key"]["description"]
+    assert "policy_version" in described
+    assert "screen_id" in described

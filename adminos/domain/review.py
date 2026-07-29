@@ -173,19 +173,26 @@ class RunView:
     warnings: list[str] = field(default_factory=list)
 
     def current_group(self) -> GroupView | None:
-        """The first group still needing a decision, in configured order.
+        """The first group not finished with, in configured order.
 
-        A group waiting only on execution is not what to work on next: the
-        review moves to the next group that needs Brian, and comes back to the
-        outstanding actions once every group has been decided.
+        A group whose rows are approved but not executed is not finished with,
+        and moving past it is how "I decided" comes to read as "it happened":
+        the next group appears, the last one looks dealt with, and nothing has
+        touched Gmail. Approving is Brian's word that something should happen;
+        preparing and confirming it is still his to give, so the group stays.
+
+        Working out of order is still possible by naming a group directly.
         """
         for view in self.groups:
-            if view.group.state in {GroupState.PENDING, GroupState.IN_PROGRESS}:
-                return view
-        for view in self.groups:
-            if view.group.state == GroupState.AWAITING_ACTIONS:
+            if view.group.state != GroupState.COMPLETED:
                 return view
         return None
+
+    def awaiting_execution(self) -> list[GroupView]:
+        """Groups holding decisions that have not reached the mailbox."""
+        return [
+            view for view in self.groups if view.group.state == GroupState.AWAITING_ACTIONS
+        ]
 
 
 def start_or_resume_review(

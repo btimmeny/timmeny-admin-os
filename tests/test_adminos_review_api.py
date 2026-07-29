@@ -181,16 +181,20 @@ def test_start_records_the_configuration_that_produced_the_run(
     assert len(body["config_digest"]) == 64
 
 
-def test_start_is_idempotent_within_a_day(
+def test_starting_twice_in_a_day_reviews_the_mailbox_twice(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Saying hello again asks about the inbox again, not about the last answer."""
     mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
-
     first = start(client)
+
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities"), thread("t2", "IRS notice")])
     second = start(client)
 
-    assert first["run_id"] == second["run_id"]
-    assert second["current_group"]["counts"]["total"] == 1
+    assert second["run_id"] != first["run_id"]
+    assert second["supersedes_review_id"] == first["run_id"]
+    assert second["snapshot_at"] is not None
+    assert {item["thread_id"] for item in second["current_group"]["items"]} == {"t1", "t2"}
 
 
 def test_start_without_gmail_credentials_still_opens_the_review(client: TestClient) -> None:
@@ -590,10 +594,10 @@ def test_a_decision_response_returns_the_next_screen(
     )
 
 
-def test_starting_a_completed_review_offers_the_choice_rather_than_reopening_it(
+def test_starting_after_a_completed_review_reviews_the_mail_that_arrived_since(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The morning's work stays finished, and the next move is Brian's."""
+    """A finished review says nothing about the mail that came after it."""
     mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
     body = start(client)
     item_id = body["current_group"]["items"][0]["item_id"]
@@ -606,14 +610,18 @@ def test_starting_a_completed_review_offers_the_choice_rather_than_reopening_it(
 
     again = proposed(client)
 
-    assert again["review_id"] == body["review_id"]
-    assert again["status"] == "completed"
-    assert again["prompt"]["reason"] == "review_completed"
-    assert [choice["operation"] for choice in again["prompt"]["choices"]] == [
-        "readDailyReview",
-        "restartDailyReview",
-    ]
-    assert again["current_group"] is None
+    assert again["review_id"] != body["review_id"]
+    assert again["revision"] == 2
+    assert again["supersedes_review_id"] == body["review_id"]
+    assert again["status"] == "not_started"
+    assert again["current_group"] is None, "a fresh review states its plan first"
+
+    begun = begin(client, again["review_id"])
+    assert [item["thread_id"] for item in begun["current_group"]["items"]] == ["t2"]
+
+    finished = client.get(f"/review/runs/{body['review_id']}", headers=AUTH).json()
+    assert finished["status"] == "abandoned"
+    assert finished["completed_at"] is not None, "the morning it was finished is history"
 
 
 def test_restarting_opens_a_second_revision_of_the_same_day(

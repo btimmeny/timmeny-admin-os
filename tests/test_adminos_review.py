@@ -19,13 +19,14 @@ from adminos.domain.review import (
     ItemState,
     ReviewNotFound,
     RunState,
+    continue_review,
     decide_group,
     read_group,
     read_group_items,
+    open_fresh_review,
     record_assessment,
     record_decision,
     refresh_states,
-    start_or_resume_review,
 )
 from tests.conftest import build_capability
 
@@ -122,7 +123,7 @@ def add_evidence(
 
 
 def start(session: Session, *capabilities: CapabilityConfig, now: datetime = NOW):  # noqa: ANN201
-    return start_or_resume_review(session, load(*capabilities), now=now)
+    return open_fresh_review(session, load(*capabilities), now=now)
 
 
 def test_a_review_creates_one_group_per_enabled_capability(session: Session) -> None:
@@ -145,15 +146,17 @@ def test_groups_are_presented_in_configured_order(session: Session) -> None:
     assert [group.group.capability_key for group in view.groups] == ["admin", "financial_taxes"]
 
 
-def test_starting_twice_in_a_day_resumes_the_same_review(session: Session) -> None:
+def test_starting_twice_in_a_day_takes_a_second_snapshot(session: Session) -> None:
+    """The mailbox moved in those three hours, and the second review is of now."""
     add_evidence(session, "t1", "KPMG Activities")
     first = start(session, TAXES)
     session.commit()
 
     second = start(session, TAXES, now=NOW + timedelta(hours=3))
 
-    assert second.run.id == first.run.id
-    assert session.query(ReviewItem).count() == 1
+    assert second.run.id != first.run.id
+    assert second.run.supersedes_run_id == first.run.id
+    assert first.run.state == RunState.ABANDONED
 
 
 def test_resuming_picks_up_mail_that_arrived_since(session: Session) -> None:
@@ -162,7 +165,7 @@ def test_resuming_picks_up_mail_that_arrived_since(session: Session) -> None:
     session.commit()
 
     add_evidence(session, "t2", "IRS notice")
-    view = start(session, TAXES, now=NOW + timedelta(hours=3))
+    view = continue_review(session, load(TAXES), now=NOW + timedelta(hours=3))
 
     assert {item.source_thread_id for item in view.groups[0].items} == {"t1", "t2"}
 
@@ -172,7 +175,7 @@ def test_a_new_day_starts_a_new_review(session: Session) -> None:
     first = start(session, TAXES)
     session.commit()
 
-    tomorrow = start_or_resume_review(
+    tomorrow = open_fresh_review(
         session, load(TAXES), review_date=date(2026, 7, 29), now=NOW + timedelta(days=1)
     )
 
@@ -629,7 +632,7 @@ def test_a_settled_thread_does_not_return_tomorrow(session: Session) -> None:
     record_decision(session, TAXES, today.run, today.groups[0].items[0], DecisionKind.DISMISS)
     session.commit()
 
-    tomorrow = start_or_resume_review(
+    tomorrow = open_fresh_review(
         session, load(TAXES), review_date=date(2026, 7, 29), now=NOW + timedelta(days=1)
     )
 
@@ -645,7 +648,7 @@ def test_a_reply_brings_a_settled_thread_back(session: Session) -> None:
 
     evidence.content_hash = "hash-after-the-reply"
     session.flush()
-    tomorrow = start_or_resume_review(
+    tomorrow = open_fresh_review(
         session, load(TAXES), review_date=date(2026, 7, 29), now=NOW + timedelta(days=1)
     )
 
@@ -865,7 +868,7 @@ def test_a_deferred_thread_comes_back_tomorrow(session: Session) -> None:
     record_decision(session, TAXES, today.run, today.groups[0].items[0], DecisionKind.DEFER)
     session.commit()
 
-    tomorrow = start_or_resume_review(
+    tomorrow = open_fresh_review(
         session, load(TAXES), review_date=date(2026, 7, 29), now=NOW + timedelta(days=1)
     )
 
@@ -903,7 +906,7 @@ def test_a_group_waiting_on_execution_stays_the_group_in_hand(session: Session) 
     add_evidence(session, "t1", "KPMG obligation")
     add_evidence(session, "t2", "Something admin", capabilities=["admin"])
     loaded = load(TAXES, ADMIN)
-    view = start_or_resume_review(session, loaded, now=NOW)
+    view = open_fresh_review(session, loaded, now=NOW)
 
     record_decision(
         session,
@@ -928,7 +931,7 @@ def test_outstanding_actions_are_what_is_left_once_every_group_is_decided(
 ) -> None:
     add_evidence(session, "t1", "KPMG obligation")
     loaded = load(TAXES)
-    view = start_or_resume_review(session, loaded, now=NOW)
+    view = open_fresh_review(session, loaded, now=NOW)
     record_decision(
         session, TAXES, view.run, view.groups[0].items[0], DecisionKind.APPROVE
     )

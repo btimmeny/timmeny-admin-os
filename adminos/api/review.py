@@ -69,17 +69,17 @@ from adminos.domain.review import (
     ReviewNotFound,
     RunState,
     RunView,
+    SupersededView,
     UNEXECUTED_DECISION_STATES,
     continue_review,
     decide_group,
+    open_fresh_review,
     read_group,
     read_item,
     read_run,
     record_assessment,
     record_decision,
     refresh_states,
-    restart_review,
-    start_or_resume_review,
 )
 from adminos.logging import get_logger
 
@@ -452,6 +452,22 @@ class ReviewPromptResponse(BaseModel):
     choices: list[ReviewChoiceResponse]
 
 
+class SupersededResponse(BaseModel):
+    """The review a fresh snapshot set aside, and what it still owes.
+
+    Returned because a snapshot taken over a review holding decisions the
+    mailbox never saw is the one way this loses work quietly: those rows are
+    real, they are in a review nobody will open again, and the new review is
+    the last place they can be said.
+    """
+
+    review_id: str
+    status: str
+    standing: ReviewStandingResponse
+    message: str
+    """One sentence, safe to show as written."""
+
+
 class RunResponse(BaseModel):
     review_id: str
     run_id: str
@@ -468,6 +484,13 @@ class RunResponse(BaseModel):
     completed_at: datetime | None
     abandoned_at: datetime | None
     evidence_refresh_at: datetime | None
+    snapshot_at: datetime | None
+    """The mailbox this review is of: when its evidence was first read. Say
+    how current a review is from here, never from the clock."""
+    supersedes_review_id: str | None = None
+    """The review this one replaced, where a fresh snapshot replaced one."""
+    superseded: SupersededResponse | None = None
+    """What that review was left holding, where it was left holding anything."""
     config_version: str
     config_digest: str
     screen_id: str | None
@@ -566,42 +589,22 @@ async def start_review(
     request: StartReviewRequest,
     _: None = Depends(require_api_key),
 ) -> RunResponse:
-    """Start today's review, or resume the one still under way.
+    """Read the mailbox as it is now, and review that.
 
-    One call answers "good morning": it refreshes the mailbox, builds or
-    resumes the review, and hands back a single capability group rather than
-    an undifferentiated inbox.
+    One call answers "good morning", and it answers it with the inbox of the
+    moment it was asked. A review is a snapshot; the mailbox is not. Handing
+    back the review Brian finished at nine when he says hello at ten reports
+    an inbox nobody looked at, so every entry takes a fresh snapshot and the
+    review that existed is set aside with its decisions intact.
 
-    A review already finished is not reopened. Mail that arrived since would
-    otherwise turn a morning's completed work back into an unfinished list, so
-    the finished review comes back with the choice — leave it, or review the
-    day again on refreshed mail — and the choice is Brian's.
+    Resuming a review under way is `continueDailyReview`, and it is his to ask
+    for: nothing here quietly carries on a morning he did not say to carry on.
 
     The review is of the inbox unless another scope is named. That is not a
     preference to be confirmed or a rule to be learned; it is the query, and
     the scope that was used comes back in the response.
     """
-    loaded = read_capability_config()
-    scope = requested_scope(request.scope)
-    refresh = await sync_if_asked(loaded, request, scope)
-
-    try:
-        with session_scope() as session:
-            try:
-                view = start_or_resume_review(
-                    session,
-                    loaded,
-                    review_date=request.review_date,
-                    scope=scope,
-                    evidence_refresh_at=refresh.read_at,
-                )
-            except ReviewClosed as exc:
-                return build_closed_response(session, loaded, exc.run, request, refresh.warnings)
-            return build_run_response(
-                view, refresh.warnings, loaded, opening=entry_mode(view)
-            )
-    except DatabaseNotConfigured as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return await open_review_response(request)
 
 
 @router.post("/continue", response_model=RunResponse)
@@ -653,29 +656,35 @@ async def restart_daily_review(
     request: StartReviewRequest,
     _: None = Depends(require_api_key),
 ) -> RunResponse:
-    """Put today's review aside and open a fresh one on refreshed mail.
+    """Replace the review in hand with one of the mailbox as it is now.
 
-    The review being replaced is abandoned rather than deleted: its decisions
-    and the actions they ran are what happened, and they stay readable. What
-    it loses is any preparation still open in it, which stops being executable
-    the moment it is set aside.
+    The same thing `startDailyReview` does, under the name for asking: "start
+    over", "restart", "pull my inbox again". It is a separate operation
+    because the two sentences are different — one enters admin, the other
+    abandons a review in progress on purpose — and a caller that has been
+    working a review should have to mean it.
+
+    Nothing in Gmail changes, so nothing here needs confirming.
     """
+    return await open_review_response(request)
+
+
+async def open_review_response(request: StartReviewRequest) -> RunResponse:
+    """Take the snapshot both entries take, and render the review of it."""
     loaded = read_capability_config()
     scope = requested_scope(request.scope)
     refresh = await sync_if_asked(loaded, request, scope)
 
     try:
         with session_scope() as session:
-            view = restart_review(
+            view = open_fresh_review(
                 session,
                 loaded,
                 review_date=request.review_date,
                 scope=scope,
                 evidence_refresh_at=refresh.read_at,
             )
-            return build_run_response(
-                view, refresh.warnings, loaded, opening=OpeningMode.NEW
-            )
+            return build_run_response(view, refresh.warnings, loaded, opening=OpeningMode.NEW)
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -1010,43 +1019,25 @@ def requires_confirmation(capability: CapabilityConfig, item: ReviewItem) -> boo
     )
 
 
-def build_closed_response(
-    session: Session,
-    loaded: LoadedCapabilities,
-    run: ReviewRun,
-    request: StartReviewRequest,
-    warnings: list[str],
-) -> RunResponse:
-    """Report the finished review, and offer the two honest ways on."""
-    body: JsonObject = {"sync": True, "limit": request.limit}
-    if run.scope_name != DEFAULT_SCOPE.name:
-        body["scope"] = run.scope_name
-    return build_run_response(
-        refresh_states(session, loaded, run),
-        warnings,
-        loaded,
-        prompt=ReviewPromptResponse(
-            reason=f"review_{run.state}",
-            message=(
-                f"The {run.scope_name} review for {run.review_date.isoformat()} is "
-                f"already {run.state}. Nothing has been reopened."
-            ),
-            choices=[
-                ReviewChoiceResponse(
-                    operation="readDailyReview",
-                    label="Leave it as it stands, and read what was decided",
-                    method="GET",
-                    path=f"/review/runs/{run.id}",
-                    body={},
-                ),
-                ReviewChoiceResponse(
-                    operation="restartDailyReview",
-                    label="Review the day again, on refreshed mail",
-                    method="POST",
-                    path="/review/restart",
-                    body=body,
-                ),
-            ],
+def build_superseded(view: SupersededView | None) -> SupersededResponse | None:
+    """Say what the review this one replaced was left holding, if anything.
+
+    Only where something is owed. A review replaced with every row settled is
+    history and needs no sentence; one replaced holding decisions the mailbox
+    never saw is work that would otherwise disappear quietly.
+    """
+    if view is None or not view.standing.outstanding():
+        return None
+    return SupersededResponse(
+        review_id=view.run.id,
+        status=view.run.state,
+        standing=build_standing_response(view.standing),
+        message=(
+            f"The review this one replaced still stands at "
+            f"{view.standing.decided_not_executed} decided and not carried out, "
+            f"{view.standing.prepared_awaiting_confirmation} prepared and unconfirmed, "
+            f"{view.standing.failed_or_unverified} attempted without verification. "
+            "Those rows were decided there, not here."
         ),
     )
 
@@ -1075,6 +1066,9 @@ def build_run_response(
         completed_at=view.run.completed_at,
         abandoned_at=view.run.abandoned_at,
         evidence_refresh_at=view.run.evidence_refresh_at,
+        snapshot_at=view.run.snapshot_at,
+        supersedes_review_id=view.run.supersedes_run_id,
+        superseded=build_superseded(view.superseded),
         config_version=view.run.config_version,
         config_digest=view.run.config_digest,
         screen_id=rendered.screen_id if rendered else None,

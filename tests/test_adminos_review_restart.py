@@ -1,9 +1,9 @@
-"""Refreshing the mail is a restart, and nothing else can pretend to be one.
+"""Every entry into admin reads the mailbox, and reviews what it says now.
 
-"Refresh mail" answered by `startDailyReview` hands back the finished review
-unchanged — no Gmail read, no new mail, nothing to see — and a caller with only
-prose to go on reports that as a check. So the finished review carries the
-request that actually reviews the day again, as data.
+A review is a snapshot; the inbox is not. Handing back the review finished at
+nine when Brian says hello at ten reports a mailbox nobody looked at, so both
+"good morning" and "check again" take a fresh snapshot, and only "continue"
+picks up the review already under way.
 """
 
 from pathlib import Path
@@ -154,26 +154,42 @@ def test_restarting_with_no_new_mail_still_opens_a_fresh_review(
     assert restarted["summary"]["reviewed"] == 0
 
 
-def test_a_finished_review_carries_the_request_that_refreshes_it(
+def test_saying_hello_after_a_finished_review_reviews_the_mail_that_arrived(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bug this exists for: "hello" at ten is a question about ten."""
+    fake = mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    finished = work_the_day(client)
+    arrives(fake, thread("t3", "Invoice 4021"), label_id="Label_9")
+
+    again = post(client, "/review/start", sync=True)
+    begun = begin(client, again["run_id"])
+
+    assert again["run_id"] != finished["run_id"]
+    assert again["supersedes_review_id"] == finished["run_id"]
+    assert again["snapshot_at"] is not None
+    assert subjects(begun) == ["Invoice 4021"]
+
+
+def test_a_finished_review_read_back_carries_the_request_that_refreshes_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The restart is data, so acting on it takes no interpretation."""
     mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
     finished = work_the_day(client)
 
-    again = post(client, "/review/start", sync=False)
+    read_back = client.get(f"/review/runs/{finished['run_id']}", headers=AUTH).json()
 
-    assert again["run_id"] == finished["run_id"]
-    assert again["prompt"]["reason"] == "review_completed"
-    assert again["restart_available"] is True
-    assert again["restart_action"] == {
+    assert read_back["status"] == "completed"
+    assert read_back["restart_available"] is True
+    assert read_back["restart_action"] == {
         "name": "restartDailyReview",
         "method": "POST",
         "path": "/review/restart",
         "body": {"sync": True, "scope": "inbox"},
     }
 
-    fresh = post(client, again["restart_action"]["path"], **again["restart_action"]["body"])
+    fresh = post(client, read_back["restart_action"]["path"], **read_back["restart_action"]["body"])
     assert fresh["run_id"] != finished["run_id"]
 
 
@@ -213,10 +229,10 @@ def test_continuing_a_review_under_way_opens_no_new_one(
     state says about decisions."""
 
 
-def test_the_evening_entry_creates_resumes_or_offers_the_restart(
+def test_the_evening_entry_reads_the_mailbox_every_time(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """"Good evening" is one call with three honest answers."""
+    """"Good evening" is one call, and its answer is always the inbox of now."""
     mailbox(
         monkeypatch,
         taxes=[thread("t1", "KPMG Activities")],
@@ -225,18 +241,61 @@ def test_the_evening_entry_creates_resumes_or_offers_the_restart(
 
     opened = post(client, "/review/start", sync=True)
     assert opened["status"] == "not_started"
-    assert opened["restart_available"] is False
+    assert opened["supersedes_review_id"] is None
 
-    begun = begin(client, opened["run_id"])
-    resumed = post(client, "/review/start", sync=False)
-    assert resumed["run_id"] == begun["run_id"]
-    assert resumed["restart_available"] is False
+    begin(client, opened["run_id"])
+    again = post(client, "/review/start", sync=True)
+    assert again["run_id"] != opened["run_id"]
+    assert again["supersedes_review_id"] == opened["run_id"]
 
-    work_the_day(client)
-    finished = post(client, "/review/start", sync=False)
-    assert finished["status"] == "completed"
-    assert finished["restart_available"] is True
-    assert finished["restart_action"]["body"] == {"sync": True, "scope": "inbox"}
+    resumed = post(client, "/review/continue", sync=False)
+    assert resumed["run_id"] == again["run_id"], "only continue resumes"
+
+
+def test_a_deferred_thread_still_in_the_inbox_is_asked_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Putting a thread off is a decision about that review, not about Gmail.
+
+    The mail is still in the inbox, so the next snapshot of the inbox contains
+    it: a review that hid it would be reporting a mailbox state nobody made.
+    """
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    first = begin(client, post(client, "/review/start", sync=True)["run_id"])
+    item_id = first["current_group"]["items"][0]["item_id"]
+    client.post(
+        f"/review/runs/{first['run_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "defer"},
+    )
+
+    fresh = begin(client, post(client, "/review/start", sync=True)["run_id"])
+
+    assert subjects(fresh) == ["KPMG Activities"]
+
+
+def test_replacing_a_review_says_what_it_was_left_holding(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Decisions the mailbox never saw do not vanish with the review that holds them."""
+    mailbox(
+        monkeypatch,
+        taxes=[thread("t1", "KPMG Activities")],
+        admin=[thread("t2", "Domain renewal")],
+    )
+    body = begin(client, post(client, "/review/start", sync=True)["run_id"])
+    item_id = body["current_group"]["items"][0]["item_id"]
+    client.post(
+        f"/review/runs/{body['run_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "approve"},
+    )
+
+    fresh = post(client, "/review/start", sync=True)
+
+    assert fresh["superseded"]["review_id"] == body["run_id"]
+    assert fresh["superseded"]["standing"]["decided_not_executed"] == 1
+    assert "decided and not carried out" in fresh["superseded"]["message"]
 
 
 # A scope prepared in the review being replaced is disarmed by the restart:

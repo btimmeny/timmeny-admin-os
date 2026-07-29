@@ -153,6 +153,28 @@ def test_the_contract_says_refreshing_mail_is_a_restart() -> None:
         )
 
 
+def test_the_contract_says_every_entry_reads_the_mailbox() -> None:
+    """A review is a snapshot, and the contract has to say which mailbox."""
+    document = yaml.safe_load(CONTRACT_PATH.read_text())
+    schemas = document["components"]["schemas"]
+    start = document["paths"]["/review/start"]["post"]["description"]
+    resume = document["paths"]["/review/continue"]["post"]["description"]
+    instructions = INSTRUCTIONS_PATH.read_text()
+
+    assert "reads Gmail and reviews what it says now" in start
+    assert "The only operation that resumes" in resume
+    assert "Superseded" in schemas
+    for response in ("/review/start", "/review/runs/{run_id}"):
+        properties = document["paths"][response][
+            "post" if response == "/review/start" else "get"
+        ]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
+        assert properties["snapshot_at"]["format"] == "date-time"
+        assert properties["supersedes_review_id"]["type"] == "string"
+        assert properties["superseded"]["$ref"] == "#/components/schemas/Superseded"
+    assert "snapshot" in instructions.lower()
+    assert "only when he asks to continue" in instructions
+
+
 def test_the_contract_and_the_instructions_open_with_the_playbook() -> None:
     """An orientation the GPT composes is one nobody agreed to and none can test."""
     document = yaml.safe_load(CONTRACT_PATH.read_text())

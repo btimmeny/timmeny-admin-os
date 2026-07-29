@@ -21,8 +21,8 @@ from adminos.domain.learning import LearningKind, read_learning_events
 from adminos.domain.review import (
     LEARNED_SOURCE,
     RULE_ACTOR_PREFIX,
+    open_fresh_review,
     record_decision,
-    start_or_resume_review,
 )
 from adminos.domain.rules import (
     HUMAN_SOURCE,
@@ -117,7 +117,7 @@ def add_evidence(session: Session, thread_id: str = "t1", capability_key: str = 
 
 
 def review(session: Session, capability: CapabilityConfig = ADMIN):  # noqa: ANN201
-    return start_or_resume_review(
+    return open_fresh_review(
         session,
         LoadedCapabilities(
             version="test.1", digest="d" * 64, channel="email", capabilities=(capability,)

@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Sequence
@@ -10,7 +10,12 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from adminos.capabilities.config import ActionKind, CapabilityConfig, MatchRule
+from adminos.capabilities.config import (
+    DESTINATION_PARAM,
+    ActionKind,
+    CapabilityConfig,
+    MatchRule,
+)
 from adminos.db.models import CandidateRule, JsonObject
 from adminos.logging import get_logger
 
@@ -73,15 +78,27 @@ class LearnedRule:
     confidence: float
     rationale: str
     automatable: bool
+    params: JsonObject = field(default_factory=dict)
 
 
-def rule_digest(capability_key: str, match: MatchRule, action: ActionKind) -> str:
-    """Identity of a rule by what it matches and does, not by who wrote it."""
+def rule_digest(
+    capability_key: str,
+    match: MatchRule,
+    action: ActionKind,
+    params: JsonObject | None = None,
+) -> str:
+    """Identity of a rule by what it matches and does, not by who wrote it.
+
+    The parameters are part of what it does: filing a sender's mail in
+    `Career/Citi` and filing it in `Later` are two rules, and confirming one
+    must not quietly confirm the other.
+    """
     payload = json.dumps(
         {
             "capability": capability_key,
             "match": dump_match(match),
             "action": action.value,
+            "params": params or {},
         },
         sort_keys=True,
     )
@@ -108,11 +125,36 @@ def load_match(conditions: JsonObject) -> MatchRule:
         raise RuleRefused(f"These match conditions are not usable: {exc}") from exc
 
 
-def check_learning_allowed(capability: CapabilityConfig, action: ActionKind) -> None:
+def check_learning_allowed(
+    capability: CapabilityConfig,
+    action: ActionKind,
+    params: JsonObject | None = None,
+) -> None:
     if not capability.learning.allow_rule_learning:
         raise RuleRefused(f"{capability.key!r} does not learn rules.")
+    check_rule_usable(capability, action, params)
+
+
+def check_rule_usable(
+    capability: CapabilityConfig,
+    action: ActionKind,
+    params: JsonObject | None = None,
+) -> None:
+    """Whether configuration still allows what this rule would recommend.
+
+    Asked again every time a rule is read, because configuration outlives no
+    rule: an action withdrawn, or a folder no longer filed in, retires a rule
+    in effect without anyone editing it.
+    """
     if not capability.permits(action):
         raise RuleRefused(f"{capability.key!r} is not allowed to {action.value!r}.")
+    if action is ActionKind.GMAIL_MOVE:
+        destination = (params or {}).get(DESTINATION_PARAM)
+        if destination not in capability.gmail.destinations:
+            raise RuleRefused(
+                f"A rule filing mail in {destination!r} is not usable: it is not one "
+                f"of {capability.key!r}'s destinations."
+            )
 
 
 def record_rule(
@@ -123,6 +165,7 @@ def record_rule(
     rationale: str,
     state: RuleState,
     source: str,
+    params: JsonObject | None = None,
     confidence: float = 0.0,
     actor: str | None = None,
     now: datetime | None = None,
@@ -133,13 +176,13 @@ def record_rule(
     correction arriving twice raises the observation count of one candidate
     rather than filling the queue with duplicates.
     """
-    check_learning_allowed(capability, action)
+    check_learning_allowed(capability, action, params)
     if state not in {RuleState.OBSERVED, RuleState.PROPOSED}:
         raise RuleRefused(f"A rule cannot be created directly in {state.value!r}.")
 
     moment = now or datetime.now(UTC)
     conditions = dump_match(match)
-    existing = find_equivalent(session, capability.key, match, action)
+    existing = find_equivalent(session, capability.key, match, action, params)
 
     if existing is not None:
         existing.observed_count += 1
@@ -156,6 +199,7 @@ def record_rule(
         state=state,
         match_conditions=conditions,
         action=action.value,
+        action_params=dict(params) if params else None,
         rationale=rationale,
         confidence=confidence,
         observed_count=1,
@@ -175,8 +219,9 @@ def find_equivalent(
     capability_key: str,
     match: MatchRule,
     action: ActionKind,
+    params: JsonObject | None = None,
 ) -> CandidateRule | None:
-    wanted = rule_digest(capability_key, match, action)
+    wanted = rule_digest(capability_key, match, action, params)
     for rule in read_rules(session, capability_key=capability_key):
         if rule.state == RuleState.RETIRED:
             continue
@@ -184,6 +229,7 @@ def find_equivalent(
             rule.capability_key,
             load_match(rule.match_conditions),
             ActionKind(rule.action),
+            rule.action_params,
         )
         if digest == wanted:
             return rule
@@ -210,7 +256,7 @@ def transition_rule(
         raise RuleRefused(f"A {current.value!r} rule cannot become {target.value!r}.")
 
     action = ActionKind(rule.action)
-    check_learning_allowed(capability, action)
+    check_learning_allowed(capability, action, rule.action_params)
 
     if target is RuleState.AUTOMATABLE:
         if not capability.learning.allow_automatable_rules:
@@ -272,13 +318,10 @@ def read_active_rules(session: Session, capability: CapabilityConfig) -> list[Le
     learned: list[LearnedRule] = []
     for rule in read_rules(session, capability.key, states=sorted(ACTIVE_RULE_STATES)):
         action = ActionKind(rule.action)
-        if not capability.permits(action):
-            logger.warning(
-                "candidate rule %s recommends %s, which %s may no longer do",
-                rule.id,
-                action.value,
-                capability.key,
-            )
+        try:
+            check_rule_usable(capability, action, rule.action_params)
+        except RuleRefused as refusal:
+            logger.warning("candidate rule %s is no longer usable: %s", rule.id, refusal)
             continue
         automatable = (
             rule.state == RuleState.AUTOMATABLE
@@ -294,6 +337,7 @@ def read_active_rules(session: Session, capability: CapabilityConfig) -> list[Le
                 confidence=rule.confidence,
                 rationale=rule.rationale,
                 automatable=automatable,
+                params=dict(rule.action_params or {}),
             )
         )
     return learned

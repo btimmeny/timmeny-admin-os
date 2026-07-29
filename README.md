@@ -493,11 +493,13 @@ Records one decision: `approve` (take the recommended action), `override` (take 
 {"decision": "override", "action": "move_gmail_thread_to_trash", "note": "Circular"}
 ```
 
-An action may be named as it is spoken (`archive_gmail_thread`, `move_gmail_thread_to_trash`) or as it is stored (`gmail.archive`, `gmail.trash`); both record the same thing, so the audit history keeps one vocabulary while the API answers in the other.
+An action may be named as it is spoken (`archive_gmail_thread`, `move_gmail_thread_to_label`, `move_gmail_thread_to_trash`) or as it is stored (`gmail.archive`, `gmail.move`, `gmail.trash`); both record the same thing, so the audit history keeps one vocabulary while the API answers in the other.
 
 Approval is the only route to an action, and configuration decides which actions exist for a capability at all: an action it is not granted is refused with `409` however the request is phrased. An approved item is recorded as approved and **not executed**: approval creates an action in `approved`, and reaching the mailbox takes the separate steps below. A run holding unexecuted actions reports `awaiting_actions` rather than claiming completion.
 
-`override` may carry `action_params` — `add_labels` and `remove_labels` for `gmail.label`, `to`/`cc`/`subject`/`body` for `gmail.draft_reply`.
+`override` may carry `action_params` — `add_labels` and `remove_labels` for `gmail.label`, `to`/`cc`/`subject`/`body` for `gmail.draft_reply`, and `label` for `gmail.move`, which is the folder to file the thread in and must be one the capability lists.
+
+Approving a recommended move with no `action_params` files the thread in the folder the row named. Agreeing with a recommendation takes the action that was shown, not a version of it that has to be spelled out again.
 
 ### `POST /review/runs/{run_id}/groups/{capability_key}/decisions`
 
@@ -563,7 +565,7 @@ Every review response carries the screen that renders it. Admin OS decides the c
           "Archive it", "A digest has nothing to act on once it has been seen.",
           "95%", "Pending"
         ],
-        "actions": ["approve", "archive_gmail_thread", "move_gmail_thread_to_trash", "dismiss"]
+        "actions": ["approve", "archive_gmail_thread", "move_gmail_thread_to_label", "move_gmail_thread_to_trash", "dismiss"]
       }
     ],
     "actions": [
@@ -602,9 +604,25 @@ screens:
     actions:
       - {id: approve, label: Do what is recommended, decision: approve}
       - {id: archive_gmail_thread, label: Archive, decision: override, action: gmail.archive}
+      - {id: move_gmail_thread_to_label, label: File it in a folder, decision: override, action: gmail.move}
       - {id: move_gmail_thread_to_trash, label: Move to Trash, decision: override, action: gmail.trash}
     footer: "{pending} of {total} still need you."
 ```
+
+An action that needs something said carries what, and the only answers it takes. Filing carries the capability's folders, so a renderer offers a choice rather than inviting a folder name to be typed:
+
+```json
+{
+  "id": "move_gmail_thread_to_label",
+  "label": "File it in a folder",
+  "decision": "override",
+  "action": "gmail.move",
+  "body": {"decision": "override", "action": "gmail.move"},
+  "params": [{"name": "label", "label": "Folder", "required": true, "choices": ["Later", "Notes"]}]
+}
+```
+
+A recommended move names its folder in the cell that recommends it — "File it in Later", not "File it" — because a destination the reader cannot see is not one they can agree to.
 
 A column names a `source` from a closed set, and a format its value type allows: a percentage of a subject line is a configuration error, not a blank cell. So is ordering by a value with no order, an unknown footer substitution, an override that names no action, a capability pointing at a screen that does not exist, a screen offering an action the capability is not allowed, or a whole-group decision offered where `allow_bulk_decisions` is false.
 
@@ -625,16 +643,21 @@ completed -> done; re-running is a no-op
 failed    -> durable, with the error, and retryable
 ```
 
-Five Gmail actions ship: `gmail.label`, `gmail.archive`, `gmail.trash`, and `gmail.draft_reply`, plus `gmail.send_draft`, which sends only a specific draft that has been approved by id.
+Six Gmail actions ship: `gmail.label`, `gmail.archive`, `gmail.move`, `gmail.trash`, and `gmail.draft_reply`, plus `gmail.send_draft`, which sends only a specific draft that has been approved by id.
 
-The two dispositions are what a review mostly does, and the API names them as they are spoken:
+The three dispositions are what a review mostly does, and the API names them as they are spoken:
 
 | Said | Sent as | Gmail call | Reversible |
 |---|---|---|---|
 | "archive" | `archive_gmail_thread` | `threads.modify`, removing `INBOX` | yes, the thread and its other labels are untouched |
+| "file it in Later", "move it out of my inbox" | `move_gmail_thread_to_label` with `{"label": "Later"}` | `threads.modify`, adding the folder and removing `INBOX` | yes, the thread and its other labels are untouched |
 | "delete", "remove", "trash" | `move_gmail_thread_to_trash` | `threads.trash` | yes, Gmail restores from Trash for 30 days |
 
-Both act on the whole thread the row stands for, and both are verified by reading Gmail back: archive requires `INBOX` to be absent, Trash requires `TRASH` to be present. A thread that is already in the requested state is completed without a write.
+All three act on the whole thread the row stands for, and all three are verified by reading Gmail back: archive requires `INBOX` to be absent, a move requires the folder to be present *and* `INBOX` absent, Trash requires `TRASH` to be present. A thread that is already in the requested state is completed without a write.
+
+Filing is one action rather than a label followed by an archive, because the two together are what "move it" means: doing them separately can leave a thread labelled and still in the inbox when the second half fails.
+
+A folder is chosen, never invented. Each capability lists the folders it may file in under `gmail.destinations`, the screen carries that list as the action's `choices`, and a destination outside it is refused when the decision is recorded — before anything reaches Gmail. A folder the mailbox does not actually have fails the action rather than creating a label: nothing here calls `labels.create`. See [ADR-0013](docs/adr/ADR-0013-filing-mail-in-a-named-folder.md).
 
 **There is no permanent deletion.** `messages.delete` and `threads.delete` are not implemented, not gated: no capability, rule, or request can reach them, and a test asserts the client has no method that could.
 
@@ -650,7 +673,7 @@ The only route that changes the mailbox, behind four gates: the capability must 
 {"confirm": true, "capability_key": "admin"}
 ```
 
-Every execution is read back from Gmail. An archive that Gmail still lists in the inbox is `failed`, not `completed` — a write that cannot be confirmed is not a write that happened. Permission and the kill switch are rechecked at execution, not trusted from preparation, so revoking a permission stops work already approved.
+Every execution is read back from Gmail. An archive, or a move, that Gmail still lists in the inbox is `failed`, not `completed` — a write that cannot be confirmed is not a write that happened. Permission and the kill switch are rechecked at execution, not trusted from preparation, so revoking a permission stops work already approved.
 
 ### `GET /review/runs/{run_id}/actions` and `GET …/actions/{action_id}`
 
@@ -691,6 +714,8 @@ retired     -> neither, permanently
 - `POST /learning/rules/{rule_id}/promote` — the narrowest grant in the system, and it needs `confirm: true`. Only a promoted rule may approve without being asked, and the capability must set `learning.allow_automatable_rules`.
 - `POST /learning/rules/{rule_id}/retire` — stops it recommending and acting, for good.
 
+A rule that files mail carries the folder it files into, as `action_params: {"label": "Later"}`, and is refused without one: "file this sender's mail" is not something anyone can confirm. Two folders are two rules — confirming "file KPMG mail in Financial/Taxes" leaves "file KPMG mail in Later" a separate proposal — and a rule whose folder its capability no longer lists stops recommending, without anyone editing it.
+
 Even a promoted rule only *approves*: execution permission and the kill switch still stand between it and the mailbox, and the action it approves records `approval_kind: automatable_rule` with the rule that did it.
 
 ## Capabilities
@@ -704,6 +729,7 @@ Capabilities are data, in `config/capabilities.yaml` — not branches in code. A
   gmail:
     labels: [Financial/Taxes]
     require_inbox: true
+    destinations: [Financial, Financial/Taxes, Later]
   presentation:
     screen: tax-review-v1
   playbook:
@@ -718,7 +744,7 @@ Capabilities are data, in `config/capabilities.yaml` — not branches in code. A
         recommend: monday.create_task
         confidence: 0.9
         rationale: The adviser is asking for something.
-  allowed_actions: [gmail.label, gmail.archive, gmail.draft_reply, monday.create_task]
+  allowed_actions: [gmail.label, gmail.archive, gmail.move, gmail.draft_reply, monday.create_task]
   approval:
     auto_approve: []
     allow_bulk_decisions: true
@@ -738,8 +764,10 @@ The file is validated on load and rejected outright — with `503` rather than a
 - The default recommendation may not be an action, or unmatched mail would be acted on by omission.
 - A capability may not auto-approve an action it is not allowed to take.
 - A capability may not execute an action it may not approve.
+- A capability allowed `gmail.move` must list the folders it files in, and a rule may not file mail anywhere else.
+- A Gmail system label — `INBOX`, `TRASH`, `SPAM` and the rest — may not be a destination: they are states, not folders.
 - `allow_automatable_rules` without `allow_rule_learning` is refused: a rule cannot be promoted where none may be learned.
-- No capability auto-approves a disposition: archiving and Trash are decided item by item, or by a rule that has been separately confirmed *and* promoted.
+- No capability auto-approves a disposition: archiving, filing, and Trash are decided item by item, or by a rule that has been separately confirmed *and* promoted.
 - `learning.record_message_content: true` is refused: message content is never retained ([ADR-0003](docs/adr/ADR-0003-gmail-access-and-retention.md)).
 - Two capabilities may not share a position, since position is what orders the review.
 - A capability may not name a screen that is not defined, and a screen may not offer more than the capability permits ([Presentation](#presentation)).

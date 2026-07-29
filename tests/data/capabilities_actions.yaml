@@ -28,6 +28,10 @@ screens:
         label: Archive
         decision: override
         action: gmail.archive
+      - id: move_gmail_thread_to_label
+        label: File it in a folder
+        decision: override
+        action: gmail.move
       - id: move_gmail_thread_to_trash
         label: Move to Trash
         decision: override
@@ -42,6 +46,11 @@ screens:
         label: Archive all of these
         decision: override
         action: gmail.archive
+        scope: group
+      - id: move_gmail_thread_to_label_all
+        label: File all of these in one folder
+        decision: override
+        action: gmail.move
         scope: group
       - id: move_gmail_thread_to_trash_all
         label: Move all of these to Trash
@@ -80,6 +89,9 @@ capabilities:
     gmail:
       labels:
         - Admin
+      destinations:
+        - Later
+        - Notes
     presentation:
       screen: admin-test-v1
     playbook:
@@ -108,6 +120,7 @@ capabilities:
     allowed_actions:
       - gmail.label
       - gmail.archive
+      - gmail.move
       - gmail.trash
       - gmail.draft_reply
       - gmail.send_draft
@@ -116,6 +129,7 @@ capabilities:
       permitted_actions:
         - gmail.label
         - gmail.archive
+        - gmail.move
         - gmail.trash
         - gmail.draft_reply
         - gmail.send_draft

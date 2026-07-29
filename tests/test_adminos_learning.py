@@ -70,6 +70,20 @@ TRASHING_ADMIN = build_capability(
         "allow_automatable_rules": True,
     },
 )
+FILING_ADMIN = build_capability(
+    key="admin",
+    labels=["Admin"],
+    gmail={"labels": ["Admin"], "destinations": ["Later", "Notes"]},
+    allowed_actions=["gmail.archive", "gmail.move"],
+    execution={"permitted_actions": ["gmail.archive", "gmail.move"]},
+    learning={
+        "scope": "capability",
+        "record_decisions": True,
+        "record_message_content": False,
+        "allow_rule_learning": True,
+        "allow_automatable_rules": True,
+    },
+)
 ARCHIVE_COUNCIL = MatchRule(participant_domains=[DOMAIN])
 
 
@@ -296,6 +310,90 @@ def test_a_confirmed_trash_rule_does_not_empty_the_inbox_by_itself(session: Sess
 
     assert promoted.state == ItemState.APPROVED
     assert promoted.approved_action == ActionKind.GMAIL_TRASH
+
+
+def test_a_correction_that_files_mail_remembers_the_folder(session: Session) -> None:
+    """The lesson is "file this in Later", not "file this somewhere"."""
+    add_evidence(session, capability_key=FILING_ADMIN.key)
+    view = review(session, FILING_ADMIN)
+    record_decision(
+        session,
+        FILING_ADMIN,
+        view.run,
+        view.groups[0].items[0],
+        DecisionKind.OVERRIDE,
+        action=ActionKind.GMAIL_MOVE,
+        action_params={"label": "Later"},
+        now=NOW,
+    )
+
+    rule = session.query(CandidateRule).one()
+
+    assert rule.action == ActionKind.GMAIL_MOVE
+    assert rule.action_params == {"label": "Later"}
+    assert "into Later" in rule.rationale
+
+
+def test_the_same_action_into_two_folders_is_two_observations(session: Session) -> None:
+    """Two folders are two different lessons, however alike the mail looks."""
+    add_evidence(session, capability_key=FILING_ADMIN.key)
+    add_evidence(session, thread_id="t2", capability_key=FILING_ADMIN.key)
+    view = review(session, FILING_ADMIN)
+    for item, folder in zip(view.groups[0].items, ("Later", "Notes")):
+        record_decision(
+            session,
+            FILING_ADMIN,
+            view.run,
+            item,
+            DecisionKind.OVERRIDE,
+            action=ActionKind.GMAIL_MOVE,
+            action_params={"label": folder},
+            now=NOW,
+        )
+
+    rules = session.query(CandidateRule).all()
+
+    assert [rule.action_params for rule in rules] == [{"label": "Later"}, {"label": "Notes"}]
+
+
+def test_a_confirmed_filing_rule_recommends_its_folder(session: Session) -> None:
+    rule = record_rule(
+        session,
+        FILING_ADMIN,
+        ARCHIVE_COUNCIL,
+        ActionKind.GMAIL_MOVE,
+        params={"label": "Later"},
+        rationale="Council notices are worth keeping, out of the inbox.",
+        state=RuleState.PROPOSED,
+        source=HUMAN_SOURCE,
+        actor="human",
+        now=NOW,
+    )
+    transition_rule(session, FILING_ADMIN, rule, RuleState.CONFIRMED, actor="human", now=NOW)
+    add_evidence(session)
+
+    item = review(session, FILING_ADMIN).groups[0].items[0]
+
+    assert item.recommendation == ActionKind.GMAIL_MOVE
+    assert item.recommendation_params == {"label": "Later"}
+
+
+def test_a_rule_filing_mail_somewhere_the_capability_does_not_is_refused(
+    session: Session,
+) -> None:
+    with pytest.raises(RuleRefused, match="not usable"):
+        record_rule(
+            session,
+            FILING_ADMIN,
+            ARCHIVE_COUNCIL,
+            ActionKind.GMAIL_MOVE,
+            params={"label": "Career/Citi"},
+            rationale="Worth keeping.",
+            state=RuleState.PROPOSED,
+            source=HUMAN_SOURCE,
+            actor="human",
+            now=NOW,
+        )
 
 
 def test_a_rule_approval_says_it_was_a_rule(session: Session) -> None:

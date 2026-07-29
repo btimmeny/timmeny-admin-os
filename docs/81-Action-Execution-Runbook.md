@@ -68,9 +68,9 @@ A decision records intent. Nothing has been written to Gmail yet.
 
 ---
 
-## 2a. Archiving and Trash
+## 2a. Archiving, filing, and Trash
 
-Both dispositions can be named as they are spoken. `archive_gmail_thread` and `move_gmail_thread_to_trash` are accepted wherever `gmail.archive` and `gmail.trash` are, and record the same thing.
+All three dispositions can be named as they are spoken. `archive_gmail_thread`, `move_gmail_thread_to_label`, and `move_gmail_thread_to_trash` are accepted wherever `gmail.archive`, `gmail.move`, and `gmail.trash` are, and record the same thing.
 
 ```bash
 # one row
@@ -97,6 +97,39 @@ If any named row refuses, the whole request is refused and nothing is recorded:
 ```
 
 Financial/Taxes is not granted Trash, deliberately. Archive removes `INBOX` and leaves every other label; Trash calls `threads.trash` and is recoverable in Gmail for thirty days. Permanent deletion is not implemented anywhere — there is no request that reaches it.
+
+### Filing a thread in a folder
+
+Filing keeps the thread and clears the inbox: one `threads.modify` that adds the folder and removes `INBOX`. The folder is named in `action_params`, and must be one of the capability's `gmail.destinations` — the screen carries the list as the action's `choices`.
+
+```bash
+# one row, into a named folder
+os -X POST "$ADMIN_OS/review/runs/$RUN/items/$ITEM/decision" \
+   -d '{"decision":"override","action":"move_gmail_thread_to_label",
+        "action_params":{"label":"Later"}}'
+
+# agreeing with a recommended move: the folder the row showed is the folder used
+os -X POST "$ADMIN_OS/review/runs/$RUN/items/$ITEM/decision" \
+   -d '{"decision":"approve"}'
+
+# "file 2, 4 and 7 in Later" — one folder, one decision each
+os -X POST "$ADMIN_OS/review/runs/$RUN/groups/admin/decisions" \
+   -d '{"decision":"override","action":"move_gmail_thread_to_label",
+        "action_params":{"label":"Later"},
+        "item_ids":["<row 2>","<row 4>","<row 7>"]}'
+```
+
+A move with no folder, or a folder the capability does not list, is refused with `409` at the decision — before anything reaches Gmail:
+
+```json
+{"detail": "'admin' does not file mail in 'Career/Citi'. Its folders are: Admin, Admin/- Meetings, Admin/spam & junk, Later, Notes, General & Personal."}
+```
+
+No label is ever created. A configured folder the mailbox no longer has fails the action with `The mailbox has no label named 'Later'.`, retryably. After editing `gmail.destinations`, check the names against the mailbox:
+
+```bash
+os "$ADMIN_OS/admin/gmail/labels"
+```
 
 ---
 
@@ -281,7 +314,7 @@ The paths that write to Gmail are covered by tests against a fake mailbox, not b
 The deployment itself is verified above; what follows is the first real write.
 
 1. Wait for a run created *after* the deployment. A run resumed across a configuration change keeps the recommendations its items were given, so an item opened under `admin.v1` stays `needs_review` even where an `admin.v2` rule would now match it. The group reports the `policy_version` it was populated under, which is how to tell.
-2. Approve exactly one archive, prepare it, and read `prepared_params`. Confirm it names the thread you expect and removes only `INBOX`.
+2. Approve exactly one archive, prepare it, and read `prepared_params`. Confirm it names the thread you expect and removes only `INBOX`. For a move, confirm `add_labels` names the folder you meant and `remove_labels` is `["INBOX"]` and nothing else.
 3. Set `GMAIL_WRITE_ENABLED=true` in Railway and redeploy.
 4. Execute that one action by id — `{"confirm":true,"action_ids":["…"]}` — not the whole run.
 5. Check the thread in Gmail, and check the action reports `completed` with its verification detail.

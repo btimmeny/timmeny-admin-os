@@ -27,7 +27,12 @@ class FakeGmail:
     """One mailbox serving both the review's reads and the action's writes."""
 
     def __init__(self) -> None:
-        self.labels = {"Admin": ADMIN_LABEL_ID, "financial/taxes": "Label_taxes"}
+        self.labels = {
+            "Admin": ADMIN_LABEL_ID,
+            "financial/taxes": "Label_taxes",
+            "Later": "Label_later",
+            "Notes": "Label_notes",
+        }
         self.thread_labels: dict[str, list[str]] = {}
         self.drafts: dict[str, GmailDraft] = {}
         self.sent: list[str] = []
@@ -565,6 +570,134 @@ def test_running_the_same_trash_again_changes_nothing(
 
     assert again.status_code == 200, again.text
     assert gmail.writes == [("trash", "t1")]
+
+
+def test_a_row_offers_filing_with_the_folders_it_would_accept(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """The folder list comes from Admin OS, so the GPT never invents one."""
+    gmail.serve("t1", "Newsletter: weekly")
+
+    body = client.post("/review/start", headers=AUTH, json={}).json()
+
+    screen = body["current_group"]["screen"]
+    filing = next(
+        action for action in screen["actions"] if action["id"] == "move_gmail_thread_to_label"
+    )
+    assert "move_gmail_thread_to_label" in screen["rows"][0]["actions"]
+    assert filing["params"] == [
+        {"name": "label", "label": "Folder", "required": True, "choices": ["Later", "Notes"]}
+    ]
+
+
+def test_filing_one_thread_files_it_and_takes_it_out_of_the_inbox(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """\"Keep it, but move it to Later\": one write, verified as both halves."""
+    run_id, item_id = approved_run(
+        client,
+        gmail,
+        decision="override",
+        action="move_gmail_thread_to_label",
+        action_params={"label": "Later"},
+    )
+
+    prepared = prepare(client, run_id)
+
+    assert prepared["actions"][0]["action"] == "gmail.move"
+    assert prepared["actions"][0]["prepared_params"] == {
+        "thread_id": "t1",
+        "label": "Later",
+        "add_labels": ["Later"],
+        "remove_labels": ["INBOX"],
+    }
+    assert gmail.writes == []
+
+    unconfirmed = client.post(f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={})
+
+    assert unconfirmed.status_code == 400
+    assert gmail.writes == []
+
+    executed = client.post(
+        f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={"confirm": True}
+    )
+    action = executed.json()["actions"][0]
+
+    assert action["state"] == "completed"
+    assert action["item_id"] == item_id
+    assert gmail.writes == [("modify", ("t1", ["Label_later"], ["INBOX"]))]
+    assert gmail.thread_labels["t1"] == [ADMIN_LABEL_ID, "Label_later"]
+
+
+def test_filing_all_of_them_puts_every_thread_in_the_named_folder(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    for number in (1, 2, 3):
+        gmail.serve(f"t{number}", f"Newsletter: issue {number}")
+    run_id = client.post("/review/start", headers=AUTH, json={}).json()["run_id"]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/admin/decisions",
+        headers=AUTH,
+        json={
+            "decision": "override",
+            "action": "move_gmail_thread_to_label",
+            "action_params": {"label": "Notes"},
+        },
+    )
+
+    assert decided.status_code == 200, decided.text
+    assert {item["approved_action"] for item in decided.json()["decided"]} == {"gmail.move"}
+
+    prepare(client, run_id)
+    executed = client.post(
+        f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={"confirm": True}
+    )
+
+    assert [action["state"] for action in executed.json()["actions"]] == ["completed"] * 3
+    assert sorted(gmail.writes) == sorted(
+        ("modify", (f"t{number}", ["Label_notes"], ["INBOX"])) for number in (1, 2, 3)
+    )
+
+
+def test_filing_without_naming_a_folder_is_refused(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    gmail.serve("t1", "Newsletter: weekly")
+    body = client.post("/review/start", headers=AUTH, json={}).json()
+    item_id = body["current_group"]["items"][0]["item_id"]
+
+    refused = client.post(
+        f"/review/runs/{body['run_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": "override", "action": "move_gmail_thread_to_label"},
+    )
+
+    assert refused.status_code == 409
+    assert "must name the folder" in refused.json()["detail"]
+    assert gmail.writes == []
+
+
+def test_a_folder_outside_the_capabilitys_list_is_refused(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    gmail.serve("t1", "Newsletter: weekly")
+    body = client.post("/review/start", headers=AUTH, json={}).json()
+    item_id = body["current_group"]["items"][0]["item_id"]
+
+    refused = client.post(
+        f"/review/runs/{body['run_id']}/items/{item_id}/decision",
+        headers=AUTH,
+        json={
+            "decision": "override",
+            "action": "move_gmail_thread_to_label",
+            "action_params": {"label": "Somewhere Else"},
+        },
+    )
+
+    assert refused.status_code == 409
+    assert "does not file mail in 'Somewhere Else'" in refused.json()["detail"]
+    assert gmail.writes == []
 
 
 def test_nothing_can_ask_for_a_thread_to_be_destroyed(

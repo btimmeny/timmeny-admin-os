@@ -12,7 +12,7 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-07-31.1"
+version: "2026-08-01.1"
 channel: email
 
 # Presentation contracts. A screen decides what a review looks like — the
@@ -59,11 +59,16 @@ screens:
         label: Do what is recommended
         decision: approve
       # `move_gmail_thread_to_trash` is what "delete" means here: Gmail's
-      # Trash, recoverable, never permanent deletion.
+      # Trash, recoverable, never permanent deletion. `move_gmail_thread_to_label`
+      # is the other way out of the inbox: the thread is kept, in a named folder.
       - id: archive_gmail_thread
         label: Archive
         decision: override
         action: gmail.archive
+      - id: move_gmail_thread_to_label
+        label: File it in a folder
+        decision: override
+        action: gmail.move
       - id: move_gmail_thread_to_trash
         label: Move to Trash
         decision: override
@@ -86,6 +91,11 @@ screens:
         label: Archive all of these
         decision: override
         action: gmail.archive
+        scope: group
+      - id: move_gmail_thread_to_label_all
+        label: File all of these in one folder
+        decision: override
+        action: gmail.move
         scope: group
       - id: move_gmail_thread_to_trash_all
         label: Move all of these to Trash
@@ -109,6 +119,10 @@ screens:
       - id: approve
         label: Do what is recommended
         decision: approve
+      - id: move_gmail_thread_to_label
+        label: File it in a folder
+        decision: override
+        action: gmail.move
       - id: draft_reply
         label: Draft a reply
         decision: override
@@ -123,9 +137,14 @@ screens:
       - id: defer
         label: Not today
         decision: defer
+      - id: move_gmail_thread_to_label_all
+        label: File all of these in one folder
+        decision: override
+        action: gmail.move
+        scope: group
     footer: >-
       {pending} of {total} still need you. Nothing here is archived or answered
-      unless you say so.
+      unless you say so; filing keeps the thread and only clears the inbox.
     empty_text: No tax or financial mail is waiting.
 
   - id: advisor-review-v1
@@ -144,6 +163,10 @@ screens:
         label: Archive
         decision: override
         action: gmail.archive
+      - id: move_gmail_thread_to_label
+        label: File it in a folder
+        decision: override
+        action: gmail.move
       - id: move_gmail_thread_to_trash
         label: Move to Trash
         decision: override
@@ -166,6 +189,11 @@ screens:
         label: Archive all of these
         decision: override
         action: gmail.archive
+        scope: group
+      - id: move_gmail_thread_to_label_all
+        label: File all of these in one folder
+        decision: override
+        action: gmail.move
         scope: group
       - id: move_gmail_thread_to_trash_all
         label: Move all of these to Trash
@@ -191,6 +219,16 @@ capabilities:
       labels:
         - Admin
       require_inbox: true
+      # Where a kept thread may be filed. Every name here is a label the
+      # mailbox already has: a folder is chosen from this list, never invented,
+      # and a move to anything else is refused before it reaches Gmail.
+      destinations:
+        - Admin
+        - Admin/- Meetings
+        - Admin/spam & junk
+        - Later
+        - Notes
+        - General & Personal
     presentation:
       screen: admin-review-v1
     playbook:
@@ -241,13 +279,14 @@ capabilities:
     allowed_actions:
       - gmail.label
       - gmail.archive
+      - gmail.move
       - gmail.trash
       - gmail.draft_reply
       - monday.create_task
     approval:
-      # Empty on purpose: archiving and Trash are approved item by item, or by
-      # a rule that has been separately confirmed and promoted. Nothing leaves
-      # the inbox unattended by default.
+      # Empty on purpose: archiving, filing, and Trash are approved item by
+      # item, or by a rule that has been separately confirmed and promoted.
+      # Nothing leaves the inbox unattended by default.
       auto_approve: []
       min_confidence_for_auto: 1.0
       allow_bulk_decisions: true
@@ -255,6 +294,7 @@ capabilities:
       permitted_actions:
         - gmail.label
         - gmail.archive
+        - gmail.move
         - gmail.trash
         - gmail.draft_reply
       require_verification: true
@@ -283,6 +323,15 @@ capabilities:
       labels:
         - Financial/Taxes
       require_inbox: true
+      # Filing is the one disposition this capability has: tax mail is kept,
+      # and the folders it may be kept in are the financial ones.
+      destinations:
+        - Financial
+        - Financial/Taxes
+        - Financial/Health Care
+        - Financial/McLean Home
+        - Financial/Park City Home
+        - Later
     presentation:
       screen: tax-review-v1
     playbook:
@@ -309,6 +358,7 @@ capabilities:
     allowed_actions:
       - gmail.label
       - gmail.archive
+      - gmail.move
       - gmail.draft_reply
       - monday.create_task
     approval:
@@ -316,8 +366,12 @@ capabilities:
       min_confidence_for_auto: 1.0
       allow_bulk_decisions: true
     execution:
+      # Filing runs here where archiving does not, and deliberately so: a filed
+      # thread is somewhere nameable, while an archived one is only "not in the
+      # inbox", which is the wrong way to lose a tax deadline.
       permitted_actions:
         - gmail.label
+        - gmail.move
         - gmail.draft_reply
       require_verification: true
     completion:
@@ -345,6 +399,14 @@ capabilities:
       labels:
         - Career - Advisory/Expert Calls
       require_inbox: true
+      destinations:
+        - Career - Advisory
+        - Career - Advisory/Expert Calls
+        - Career - Advisory/Expert Survey
+        - Career - Advisory/Transforml
+        - Career - Advisory/Vibranium Labs
+        - Career/- Conferences
+        - Later
     presentation:
       screen: advisor-review-v1
     playbook:
@@ -371,6 +433,7 @@ capabilities:
     allowed_actions:
       - gmail.label
       - gmail.archive
+      - gmail.move
       - gmail.trash
       - gmail.draft_reply
       - gmail.send_draft
@@ -383,6 +446,7 @@ capabilities:
       permitted_actions:
         - gmail.label
         - gmail.archive
+        - gmail.move
         - gmail.trash
         - gmail.draft_reply
         - gmail.send_draft

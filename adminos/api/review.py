@@ -70,6 +70,7 @@ class ItemResponse(BaseModel):
     recommendation_source: str
     recommendation_confidence: float
     recommendation_rationale: str | None
+    recommendation_params: JsonObject | None
     category: str | None
     objectives: list[str]
     approved_action: str | None
@@ -83,6 +84,15 @@ class ColumnResponse(BaseModel):
     format: str
 
 
+class ScreenParamResponse(BaseModel):
+    """A value the action needs, and the only values it accepts."""
+
+    name: str
+    label: str
+    required: bool
+    choices: list[str]
+
+
 class ScreenActionResponse(BaseModel):
     id: str
     label: str
@@ -92,6 +102,7 @@ class ScreenActionResponse(BaseModel):
     method: str
     path: str
     body: dict[str, str]
+    params: list[ScreenParamResponse] = []
 
 
 class RowResponse(BaseModel):
@@ -183,6 +194,7 @@ class BulkDecisionRequest(BaseModel):
     decision: DecisionKind
     item_ids: list[str] | None = None
     action: ActionKind | None = Field(default=None, description=ACTION_DESCRIPTION)
+    action_params: JsonObject | None = None
     note: str | None = None
 
     _read_action = field_validator("action", mode="before")(read_requested_action)
@@ -337,6 +349,7 @@ def decide_items(
                 request.decision,
                 item_ids=request.item_ids,
                 action=request.action,
+                action_params=request.action_params,
                 note=request.note,
                 batch_id=group.id,
             )
@@ -563,6 +576,15 @@ def as_screen_response(rendered: ScreenView) -> ScreenResponse:
                 method=action.method,
                 path=action.path,
                 body=action.body,
+                params=[
+                    ScreenParamResponse(
+                        name=param.name,
+                        label=param.label,
+                        required=param.required,
+                        choices=param.choices,
+                    )
+                    for param in action.params
+                ],
             )
             for action in rendered.actions
         ],
@@ -593,6 +615,7 @@ def build_item_response(item: ReviewItem, capability: CapabilityConfig) -> ItemR
         recommendation_source=item.recommendation_source,
         recommendation_confidence=item.recommendation_confidence,
         recommendation_rationale=item.recommendation_rationale,
+        recommendation_params=item.recommendation_params,
         category=item.category,
         objectives=[value for value in (item.objective_keys or []) if isinstance(value, str)],
         approved_action=item.approved_action,

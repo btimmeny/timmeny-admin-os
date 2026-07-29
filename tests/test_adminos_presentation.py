@@ -154,6 +154,72 @@ def test_a_decided_item_shows_what_was_decided() -> None:
     assert screen.rows[0].cells[7] == "Approved: Archive it"
 
 
+def test_a_recommended_move_names_the_folder_in_the_cell() -> None:
+    """"File it" answers nothing; "File it in Later" is a recommendation."""
+    view = build_view(
+        build_item(recommendation="gmail.move", recommendation_params={"label": "Later"}),
+        gmail={"labels": ["Admin"], "destinations": ["Later"]},
+        allowed_actions=["gmail.label", "gmail.archive", "gmail.move"],
+        execution={"permitted_actions": ["gmail.label", "gmail.archive", "gmail.move"]},
+    )
+
+    screen = render_group(build_screen(), view, build_run(), now=NOW)
+
+    assert screen.rows[0].cells[4] == "File it in Later"
+
+
+def test_a_decided_move_says_where_it_was_filed() -> None:
+    view = build_view(
+        build_item(
+            state="approved",
+            approved_action="gmail.move",
+            approved_params={"label": "Later"},
+        ),
+        gmail={"labels": ["Admin"], "destinations": ["Later"]},
+        allowed_actions=["gmail.label", "gmail.archive", "gmail.move"],
+        execution={"permitted_actions": ["gmail.label", "gmail.archive", "gmail.move"]},
+    )
+
+    screen = render_group(build_screen(), view, build_run(), now=NOW)
+
+    assert screen.rows[0].cells[7] == "Approved: File it in Later"
+
+
+def test_a_move_action_carries_the_folders_it_will_accept() -> None:
+    """The renderer offers a choice from the mailbox, and cannot type its own."""
+    view = build_view(
+        build_item(),
+        gmail={"labels": ["Admin"], "destinations": ["Later", "Notes"]},
+        allowed_actions=["gmail.label", "gmail.archive", "gmail.move"],
+        execution={"permitted_actions": ["gmail.label", "gmail.archive", "gmail.move"]},
+    )
+    screen = build_screen(
+        actions=[
+            {
+                "id": "move_gmail_thread_to_label",
+                "label": "File it in a folder",
+                "decision": "override",
+                "action": "gmail.move",
+            }
+        ]
+    )
+
+    rendered = render_group(screen, view, build_run(), now=NOW)
+    folder = rendered.actions[0].params[0]
+
+    assert folder.name == "label"
+    assert folder.required is True
+    assert folder.choices == ["Later", "Notes"]
+
+
+def test_an_action_that_needs_nothing_said_carries_no_parameters() -> None:
+    view = build_view(build_item())
+
+    screen = render_group(build_screen(), view, build_run(), now=NOW)
+
+    assert all(action.params == [] for action in screen.actions)
+
+
 def test_a_category_says_what_the_thread_is() -> None:
     view = build_view(build_item(category="filing_obligation", subject="2025 return"))
 
@@ -441,28 +507,16 @@ def test_a_capability_may_not_reference_a_screen_that_does_not_exist() -> None:
 
 def test_a_screen_may_not_offer_an_action_the_capability_is_not_allowed() -> None:
     """Financial/Taxes may not send a draft, so its screen may not offer sending."""
-    document = SHIPPED_CONFIG.read_text().replace(
-        """      - id: dismiss
-        label: Leave it alone
-        decision: dismiss
-      - id: defer
-        label: Not today
-        decision: defer
-    footer: >-
-      {pending} of {total} still need you. Nothing here is archived""",
-        """      - id: send
-        label: Send it
-        decision: override
-        action: gmail.send_draft
-      - id: dismiss
-        label: Leave it alone
-        decision: dismiss
-      - id: defer
-        label: Not today
-        decision: defer
-    footer: >-
-      {pending} of {total} still need you. Nothing here is archived""",
+    tax_footer = "    footer: >-\n      {pending} of {total} still need you. Nothing here is archived"
+    send_action = (
+        "      - id: send\n"
+        "        label: Send it\n"
+        "        decision: override\n"
+        "        action: gmail.send_draft\n"
     )
+    original = SHIPPED_CONFIG.read_text()
+    assert original.count(tax_footer) == 1
+    document = original.replace(tax_footer, send_action + tax_footer)
 
     with pytest.raises(CapabilityConfigError, match="which is not allowed to do it"):
         parse_capabilities(document.encode())

@@ -227,11 +227,12 @@ class WorkflowStep(Base):
 class ReviewRun(Base):
     """One daily review: the session Brian starts with "good morning".
 
-    Identity is the review date, the scope, and the revision, so "start my
-    review" twice in a day resumes rather than restarts, while "show me my
+    Identity is the review date, the scope, and the revision. A review is a
+    snapshot of the mailbox rather than the mailbox itself, so "good morning"
+    twice in a day is two snapshots: the second reads Gmail again and the
+    first stays as the record of what was decided against it. "Show me my
     archive" is a separate review of a different set of mail rather than a
-    change to today's. A second revision exists only where the first was
-    deliberately abandoned.
+    change to today's.
     """
 
     __tablename__ = "review_runs"
@@ -270,6 +271,22 @@ class ReviewRun(Base):
     What makes "resume" and "start again" different questions: a review whose
     evidence was refreshed an hour ago is a stale view of the inbox, and
     saying when it was read is how that can be told without guessing.
+    """
+    snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """The mailbox this review is of: when its evidence was first read.
+
+    Unlike `evidence_refresh_at`, which moves whenever Gmail is read again,
+    this is the moment the snapshot was taken and does not change. "Is this
+    current?" is answered against it.
+    """
+    supersedes_run_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="SET NULL")
+    )
+    """The review this one replaced, where it replaced one.
+
+    A fresh snapshot sets the previous review aside rather than continuing it,
+    and the chain says which morning's work the new one is standing in front
+    of — decisions made there are still readable, and still that review's.
     """
     updated_at: Mapped[datetime] = updated_at_column()
 

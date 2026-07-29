@@ -28,7 +28,7 @@ from adminos.domain.actions import (
     verify_action,
 )
 from adminos.domain.decisions import HUMAN_ACTOR, DecisionKind, ItemState
-from adminos.domain.review import record_decision, start_or_resume_review
+from adminos.domain.review import open_fresh_review, record_decision
 from tests.conftest import build_capability
 
 
@@ -197,7 +197,7 @@ def approve(
     )
     session.flush()
 
-    view = start_or_resume_review(
+    view = open_fresh_review(
         session,
         LoadedCapabilities(
             version="test.1", digest="d" * 64, channel="email", capabilities=(capability,)

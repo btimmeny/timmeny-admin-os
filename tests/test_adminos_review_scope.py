@@ -178,6 +178,13 @@ def begin(client: TestClient, run_id: str, **plan: Any) -> dict[str, Any]:
     return response.json()
 
 
+def resume(client: TestClient, **body: Any) -> dict[str, Any]:
+    """Pick the review back up, which is what reads the mailbox into it again."""
+    response = client.post("/review/continue", headers=AUTH, json=body)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def group_of(client: TestClient, run_id: str, capability_key: str) -> dict[str, Any]:
     response = client.get(f"/review/runs/{run_id}/groups/{capability_key}", headers=AUTH)
     assert response.status_code == 200, response.text
@@ -282,7 +289,7 @@ def test_a_conversation_replied_to_is_still_in_the_review(
     assert threads_in(client, run["run_id"]) == {"replied"}
 
 
-def test_losing_the_inbox_label_takes_a_thread_out_of_the_next_review(
+def test_losing_the_inbox_label_takes_a_thread_out_of_the_review(
     client: TestClient, gmail: FakeMailbox
 ) -> None:
     """Archiving in Gmail is an answer, and the review must not ask again."""
@@ -292,9 +299,24 @@ def test_losing_the_inbox_label_takes_a_thread_out_of_the_next_review(
     assert threads_in(client, first["run_id"]) == {"t1", "t2"}
 
     gmail.relabel("t2", [TAXES_LABEL_ID])
+    resumed = resume(client)
+
+    assert resumed["run_id"] == first["run_id"]
+    assert threads_in(client, resumed["run_id"]) == {"t1"}
+
+
+def test_a_thread_archived_before_a_fresh_snapshot_is_not_in_it(
+    client: TestClient, gmail: FakeMailbox
+) -> None:
+    """An inbox review is of what carries the label now, not of what did."""
+    gmail.add("t1", "Q3 estimate")
+    gmail.add("t2", "1099 from broker")
+    first = start(client)
+    gmail.relabel("t2", [TAXES_LABEL_ID])
+
     second = start(client)
 
-    assert second["run_id"] == first["run_id"]
+    assert second["run_id"] != first["run_id"]
     assert threads_in(client, second["run_id"]) == {"t1"}
 
 
@@ -304,7 +326,7 @@ def test_a_withdrawn_row_is_still_on_the_record(client: TestClient, gmail: FakeM
     run = start(client)
     gmail.relabel("t1", [TAXES_LABEL_ID])
 
-    start(client)
+    resume(client)
 
     group = group_of(client, run["run_id"], "financial_taxes")
     states = {item["thread_id"]: item["state"] for item in group["items"]}
@@ -318,7 +340,7 @@ def test_a_thread_deleted_in_gmail_leaves_the_review(
     run = start(client)
     del gmail.threads["t1"]
 
-    start(client)
+    resume(client)
 
     assert threads_in(client, run["run_id"]) == set()
 
@@ -483,7 +505,7 @@ def test_a_scope_nobody_defined_is_refused(client: TestClient, gmail: FakeMailbo
     assert "everywhere" in response.text
 
 
-def test_asking_for_the_inbox_by_name_is_the_same_review(
+def test_asking_for_the_inbox_by_name_is_the_same_scope(
     client: TestClient, gmail: FakeMailbox
 ) -> None:
     gmail.add("t1", "Q3 estimate")
@@ -491,6 +513,7 @@ def test_asking_for_the_inbox_by_name_is_the_same_review(
     default = start(client)
     named = start(client, scope="inbox")
 
-    assert named["run_id"] == default["run_id"]
+    assert named["supersedes_review_id"] == default["run_id"], "one review, freshly taken"
     assert named["scope"]["mailbox"] == "INBOX"
-    assert named["scope"]["requested"] is False, "the run records how it was opened"
+    assert named["scope"]["requested"] is True, "the run records how it was opened"
+    assert default["scope"]["requested"] is False

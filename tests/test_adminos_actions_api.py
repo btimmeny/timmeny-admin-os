@@ -1283,6 +1283,23 @@ def test_a_scope_prepared_before_a_restart_cannot_execute(
     assert gmail.writes == []
 
 
+def test_a_scope_prepared_before_a_fresh_snapshot_cannot_execute(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """Entering admin again is a restart, and disarms what the last one prepared."""
+    run_id, _ = approved_run(client, gmail)
+    prepared = prepare(client, run_id)
+
+    started = client.post("/review/start", headers=AUTH, json={})
+    assert started.status_code == 200, started.text
+
+    response = execute(client, run_id, prepared)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "ReviewAbandoned"
+    assert gmail.writes == []
+
+
 def test_an_abandoned_review_prepares_nothing(client: TestClient, gmail: FakeGmail) -> None:
     run_id, item_id = approved_run(client, gmail)
     client.post("/review/restart", headers=AUTH, json={})

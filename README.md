@@ -443,7 +443,7 @@ If one update fails, the service keeps processing the rest and reports the per-i
 
 ## Daily review
 
-The daily review is what "good morning" calls. One request refreshes the mailbox, opens or resumes today's review, and hands back a single capability group to work through — not an undifferentiated inbox. See [ADR-0007](docs/adr/ADR-0007-daily-review-engine.md).
+The daily review is what "good morning" calls. One request refreshes the mailbox, opens a review of what Gmail says now, and hands back a single capability group to work through — not an undifferentiated inbox. See [ADR-0007](docs/adr/ADR-0007-daily-review-engine.md).
 
 ```text
 review (one per date, mailbox scope and revision)
@@ -454,7 +454,7 @@ review (one per date, mailbox scope and revision)
 
 ### `POST /review/start`
 
-Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_URL`.
+Reviews the mailbox as it is now. Requires `TIMMENY_OS_API_KEY` and `DATABASE_URL`.
 
 ```json
 {"review_date": null, "sync": true, "limit": 50, "scope": null}
@@ -472,6 +472,9 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
   "completed_at": null,
   "abandoned_at": null,
   "evidence_refresh_at": "2026-07-28T08:02:11Z",
+  "snapshot_at": "2026-07-28T08:02:11Z",
+  "supersedes_review_id": null,
+  "superseded": null,
   "config_version": "2026-07-28.1",
   "config_digest": "…",
   "screen_id": "tax-review-v1",
@@ -496,7 +499,7 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
 }
 ```
 
-Identity is the review date, the mailbox scope and the revision, so calling it twice in a day resumes rather than restarts: decisions already made are kept and only mail that has arrived since is added. Gmail being unreachable is a warning, not a failure — the review still opens over the evidence already recorded.
+Identity is the review date, the mailbox scope and the revision, and calling it twice in a day is two snapshots: the second reads Gmail again and opens the next revision, and the first is set aside with its decisions, its actions and its audit intact, named in `supersedes_review_id`. `snapshot_at` says which mailbox a review is of, and unlike `evidence_refresh_at` it does not move. Gmail being unreachable is a warning, not a failure — the review still opens over the evidence already recorded. See [ADR-0022](docs/adr/ADR-0022-every-entry-reads-the-mailbox.md).
 
 A thread settled in an earlier review does not come back, unless its content has changed since. A reply reopens a conversation; sitting in the inbox does not.
 
@@ -506,15 +509,17 @@ A review is an object rather than a scratchpad: `review_id`, `review_date`, its 
 
 | Request | What it does |
 | --- | --- |
-| `POST /review/start` | Opens today's review, or resumes the one under way. A review already worked through and completed is **not** re-served: the response carries a `prompt` saying so and offering to read it again or start a fresh one. |
+| `POST /review/start` | Reads Gmail and opens a review of what it says now. Whatever review existed — finished or half worked — is set aside rather than handed back, and named in `supersedes_review_id`. |
 | `POST /review/continue` | Resumes, and only resumes. `404` where there is no review of today, `409` where today's is finished. It never opens one. |
-| `POST /review/restart` | Abandons the review that exists — keeping its decisions, its actions, its audit and the hour it was completed at — refreshes Gmail, and opens the next revision of the same date. |
+| `POST /review/restart` | The same operation under the name for asking: "refresh mail", "check again". Abandons the review that exists — keeping its decisions, its actions, its audit and the hour it was completed at — refreshes Gmail, and opens the next revision of the same date. |
 
-A finished review returns `restart_available: true` and a `restart_action`: the exact request that reviews the date again on refreshed mail, `{"sync": true, "scope": "inbox"}` to `POST /review/restart`. See [ADR-0021](docs/adr/ADR-0021-refreshing-mail-is-a-restart.md). It is returned as data because "refresh my mail" answered by `start` hands the finished review back without reading Gmail at all, and a caller with nothing but prose to go on reports that as a check for new mail. A review under way carries neither: the way on from a morning half worked is to continue it, and offering to start over is offering to throw it away.
+A finished review returns `restart_available: true` and a `restart_action`: the exact request that reviews the date again on refreshed mail, `{"sync": true, "scope": "inbox"}` to `POST /review/restart`. See [ADR-0021](docs/adr/ADR-0021-refreshing-mail-is-a-restart.md). A review under way carries neither: the way on from a morning half worked is to continue it.
+
+Where the review set aside was left holding decisions the mailbox never saw, the fresh review returns `superseded` — the review's id, its standing, and a sentence saying what is owed. Those rows are real and they are in a review nobody will open again, so the new review is the last place they can be said.
 
 Abandoning a review supersedes every action scope prepared in it, so a preparation from a review Brian has set aside can never execute, and every mutating route refuses an abandoned review outright. A restart is the only thing that produces revision 2 of a date; the calendar turning over opens revision 1 of the new one.
 
-A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up by `start` rather than fenced off, and so is one whose rows were all withdrawn as their threads left the inbox. Only a completed review carrying a decision Brian made needs a deliberate restart.
+A review is a snapshot rather than the mailbox, so no review — finished, empty or half worked — stands between Brian and the inbox as it is now. Resuming is `POST /review/continue`, and it is his to ask for.
 
 ### How a session opens
 

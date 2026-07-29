@@ -108,20 +108,22 @@ def test_a_resumed_review_opens_by_saying_what_happens_next(
     assert "continue improving the playbook" in opening["text"]
 
 
-def test_starting_a_review_already_under_way_resumes_it_in_words_too(
+def test_starting_over_a_review_under_way_opens_a_new_one_in_words_too(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """"Start my admin" on a worked morning is a resumption, and says so."""
+    """"Start my admin" takes a fresh snapshot, and the words say a new one."""
     mailbox(
         monkeypatch,
         taxes=[thread("t1", "KPMG Activities")],
         admin=[thread("t2", "Domain renewal")],
     )
-    decide(client, start(client), "defer")
+    worked = start(client)
+    decide(client, worked, "defer")
 
     again = client.post("/review/start", headers=AUTH, json={"sync": False}).json()
 
-    assert opening_of(again) == {"mode": "resumed", "text": OPENING_RESUMED}
+    assert again["review_id"] != worked["review_id"]
+    assert opening_of(again) == {"mode": "new", "text": OPENING_NEW}
 
 
 def test_a_review_that_exists_but_settled_nothing_is_still_new(

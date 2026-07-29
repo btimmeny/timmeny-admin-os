@@ -1,10 +1,9 @@
 """A review is a thing with a beginning and an end, not a query re-run.
 
-"Start my review" on a day already reviewed used to hand back the morning's
-work with whatever had arrived since bolted on, which reads as unfinished. The
-lifecycle here is the answer: a review is created, worked, and finished; a
-finished one is left alone; and starting the day again is a separate sentence
-that abandons the first and opens a second revision on refreshed mail.
+A review is created, worked and finished, and it is a snapshot of the mailbox
+rather than the mailbox: entering admin again reads Gmail and opens the next
+revision, setting the first aside with everything it recorded. Resuming the
+review under way is its own sentence, and only Brian says it.
 """
 
 from datetime import UTC, date, datetime, timedelta
@@ -28,10 +27,9 @@ from adminos.domain.review import (
     RunState,
     RunView,
     continue_review,
+    open_fresh_review,
     record_decision,
     refresh_states,
-    restart_review,
-    start_or_resume_review,
 )
 from adminos.domain.scopes import ScopeState, open_scope
 from tests.conftest import build_capability
@@ -90,7 +88,7 @@ def add_evidence(
 
 
 def start(session: Session, now: datetime = NOW, **kwargs: object) -> RunView:
-    return start_or_resume_review(session, load(), now=now, **kwargs)  # type: ignore[arg-type]
+    return open_fresh_review(session, load(), now=now, **kwargs)  # type: ignore[arg-type]
 
 
 def dismiss_everything(session: Session, view: RunView, now: datetime = NOW) -> None:
@@ -153,10 +151,35 @@ def test_continuing_a_review_that_was_never_started_says_so(session: Session) ->
         continue_review(session, load(), now=NOW)
 
 
-def test_starting_a_completed_review_refuses_rather_than_reopening_it(
+def test_starting_after_a_completed_review_leaves_it_completed(
     session: Session,
 ) -> None:
-    """The bug this exists for: mail arriving cannot un-finish a morning."""
+    """The bug this exists for: mail arriving cannot un-finish a morning.
+
+    It gets a review of its own instead. What the earlier review decided is
+    what happened at that hour, and stays said.
+    """
+    add_evidence(session, "t1")
+    view = start(session)
+    dismiss_everything(session, view)
+    session.commit()
+    add_evidence(session, "t2", "IRS notice")
+
+    fresh = start(session, now=NOW + timedelta(hours=3))
+
+    assert fresh.run.id != view.run.id
+    assert fresh.run.supersedes_run_id == view.run.id
+    assert [item.source_thread_id for item in fresh.groups[0].items] == ["t2"]
+    assert view.run.completed_at is not None
+    assert [item.state for group in view.groups for item in group.items] == [
+        ItemState.DISMISSED
+    ]
+
+
+def test_continuing_a_completed_review_refuses_rather_than_reopening_it(
+    session: Session,
+) -> None:
+    """"Where was I" has an honest answer when the answer is nowhere."""
     add_evidence(session, "t1")
     view = start(session)
     dismiss_everything(session, view)
@@ -164,14 +187,13 @@ def test_starting_a_completed_review_refuses_rather_than_reopening_it(
     add_evidence(session, "t2", "IRS notice")
 
     with pytest.raises(ReviewClosed) as refused:
-        start(session, now=NOW + timedelta(hours=3))
+        continue_review(session, load(), now=NOW + timedelta(hours=3))
 
     assert refused.value.run.id == view.run.id
     assert refused.value.run.state == RunState.COMPLETED
-    assert session.query(ReviewItem).count() == 1
 
 
-def test_an_empty_review_is_topped_up_rather_than_treated_as_a_day_of_work(
+def test_an_empty_review_is_continued_rather_than_treated_as_a_day_of_work(
     session: Session,
 ) -> None:
     """Nothing in the inbox at eight is not a morning to protect at ten."""
@@ -179,7 +201,7 @@ def test_an_empty_review_is_topped_up_rather_than_treated_as_a_day_of_work(
     assert first.run.state == RunState.COMPLETED
 
     add_evidence(session, "t1")
-    resumed = start(session, now=NOW + timedelta(hours=2))
+    resumed = continue_review(session, load(), now=NOW + timedelta(hours=2))
 
     assert resumed.run.id == first.run.id
     assert [item.source_thread_id for item in resumed.groups[0].items] == ["t1"]
@@ -196,7 +218,7 @@ def test_restarting_abandons_the_old_review_and_opens_the_next_revision(
     add_evidence(session, "t2", "IRS notice")
 
     later = NOW + timedelta(hours=3)
-    second = restart_review(session, load(), now=later, evidence_refresh_at=later)
+    second = open_fresh_review(session, load(), now=later, evidence_refresh_at=later)
 
     assert second.run.id != first.run.id
     assert second.run.revision == 2
@@ -214,7 +236,7 @@ def test_the_abandoned_review_keeps_what_was_decided_in_it(session: Session) -> 
     decided = record_decision(
         session, TAXES, first.run, first.groups[0].items[0], DecisionKind.DISMISS
     )
-    restart_review(session, load(), now=NOW + timedelta(hours=1))
+    open_fresh_review(session, load(), now=NOW + timedelta(hours=1))
 
     kept = session.get(ReviewItem, decided.id)
 
@@ -226,7 +248,7 @@ def test_the_abandoned_review_keeps_what_was_decided_in_it(session: Session) -> 
 def test_an_abandoned_review_is_never_resumed_again(session: Session) -> None:
     add_evidence(session, "t1")
     first = start(session)
-    restart_review(session, load(), now=NOW + timedelta(hours=1))
+    open_fresh_review(session, load(), now=NOW + timedelta(hours=1))
     session.commit()
 
     resumed = continue_review(session, load(), now=NOW + timedelta(hours=2))
@@ -252,7 +274,7 @@ def test_restarting_disarms_a_scope_prepared_in_the_old_review(session: Session)
         now=NOW,
     )
 
-    restart_review(session, load(), now=NOW + timedelta(hours=1))
+    open_fresh_review(session, load(), now=NOW + timedelta(hours=1))
 
     assert session.get(ActionScope, scope.id).state == ScopeState.SUPERSEDED
 
@@ -269,7 +291,7 @@ def test_a_new_review_carries_none_of_the_old_review_s_rows(session: Session) ->
     first = start(session)
     answered = next(item for item in first.groups[0].items if item.source_thread_id == "t1")
     record_decision(session, TAXES, first.run, answered, DecisionKind.DISMISS)
-    second = restart_review(session, load(), now=NOW + timedelta(hours=1))
+    second = open_fresh_review(session, load(), now=NOW + timedelta(hours=1))
 
     rows = second.groups[0].items
 
@@ -288,7 +310,7 @@ def test_the_calendar_day_turning_over_opens_a_new_review_by_itself(
     session.commit()
 
     add_evidence(session, "t2", "IRS notice", received_at=NOW + timedelta(days=1))
-    tomorrow = start_or_resume_review(
+    tomorrow = open_fresh_review(
         session, load(), review_date=TOMORROW, now=NOW + timedelta(days=1)
     )
 
@@ -304,35 +326,36 @@ def test_a_restart_of_one_scope_leaves_another_scope_s_review_alone(
     """Scope is part of a review's identity, so restarts do not cross it."""
     add_evidence(session, "t1")
     inbox = start(session)
-    archive = start_or_resume_review(
+    archive = open_fresh_review(
         session, load(), now=NOW, scope=read_scope("archived")
     )
 
-    restart_review(session, load(), now=NOW + timedelta(hours=1))
+    open_fresh_review(session, load(), now=NOW + timedelta(hours=1))
 
     assert session.get(ReviewRun, inbox.run.id).state == RunState.ABANDONED
     assert session.get(ReviewRun, archive.run.id).state != RunState.ABANDONED
 
 
-def test_a_review_emptied_by_mail_leaving_the_inbox_is_still_topped_up(
+def test_a_review_emptied_by_mail_leaving_the_inbox_can_still_be_continued(
     session: Session,
 ) -> None:
     """Threads archiving themselves out of a review is not a morning's work.
 
     Every row was withdrawn by scope rather than decided by Brian, so the
-    review completed without him: mail arriving afterwards belongs in it.
+    review completed without him: continuing it is picking up where he was,
+    not reopening something he finished.
     """
     evidence = add_evidence(session, "t1")
     first = start(session)
     evidence.label_ids = []
     session.flush()
 
-    emptied = start(session, now=NOW + timedelta(hours=1))
+    emptied = continue_review(session, load(), now=NOW + timedelta(hours=1))
     assert emptied.run.state == RunState.COMPLETED
     assert emptied.groups[0].items[0].state == ItemState.DEFERRED
 
     add_evidence(session, "t2", "IRS notice")
-    resumed = start(session, now=NOW + timedelta(hours=2))
+    resumed = continue_review(session, load(), now=NOW + timedelta(hours=2))
 
     assert resumed.run.id == first.run.id
     assert {item.source_thread_id for item in resumed.groups[0].items} == {"t1", "t2"}

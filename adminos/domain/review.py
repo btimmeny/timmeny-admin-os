@@ -43,6 +43,8 @@ from adminos.domain.plan import (
     plan_for,
     actions_by_capability,
     count_standing,
+    read_run_actions,
+    read_run_items,
     review_summary,
 )
 from adminos.domain.rules import LearnedRule, read_active_rules
@@ -189,6 +191,20 @@ class GroupView:
 
 
 @dataclass(frozen=True)
+class SupersededView:
+    """The review a fresh snapshot replaced, and what it left owed.
+
+    A snapshot taken over a review still holding decisions the mailbox never
+    saw is the one way this loses work quietly: the rows are still there, in a
+    review nobody will open again. Reporting them is how the new review says
+    what the old one is still owed.
+    """
+
+    run: ReviewRun
+    standing: ReviewStanding
+
+
+@dataclass(frozen=True)
 class RunView:
     run: ReviewRun
     groups: list[GroupView]
@@ -196,6 +212,8 @@ class RunView:
     plan: ReviewPlan | None = None
     summary: ReviewSummary | None = None
     """What the review has done, counted from actions Gmail confirmed."""
+    superseded: "SupersededView | None" = None
+    """The review this one replaced, and what it was left holding."""
 
     def planned_groups(self) -> list[GroupView]:
         """The groups this review will work, in the order it agreed to.
@@ -255,7 +273,7 @@ class RunView:
         ]
 
 
-def start_or_resume_review(
+def open_fresh_review(
     session: Session,
     loaded: LoadedCapabilities,
     review_date: date | None = None,
@@ -263,33 +281,50 @@ def start_or_resume_review(
     scope: ReviewScope = DEFAULT_SCOPE,
     evidence_refresh_at: datetime | None = None,
 ) -> RunView:
-    """Return today's review, creating it or topping it up with new mail.
+    """Take a fresh snapshot of the mailbox, and review that.
 
-    Resuming is the normal case: a second "start my review" on the same day
-    returns the same review, keeps decisions already made, and adds only
-    threads that have arrived since.
+    A review is a snapshot rather than the mailbox itself, and the mailbox
+    does not hold still: mail arrives while a review is being worked, and the
+    review Brian finished at nine says nothing about ten o'clock. So every
+    entry into admin reads Gmail again and reviews what it says now, and the
+    review that existed is set aside rather than topped up or handed back.
 
-    A review that is finished with is not resumed. Answering "start my review"
-    with a review Brian has already worked through — reopened by whatever mail
-    arrived since — is how a morning's work is made to look unfinished, so a
-    completed or abandoned review raises `ReviewClosed` and the choice between
-    leaving it and starting a fresh one is his.
+    Set aside is not lost. The earlier review keeps its decisions, its actions
+    and what they did to the mailbox, and says which review took its place.
+    What it loses is any preparation still open in it, which stops being
+    executable the moment it is superseded — a confirmation given against the
+    old snapshot cannot run against the new one.
 
-    A review belongs to one scope. "Show me my archive" is therefore a second
-    review of the same day rather than an addition to the first, so that a
-    request to see mail outside the inbox cannot widen the review that was
-    already made.
+    Resuming is a different sentence, and has its own: `continue_review`.
+
+    A review belongs to one scope. "Show me my archive" is therefore a review
+    of different mail rather than an addition to the inbox review, so that a
+    request to see mail outside the inbox cannot widen the one already made.
     """
     moment = now or datetime.now(UTC)
     day = review_date or moment.date()
-    run = read_current_review(session, loaded, day, scope)
+    superseded = read_current_review(session, loaded, day, scope)
 
-    if run is None:
-        run = open_review(session, loaded, day, scope, moment, evidence_refresh_at)
-    elif is_finished_with(session, run):
-        raise ReviewClosed(run)
+    if superseded is not None:
+        abandon_review(session, superseded, moment)
 
+    run = open_review(session, loaded, day, scope, moment, evidence_refresh_at, superseded)
     return fill_review(session, loaded, run, scope, moment, evidence_refresh_at)
+
+
+def read_superseded(session: Session, run: ReviewRun) -> SupersededView | None:
+    """What the review this one replaced was left holding, where it replaced one."""
+    if run.supersedes_run_id is None:
+        return None
+    replaced = session.get(ReviewRun, run.supersedes_run_id)
+    if replaced is None:
+        return None
+    return SupersededView(
+        run=replaced,
+        standing=count_standing(
+            read_run_items(session, replaced), read_run_actions(session, replaced)
+        ),
+    )
 
 
 def continue_review(
@@ -317,33 +352,6 @@ def continue_review(
     if is_finished_with(session, run):
         raise ReviewClosed(run)
 
-    return fill_review(session, loaded, run, scope, moment, evidence_refresh_at)
-
-
-def restart_review(
-    session: Session,
-    loaded: LoadedCapabilities,
-    review_date: date | None = None,
-    now: datetime | None = None,
-    scope: ReviewScope = DEFAULT_SCOPE,
-    evidence_refresh_at: datetime | None = None,
-) -> RunView:
-    """Put the current review aside and open the next revision of the day.
-
-    The abandoned review keeps everything it recorded: its decisions, its
-    actions, and what they did to the mailbox are history, not a draft. What
-    it stops being is the review that "my review" means, and any preparation
-    still open in it stops being executable, so a confirmation given before
-    the restart cannot run afterwards.
-    """
-    moment = now or datetime.now(UTC)
-    day = review_date or moment.date()
-    current = read_current_review(session, loaded, day, scope)
-
-    if current is not None:
-        abandon_review(session, current, moment)
-
-    run = open_review(session, loaded, day, scope, moment, evidence_refresh_at)
     return fill_review(session, loaded, run, scope, moment, evidence_refresh_at)
 
 
@@ -409,6 +417,7 @@ def open_review(
     scope: ReviewScope,
     now: datetime,
     evidence_refresh_at: datetime | None,
+    superseded: ReviewRun | None = None,
 ) -> ReviewRun:
     """Create the next revision of this day's review in this scope."""
     run = ReviewRun(
@@ -422,16 +431,19 @@ def open_review(
         config_digest=loaded.digest,
         started_at=now,
         evidence_refresh_at=evidence_refresh_at,
+        snapshot_at=evidence_refresh_at or now,
+        supersedes_run_id=superseded.id if superseded is not None else None,
     )
     session.add(run)
     session.flush()
     logger.info(
-        "review %s opened for %s in the %s scope, revision %s, on capabilities %s",
+        "review %s opened for %s in the %s scope, revision %s, on capabilities %s%s",
         run.id,
         day,
         scope.name,
         run.revision,
         loaded.version,
+        f", replacing review {superseded.id}" if superseded is not None else "",
     )
     return run
 
@@ -1202,6 +1214,7 @@ def refresh_states(
             ],
             plan=plan,
             summary=review_summary(session, run),
+            superseded=read_superseded(session, run),
         )
 
     for group in read_groups(session, run):
@@ -1224,7 +1237,11 @@ def refresh_states(
         )
 
     view = RunView(
-        run=run, groups=views, plan=plan, summary=review_summary(session, run)
+        run=run,
+        groups=views,
+        plan=plan,
+        summary=review_summary(session, run),
+        superseded=read_superseded(session, run),
     )
     planned = view.planned_groups()
     states = {group.group.state for group in planned}

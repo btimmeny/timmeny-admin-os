@@ -22,7 +22,7 @@ Nothing recorded when Gmail was last read for a review, either. "How fresh is th
 
 **A finished review is not silently re-served; it is reported, with the choice offered.** `startDailyReview` on a completed review returns a prompt naming what a fresh review would cost, and the operations that read it or restart it. Admin OS refuses; it does not decide.
 
-**"Finished" means worked, not merely marked complete.** A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up rather than fenced off. Only a completed review that carries at least one decision requires a deliberate restart.
+**"Finished" means worked by Brian, not merely marked complete.** A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up rather than fenced off, and so is one every row of which was withdrawn because the thread left the inbox: a decision signed `scope:` or `rule:` is Admin OS's own doing, not a morning to protect. Only a completed review carrying a decision Brian made requires a deliberate restart.
 
 **Abandoning disarms, and preserves.** The abandoned review keeps its decisions, its actions and its audit; what it loses is any open preparation, which is superseded at the moment of abandonment and can never execute. Its rows take no further decisions: every mutating route refuses an abandoned review before doing anything.
 

@@ -764,6 +764,7 @@ def test_there_is_no_executor_for_permanent_deletion() -> None:
         ActionKind.GMAIL_ARCHIVE,
         ActionKind.GMAIL_MOVE,
         ActionKind.GMAIL_TRASH,
+        ActionKind.GMAIL_UNTRASH,
         ActionKind.GMAIL_DRAFT_REPLY,
         ActionKind.GMAIL_SEND_DRAFT,
     }

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.9.4
+  version: 0.10.0
   description: API for the Timmeny Admin OS daily review workflow.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
@@ -200,6 +200,30 @@ paths:
                         type: string
                       empty_text:
                         type: string
+                  restorable:
+                    type: array
+                    description: >-
+                      Threads this capability moved to Trash and may take back
+                      out of it. Each entry carries the exact request that
+                      restores it.
+                    items:
+                      type: object
+                      properties:
+                        item_id:
+                          type: string
+                        thread_id:
+                          type: string
+                        subject:
+                          type: string
+                        action:
+                          type: string
+                        method:
+                          type: string
+                        path:
+                          type: string
+                        body:
+                          type: object
+                          additionalProperties: true
                 additionalProperties: true
   /review/runs/{run_id}/items/{item_id}/decision:
     post:
@@ -235,6 +259,10 @@ paths:
                     move_gmail_thread_to_label, and
                     move_gmail_thread_to_trash; "delete", "remove", and
                     "trash" all mean move to Trash, which is recoverable.
+                    restore_gmail_thread_from_trash undoes a Trash: it is
+                    offered on the group's restorable list, and it runs
+                    through preparation and confirmation like any other
+                    action.
                 action_params:
                   type: object
                   description: >-
@@ -376,11 +404,23 @@ paths:
   /review/runs/{run_id}/actions/prepare:
     post:
       operationId: prepareReviewActions
-      summary: Prepare approved actions
+      summary: Prepare the selected rows, and fix the scope
       description: >-
         Resolves each approval into the exact parameters that would be sent.
-        Nothing is written to Gmail here; preparing twice yields the same
-        action rather than a second one.
+        Nothing is written to Gmail here.
+
+
+        Send the exact item_ids the user named. A request with no item_ids is
+        refused unless entire_capability is true, which means the user asked
+        for every approved row in that capability; it is never an assumption.
+
+
+        The response returns a server-generated scope_id, the prepared
+        item_ids, the corresponding action_ids, and every requested row that
+        was left out with the reason. Compare prepared_item_ids with the rows
+        the user actually named before asking for confirmation: if they differ,
+        or scope_matches_request is false, show the difference and stop.
+        Preparing again supersedes the previous scope_id.
       parameters:
         - name: run_id
           in: path
@@ -388,7 +428,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -398,20 +438,66 @@ paths:
                   type: string
                 item_ids:
                   type: array
+                  description: The exact rows the user selected.
                   items:
                     type: string
-                action_ids:
-                  type: array
-                  items:
-                    type: string
+                entire_capability:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Only true when the user asked for every approved row in
+                    the capability. Requires capability_key, and cannot be
+                    combined with item_ids.
       responses:
         "200":
-          description: Actions prepared.
+          description: Actions prepared, and the scope they may execute.
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  scope_id:
+                    type: string
+                  capability_key:
+                    type: string
+                  entire_capability:
+                    type: boolean
+                  requested_item_ids:
+                    type: array
+                    items:
+                      type: string
+                  prepared_item_ids:
+                    type: array
+                    items:
+                      type: string
+                  action_ids:
+                    type: array
+                    items:
+                      type: string
+                  prepared_items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item_id:
+                          type: string
+                        action_id:
+                          type: string
+                        action:
+                          type: string
+                        thread_id:
+                          type: string
+                  excluded_items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        item_id:
+                          type: string
+                        reason:
+                          type: string
+                  scope_matches_request:
+                    type: boolean
                   gmail_write_enabled:
                     type: boolean
                   counts:
@@ -435,17 +521,33 @@ paths:
                         action:
                           type: string
                 additionalProperties: true
+        "400":
+          description: >-
+            The selection was not stated. Ask the user which rows they mean
+            rather than resending without item_ids.
   /review/runs/{run_id}/actions/execute:
     post:
       operationId: executeReviewActions
-      summary: Execute and verify prepared actions
+      summary: Execute one prepared scope, and verify it
       description: >-
-        The only operation that changes the mailbox, and it requires
-        confirm: true given for the execution itself, not inherited from the
-        decision. Every action is read back from Gmail: an archive is complete
-        only once INBOX is absent, and a move to Trash only once the thread is
-        in TRASH. A thread already in the requested state completes without a
-        write. A failure stays visible and retryable; nothing retries itself.
+        The only operation that changes the mailbox. It requires the scope_id
+        returned by prepareReviewActions, and confirm: true given for the
+        execution itself rather than inherited from the decision. It runs that
+        scope's action_ids and nothing else: there is no capability-wide
+        execution.
+
+
+        Restate the selection in item_ids and action_ids. A scope that has
+        been superseded by a later preparation, already executed, or whose
+        rows were decided again since, answers 409 ScopeMismatch and writes
+        nothing; so does a restatement that disagrees with what was prepared.
+
+
+        Every action is read back from Gmail: an archive is complete only once
+        INBOX is absent, a move to Trash only once the thread is in TRASH, and
+        a restore only once TRASH is gone. A thread already in the requested
+        state completes without a write. A failure stays visible and
+        retryable; nothing retries itself.
       parameters:
         - name: run_id
           in: path
@@ -458,17 +560,52 @@ paths:
           application/json:
             schema:
               type: object
-              required: [confirm]
+              required: [scope_id, confirm]
               properties:
+                scope_id:
+                  type: string
+                  description: The scope returned by prepareReviewActions.
                 confirm:
                   type: boolean
-                capability_key:
-                  type: string
+                item_ids:
+                  type: array
+                  description: The rows being confirmed, restated.
+                  items:
+                    type: string
                 action_ids:
                   type: array
+                  description: The action ids the scope prepared, restated.
                   items:
                     type: string
       responses:
+        "409":
+          description: >-
+            ScopeMismatch. Nothing was written. The body names the prepared
+            and requested rows and how they differ; show that difference and
+            prepare again rather than retrying.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: object
+                    properties:
+                      error:
+                        type: string
+                      message:
+                        type: string
+                      scope_id:
+                        type: string
+                      prepared_item_ids:
+                        type: array
+                        items:
+                          type: string
+                      requested_item_ids:
+                        type: array
+                        items:
+                          type: string
+                    additionalProperties: true
         "200":
           description: Actions executed and verified.
           content:

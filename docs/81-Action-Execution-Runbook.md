@@ -135,31 +135,46 @@ os "$ADMIN_OS/admin/gmail/labels"
 
 ## 3. Prepare, read, execute
 
-**Prepare** resolves every approval into the exact parameters that would be sent, and writes nothing:
+**Prepare** resolves the selected approvals into the exact parameters that would be sent, writes nothing, and fixes the scope. It needs the rows: a request naming neither `item_ids` nor `entire_capability` is `400`, because a missing selection is not "all of them".
 
 ```bash
 os -X POST "$ADMIN_OS/review/runs/$RUN/actions/prepare" -d '{"capability_key":"admin"}'
 ```
 ```json
-{"gmail_write_enabled": false,
- "counts": {"total": 1, "prepared": 1},
- "actions": [{"action_id": "…", "action": "gmail.archive", "state": "prepared",
+{"detail":"Preparation needs the exact item_ids that were selected. Send entire_capability=true with a capability_key only when every approved row in that capability was asked for."}
+```
+
+```bash
+os -X POST "$ADMIN_OS/review/runs/$RUN/actions/prepare" \
+   -d '{"capability_key":"admin","item_ids":["item-1","item-2","item-3"]}'
+```
+```json
+{"scope_id": "3f0c…", "capability_key": "admin", "entire_capability": false,
+ "requested_item_ids": ["item-1", "item-2", "item-3"],
+ "prepared_item_ids": ["item-1", "item-2", "item-3"],
+ "action_ids": ["act-1", "act-2", "act-3"],
+ "excluded_items": [],
+ "scope_matches_request": true,
+ "gmail_write_enabled": false,
+ "counts": {"total": 3, "prepared": 3},
+ "actions": [{"action_id": "act-1", "action": "gmail.archive", "state": "prepared",
               "prepared_params": {"remove_labels": ["INBOX"], "thread_id": "197b351c69d3613f"},
               "idempotency_key": "9f2c…", "attempts": 0}]}
 ```
 
-Preparing twice returns the same action; the idempotency key is derived from the item, the action, and its parameters.
+Preparing twice returns the same actions; the idempotency key is derived from the item, the action, and its parameters. It does **not** return the same scope: the newer preparation supersedes the older one, and the older `scope_id` stops being executable.
 
-**Read the plan** before running it. This is the point at which a wrong label or a wrong thread is cheap:
+**Check the scope, not just the plan.** `prepared_item_ids` is what a confirmation would run. If it is not the set that was asked for — or `excluded_items` is non-empty, or `scope_matches_request` is `false` — stop and read the exclusions rather than executing the part that matches.
 
 ```bash
 os "$ADMIN_OS/review/runs/$RUN/actions?state=prepared"
+os "$ADMIN_OS/review/runs/$RUN/scopes/$SCOPE"     # what this scope covers, and whether it still stands
 ```
 
-**Execute.** `confirm` is required, and omitting it is `400` rather than a default:
+**Execute.** The `scope_id` is required, and so is `confirm`; omitting either is a refusal rather than a default:
 
 ```bash
-os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" -d '{}'
+os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" -d '{"scope_id":"3f0c…"}'
 ```
 ```json
 {"detail":"Executing changes the mailbox. Send confirm=true to proceed."}
@@ -167,12 +182,32 @@ os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" -d '{}'
 
 ```bash
 os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" \
-   -d '{"confirm":true,"capability_key":"admin"}'
+   -d '{"scope_id":"3f0c…","confirm":true,
+        "item_ids":["item-1","item-2","item-3"],
+        "action_ids":["act-1","act-2","act-3"]}'
 ```
+
+The scope runs its own action ids and nothing else. There is no capability-wide execution: `capability_key` is not a parameter here.
 
 Each action is read back from Gmail immediately. `completed` means Gmail was asked *and* Gmail agrees. `failed` with `last_error` means it does not, and the mailbox may or may not have changed — which is why the next section exists.
 
-Start narrowly. `{"confirm":true,"action_ids":["…"]}` runs exactly one.
+Start narrowly: prepare one `item_id` and execute that scope.
+
+### 3a. ScopeMismatch
+
+Every scope check happens before the first write, so a `409` means **nothing was written**:
+
+```json
+{"detail":{"error":"ScopeMismatch",
+           "message":"The selection being confirmed is not the one that was prepared, so nothing was executed.",
+           "scope_id":"3f0c…",
+           "prepared_item_ids":["item-1","item-2"],
+           "requested_item_ids":["item-1","item-2","item-9"],
+           "not_prepared":["item-9"],
+           "prepared_but_not_requested":[]}}
+```
+
+It is returned when the scope was superseded by a later preparation, has already been executed, names rows that were decided again since it was prepared, or when the `item_ids` or `action_ids` being confirmed are not the ones prepared. The answer is always to prepare again against the selection that is actually meant — never to retry the same request.
 
 ---
 
@@ -185,7 +220,28 @@ os -X POST "$ADMIN_OS/review/runs/$RUN/actions/$ACTION/retry"
 os -X POST "$ADMIN_OS/review/runs/$RUN/actions/$ACTION/verify"   # re-reads Gmail, writes nothing
 ```
 
-A retry verifies the effect before attempting it again, so a write that landed just before the connection dropped is adopted rather than repeated. Verify is safe to call at any time and is the way to answer "is this still true?" weeks later.
+A retry verifies the effect before attempting it again, so a write that landed just before the connection dropped is adopted rather than repeated. Verify is safe to call at any time and is the way to answer "is this still true?" weeks later. Retry names one action explicitly and is the only execution path without a scope.
+
+### Undoing a Trash
+
+A thread in Trash can be taken back out of it. The group response lists what is restorable, with the request that does it:
+
+```bash
+os "$ADMIN_OS/review/runs/$RUN/groups/admin"
+#    "restorable": [{"item_id":"item-4","thread_id":"19fab1e380288ea9",
+#                    "action":"restore_gmail_thread_from_trash",
+#                    "method":"POST","path":"/review/runs/…/items/item-4/decision",
+#                    "body":{"decision":"override","action":"restore_gmail_thread_from_trash"}}]
+
+os -X POST "$ADMIN_OS/review/runs/$RUN/items/$ITEM/decision" \
+   -d '{"decision":"override","action":"restore_gmail_thread_from_trash"}'
+os -X POST "$ADMIN_OS/review/runs/$RUN/actions/prepare" \
+   -d '{"capability_key":"admin","item_ids":["'$ITEM'"]}'
+os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" \
+   -d '{"scope_id":"<from the preparation>","confirm":true,"item_ids":["'$ITEM'"]}'
+```
+
+The restore is `gmail.untrash`: it removes `TRASH` from the whole thread and verifies that Gmail agrees. A thread already out of Trash completes without a write. It is granted to the capabilities that may Trash — Admin and Career — and to no others.
 
 ---
 
@@ -203,9 +259,12 @@ os -X POST "$ADMIN_OS/review/runs/$RUN/items/$ITEM/send-draft" \
    -d '{"draft_id":"r-123","draft_message_id":"msg-456","confirm":true}'
 #    -> {"action":"gmail.send_draft","state":"approved"}
 
-# 3. execute it like any other action
+# 3. prepare that item, then execute the scope it produced
+os -X POST "$ADMIN_OS/review/runs/$RUN/actions/prepare" \
+   -d '{"capability_key":"admin","item_ids":["'$ITEM'"]}'
 os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" \
-   -d '{"confirm":true,"action_ids":["<the send action id>"]}'
+   -d '{"scope_id":"<from the preparation>","confirm":true,
+        "action_ids":["<the send action id>"]}'
 ```
 
 Editing the draft between steps 2 and 3 invalidates the approval:
@@ -314,8 +373,8 @@ The paths that write to Gmail are covered by tests against a fake mailbox, not b
 The deployment itself is verified above; what follows is the first real write.
 
 1. Wait for a run created *after* the deployment. A run resumed across a configuration change keeps the recommendations its items were given, so an item opened under `admin.v1` stays `needs_review` even where an `admin.v2` rule would now match it. The group reports the `policy_version` it was populated under, which is how to tell.
-2. Approve exactly one archive, prepare it, and read `prepared_params`. Confirm it names the thread you expect and removes only `INBOX`. For a move, confirm `add_labels` names the folder you meant and `remove_labels` is `["INBOX"]` and nothing else.
+2. Approve exactly one archive, prepare **that one `item_id`**, and read `prepared_params`. Confirm it names the thread you expect and removes only `INBOX`. For a move, confirm `add_labels` names the folder you meant and `remove_labels` is `["INBOX"]` and nothing else. Confirm `prepared_item_ids` is that one item and `excluded_items` is empty.
 3. Set `GMAIL_WRITE_ENABLED=true` in Railway and redeploy.
-4. Execute that one action by id — `{"confirm":true,"action_ids":["…"]}` — not the whole run.
+4. Execute that scope — `{"scope_id":"…","confirm":true,"item_ids":["…"],"action_ids":["…"]}` — which is the only thing it can run.
 5. Check the thread in Gmail, and check the action reports `completed` with its verification detail.
 6. Leave the switch on only while watching. Setting it back to `false` stops everything already approved.

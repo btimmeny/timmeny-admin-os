@@ -38,6 +38,7 @@ class ActionKind(StrEnum):
     GMAIL_ARCHIVE = "gmail.archive"
     GMAIL_MOVE = "gmail.move"
     GMAIL_TRASH = "gmail.trash"
+    GMAIL_UNTRASH = "gmail.untrash"
     GMAIL_DRAFT_REPLY = "gmail.draft_reply"
     GMAIL_SEND_DRAFT = "gmail.send_draft"
     MONDAY_CREATE_TASK = "monday.create_task"
@@ -69,6 +70,7 @@ GMAIL_ACTIONS = {
     ActionKind.GMAIL_ARCHIVE,
     ActionKind.GMAIL_MOVE,
     ActionKind.GMAIL_TRASH,
+    ActionKind.GMAIL_UNTRASH,
     ActionKind.GMAIL_DRAFT_REPLY,
     ActionKind.GMAIL_SEND_DRAFT,
 }
@@ -94,13 +96,15 @@ ACTION_ALIASES: dict[str, ActionKind] = {
     "archive_gmail_thread": ActionKind.GMAIL_ARCHIVE,
     "move_gmail_thread_to_label": ActionKind.GMAIL_MOVE,
     "move_gmail_thread_to_trash": ActionKind.GMAIL_TRASH,
+    "restore_gmail_thread_from_trash": ActionKind.GMAIL_UNTRASH,
 }
-"""Spoken names for the three ways a thread leaves the inbox.
+"""Spoken names for the ways a thread leaves the inbox, and the way back.
 
-The stored action is `gmail.archive`, `gmail.move`, or `gmail.trash`; these
-are the names a reader sees and may send back. Accepting both means the audit
-keeps one name for a thing while the contract can say it in words — and
-`delete` never reaches an alias at all, because deleting is not what happens.
+The stored action is `gmail.archive`, `gmail.move`, `gmail.trash`, or
+`gmail.untrash`; these are the names a reader sees and may send back.
+Accepting both means the audit keeps one name for a thing while the contract
+can say it in words — and `delete` never reaches an alias at all, because
+deleting is not what happens.
 """
 
 

@@ -541,6 +541,23 @@ def read_actions(
     return list(session.execute(query).scalars().all())
 
 
+def read_item_actions(
+    session: Session,
+    run: ReviewRun,
+    item: ReviewItem,
+) -> list[ReviewAction]:
+    """Every action recorded for one item, oldest first."""
+    return list(
+        session.execute(
+            select(ReviewAction)
+            .where(ReviewAction.run_id == run.id, ReviewAction.item_id == item.id)
+            .order_by(ReviewAction.created_at, ReviewAction.id)
+        )
+        .scalars()
+        .all()
+    )
+
+
 def read_action_events(session: Session, action: ReviewAction) -> list[ActionEvent]:
     return list(
         session.execute(
@@ -809,6 +826,54 @@ async def verify_trash(
     )
 
 
+def prepare_untrash(item: ReviewItem, params: JsonObject) -> JsonObject:
+    """Plan taking a thread back out of Trash.
+
+    The undo of `gmail.trash`, and the reason trashing can be offered at all:
+    a disposition that cannot be reversed is one nobody should be asked to
+    confirm in a hurry.
+    """
+    return {
+        "thread_id": item.source_thread_id,
+        "moves_out_of": TRASH_LABEL_ID,
+    }
+
+
+async def execute_untrash(
+    client: GmailClient,
+    action: ReviewAction,
+    item: ReviewItem,
+) -> ExecutionOutcome:
+    thread = await client.fetch_thread(item.source_thread_id)
+    if TRASH_LABEL_ID not in thread.label_ids:
+        return ExecutionOutcome(
+            external_kind=GMAIL_THREAD,
+            external_ref=item.source_thread_id,
+            detail={"labels": thread.label_ids, "already": "out of Trash"},
+            already_applied=True,
+        )
+
+    await client.untrash_thread(item.source_thread_id)
+    return ExecutionOutcome(
+        external_kind=GMAIL_THREAD,
+        external_ref=item.source_thread_id,
+        detail={"moved_out_of": TRASH_LABEL_ID},
+    )
+
+
+async def verify_untrash(
+    client: GmailClient,
+    action: ReviewAction,
+    item: ReviewItem,
+) -> VerificationOutcome:
+    """Gmail itself must say the thread is no longer in Trash."""
+    thread = await client.fetch_thread(item.source_thread_id)
+    return VerificationOutcome(
+        verified=TRASH_LABEL_ID not in thread.label_ids,
+        detail={"labels": thread.label_ids},
+    )
+
+
 def prepare_draft(item: ReviewItem, params: JsonObject) -> JsonObject:
     recipients = read_strings(params, "to")
     if not recipients:
@@ -937,6 +1002,7 @@ EXECUTORS: dict[ActionKind, Executor] = {
     ActionKind.GMAIL_ARCHIVE: Executor(prepare_archive, execute_archive, verify_archive),
     ActionKind.GMAIL_MOVE: Executor(prepare_move, execute_move, verify_move),
     ActionKind.GMAIL_TRASH: Executor(prepare_trash, execute_trash, verify_trash),
+    ActionKind.GMAIL_UNTRASH: Executor(prepare_untrash, execute_untrash, verify_untrash),
     ActionKind.GMAIL_DRAFT_REPLY: Executor(prepare_draft, execute_draft, verify_draft),
     ActionKind.GMAIL_SEND_DRAFT: Executor(prepare_send, execute_send, verify_send),
 }

@@ -643,17 +643,20 @@ completed -> done; re-running is a no-op
 failed    -> durable, with the error, and retryable
 ```
 
-Six Gmail actions ship: `gmail.label`, `gmail.archive`, `gmail.move`, `gmail.trash`, and `gmail.draft_reply`, plus `gmail.send_draft`, which sends only a specific draft that has been approved by id.
+Seven Gmail actions ship: `gmail.label`, `gmail.archive`, `gmail.move`, `gmail.trash`, `gmail.untrash`, and `gmail.draft_reply`, plus `gmail.send_draft`, which sends only a specific draft that has been approved by id.
 
-The three dispositions are what a review mostly does, and the API names them as they are spoken:
+The dispositions are what a review mostly does, and the API names them as they are spoken:
 
 | Said | Sent as | Gmail call | Reversible |
 |---|---|---|---|
 | "archive" | `archive_gmail_thread` | `threads.modify`, removing `INBOX` | yes, the thread and its other labels are untouched |
 | "file it in Later", "move it out of my inbox" | `move_gmail_thread_to_label` with `{"label": "Later"}` | `threads.modify`, adding the folder and removing `INBOX` | yes, the thread and its other labels are untouched |
 | "delete", "remove", "trash" | `move_gmail_thread_to_trash` | `threads.trash` | yes, Gmail restores from Trash for 30 days |
+| "undo that", "put it back" | `restore_gmail_thread_from_trash` | `threads.untrash` | it *is* the undo |
 
-All three act on the whole thread the row stands for, and all three are verified by reading Gmail back: archive requires `INBOX` to be absent, a move requires the folder to be present *and* `INBOX` absent, Trash requires `TRASH` to be present. A thread that is already in the requested state is completed without a write.
+All of them act on the whole thread the row stands for, and all are verified by reading Gmail back: archive requires `INBOX` to be absent, a move requires the folder to be present *and* `INBOX` absent, Trash requires `TRASH` to be present, a restore requires it to be gone. A thread that is already in the requested state is completed without a write.
+
+A Trash can be taken back. A group response carries `restorable` — the threads that capability trashed, each with the exact request that restores it — and the restore runs through decision, preparation, confirmation, execution, and verification like anything else. Restoring is a permission, granted to the capabilities that may Trash and to no others; nothing restores a thread unasked.
 
 Filing is one action rather than a label followed by an archive, because the two together are what "move it" means: doing them separately can leave a thread labelled and still in the inbox when the second half fails.
 
@@ -661,19 +664,41 @@ A folder is chosen, never invented. Each capability lists the folders it may fil
 
 **There is no permanent deletion.** `messages.delete` and `threads.delete` are not implemented, not gated: no capability, rule, or request can reach them, and a test asserts the client has no method that could.
 
+### Scope: an execution runs the rows that were selected
+
+A selection has to survive three requests — deciding, preparing, executing — and it does so as a persisted scope rather than as something each step re-derives. Nineteen rows chosen are nineteen rows prepared and nineteen rows run. See [ADR-0014](docs/adr/ADR-0014-execution-scope-integrity.md).
+
 ### `POST /review/runs/{run_id}/actions/prepare`
 
-Resolves approvals into exact parameters and writes nothing. Preparing twice returns the same action, because the idempotency key is derived from the item, the action, and its parameters rather than from the attempt.
+Resolves the selected approvals into exact parameters, writes nothing, and fixes the scope. Preparing twice returns the same actions, because the idempotency key is derived from the item, the action, and its parameters rather than from the attempt — but it returns a *new* scope, and supersedes the previous one.
+
+```json
+{"capability_key": "admin", "item_ids": ["item-1", "item-2", "item-3"]}
+```
+
+`item_ids` is the selection, and it is required: a request naming neither `item_ids` nor `entire_capability: true` is `400`, because a missing selection is not "all of them". Whole-capability preparation exists and must be asked for by name.
+
+The response states the scope rather than implying it — `scope_id`, `requested_item_ids`, `prepared_item_ids`, `action_ids`, `prepared_items`, `excluded_items` with a reason each, and `scope_matches_request`. A caller that has to infer which rows a confirmation covers is a caller that will eventually infer wrongly.
 
 ### `POST /review/runs/{run_id}/actions/execute`
 
-The only route that changes the mailbox, behind four gates: the capability must be *allowed* the action, separately *permitted to execute* it, `GMAIL_WRITE_ENABLED` must be true, and the request must carry `confirm: true`.
+The only route that changes the mailbox, behind five gates: the capability must be *allowed* the action, separately *permitted to execute* it, `GMAIL_WRITE_ENABLED` must be true, the request must carry `confirm: true`, and it must name a `scope_id` that still stands.
 
 ```json
-{"confirm": true, "capability_key": "admin"}
+{"scope_id": "3f0c…", "confirm": true,
+ "item_ids": ["item-1", "item-2", "item-3"],
+ "action_ids": ["act-1", "act-2", "act-3"]}
 ```
 
+It runs that scope's action ids and nothing else; there is no capability-wide execution. `item_ids` and `action_ids` are optional restatements of what is being confirmed, and a restatement that disagrees stops the request instead of being reconciled with it.
+
+A scope that was superseded by a later preparation, has already run, or whose rows were decided again since answers `409` with `ScopeMismatch`, naming the difference in both directions. Every one of those checks happens before the first Gmail call, so a `409` means nothing was written — and nothing partial was written either: a mismatch refuses the whole request rather than running the part that still agrees.
+
 Every execution is read back from Gmail. An archive, or a move, that Gmail still lists in the inbox is `failed`, not `completed` — a write that cannot be confirmed is not a write that happened. Permission and the kill switch are rechecked at execution, not trusted from preparation, so revoking a permission stops work already approved.
+
+### `GET /review/runs/{run_id}/scopes/{scope_id}`
+
+What a preparation covers and whether it still stands: its state, the rows it prepared, the rows it left out and why.
 
 ### `GET /review/runs/{run_id}/actions` and `GET …/actions/{action_id}`
 

@@ -12,7 +12,7 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-08-01.1"
+version: "2026-08-02.1"
 channel: email
 
 # Presentation contracts. A screen decides what a review looks like — the
@@ -281,6 +281,9 @@ capabilities:
       - gmail.archive
       - gmail.move
       - gmail.trash
+      # The undo of Trash, granted wherever Trash is: a disposition nobody can
+      # reverse is one nobody should be asked to confirm in a hurry.
+      - gmail.untrash
       - gmail.draft_reply
       - monday.create_task
     approval:
@@ -296,6 +299,7 @@ capabilities:
         - gmail.archive
         - gmail.move
         - gmail.trash
+        - gmail.untrash
         - gmail.draft_reply
       require_verification: true
     completion:
@@ -435,6 +439,7 @@ capabilities:
       - gmail.archive
       - gmail.move
       - gmail.trash
+      - gmail.untrash
       - gmail.draft_reply
       - gmail.send_draft
       - monday.create_task
@@ -448,6 +453,7 @@ capabilities:
         - gmail.archive
         - gmail.move
         - gmail.trash
+        - gmail.untrash
         - gmail.draft_reply
         - gmail.send_draft
       require_verification: true

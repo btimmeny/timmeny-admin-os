@@ -624,7 +624,8 @@ def check_decision(
     """
     if not capability.playbook.allows(PlaybookStep.AWAIT_DECISION):
         raise DecisionRefused(f"{capability.key!r} does not take decisions in its playbook.")
-    if item.state in TERMINAL_ITEM_STATES:
+
+    if item.state in TERMINAL_ITEM_STATES and not restores_trash(item, decision, action):
         raise DecisionRefused(f"Item {item.id} is already {item.state} and cannot be re-decided.")
 
     chosen = resolve_action(capability, item, decision, action)
@@ -647,6 +648,25 @@ def check_decision(
         else:
             check_destination(capability, action_params)
     return chosen
+
+
+def restores_trash(
+    item: ReviewItem,
+    decision: DecisionKind,
+    action: ActionKind | None,
+) -> bool:
+    """Whether this decision is taking a trashed thread back out of Trash.
+
+    The one thing that may be decided about a settled item, because the
+    settlement is the thing being undone. Restoring is not re-deciding what to
+    do with a thread: it is reversing what was already done to it.
+    """
+    return (
+        decision is DecisionKind.OVERRIDE
+        and action is ActionKind.GMAIL_UNTRASH
+        and item.state == ItemState.EXECUTED
+        and item.approved_action == ActionKind.GMAIL_TRASH.value
+    )
 
 
 def check_destination(capability: CapabilityConfig, params: JsonObject) -> str:

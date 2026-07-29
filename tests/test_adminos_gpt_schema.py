@@ -67,8 +67,12 @@ def test_the_deployment_serves_the_contract_it_implements(client: TestClient) ->
     assert response.text == CONTRACT_PATH.read_text()
 
 
-def test_the_schema_can_be_read_without_the_api_key(client: TestClient) -> None:
+def test_the_schema_can_be_read_without_the_api_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """ChatGPT's import sends no headers, and the contract is not a secret."""
+    monkeypatch.setenv("TIMMENY_OS_API_KEY", "a-key-this-request-does-not-send")
+
     assert client.get("/gpt/action-schema.yaml").status_code == 200
     assert client.get("/gpt/action-schema/version").status_code == 200
     assert client.post("/review/start", json={}).status_code == 401

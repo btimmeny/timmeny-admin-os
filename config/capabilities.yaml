@@ -12,7 +12,7 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-08-03.1"
+version: "2026-08-04.1"
 channel: email
 
 # Presentation contracts. A screen decides what a review looks like — the
@@ -351,7 +351,7 @@ capabilities:
         - execute_approved
         - verify
     recommendation_policy:
-      version: taxes.v1
+      version: taxes.v2
       default: needs_review
       categories:
         - filing_obligation
@@ -361,7 +361,47 @@ capabilities:
         - other
       allow_ai_recommendation: true
       min_ai_confidence: 0.9
-      rules: []
+      rules:
+        # Records, not requests. Each rule below names mail that says what has
+        # already happened — a form issued, a payment acknowledged, a document
+        # posted — which belongs in a folder rather than an inbox. Mail that
+        # asks for something (a fee proposal, a missing-information request)
+        # matches none of them and stays where it will be seen.
+        - id: tax_form_or_authority_receipt
+          when:
+            subject_contains:
+              - "1099"
+              - TAX INFORMATION STATEMENT
+              - TAX RETURN DOCUMENT AVAILABLE
+              - FBAR Submission Accepted
+              - Fincen Acknowledgement
+              - IRS Direct Pay Confirmation
+              - Buzón Tributario
+          recommend: gmail.move
+          move_to: Financial/Taxes
+          confidence: 0.9
+          rationale: >-
+            A tax form or an authority's acknowledgement is a record to keep,
+            and keeping it means somewhere it can be found next April.
+        - id: kpmg_statement_or_document_notice
+          when:
+            participant_domains:
+              - kpmg.com
+              - kpmg.com.mx
+            subject_contains:
+              - Account Statement
+              - Edo de cuenta
+              - Complemento de Pago
+              - Confirmación de recepción
+              - New Document(s) Posted
+              - e-Filing Authorization Forms Receipt
+          recommend: gmail.move
+          move_to: Financial/Taxes
+          confidence: 0.85
+          rationale: >-
+            KPMG has sent a statement or posted a document rather than asked
+            for anything, so filing it with the rest of the tax year loses
+            nothing.
     allowed_actions:
       - gmail.label
       - gmail.archive
@@ -426,7 +466,7 @@ capabilities:
         - execute_approved
         - verify
     recommendation_policy:
-      version: career.v1
+      version: career.v2
       default: needs_review
       categories:
         - call_request
@@ -436,7 +476,30 @@ capabilities:
         - other
       allow_ai_recommendation: true
       min_ai_confidence: 0.8
-      rules: []
+      rules:
+        # A survey is not a call, and the two are kept apart. Only the survey
+        # invitations are recommended for filing: a call request is answered,
+        # and a thread filed out of the inbox is a call nobody takes.
+        - id: expert_network_survey_invitation
+          when:
+            participant_domains:
+              - alphasights.com
+              - arbolus.com
+              - capvision.com
+              - dialecticanet.com
+              - prosapient.com
+              - tegus.com
+              - thirdbridge.com
+              - truenorthinsights.com
+            subject_contains:
+              - survey
+          recommend: gmail.move
+          move_to: Career - Advisory/Expert Survey
+          confidence: 0.85
+          rationale: >-
+            An expert network asking for a survey rather than a call belongs
+            with the surveys, which is a different folder and a different
+            decision from an expert call.
     allowed_actions:
       - gmail.label
       - gmail.archive

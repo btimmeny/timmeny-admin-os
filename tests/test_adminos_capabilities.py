@@ -1,9 +1,11 @@
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from adminos.capabilities.config import (
+    DESTINATION_PARAM,
     ActionKind,
     CapabilityConfigError,
     LoadedCapabilities,
@@ -12,10 +14,13 @@ from adminos.capabilities.config import (
     load_capabilities,
     parse_capabilities,
 )
+from adminos.db.models import Evidence
+from adminos.domain.review import evaluate_policy
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 SHIPPED_CONFIG = REPOSITORY_ROOT / "config" / "capabilities.yaml"
+NOW = datetime(2026, 7, 29, 9, 0, tzinfo=UTC)
 
 MINIMAL = """
 version: test.1
@@ -106,6 +111,88 @@ def test_every_shipped_capability_can_file_mail_somewhere_named() -> None:
         assert capability.permits(ActionKind.GMAIL_MOVE)
         assert capability.execution.permits(ActionKind.GMAIL_MOVE)
         assert capability.gmail.destinations
+
+
+def recommend(capability_key: str, subject: str, sender: str) -> tuple[str, str | None]:
+    """What the shipped rules say about one real thread, and where it would go."""
+    capability = load_capabilities(SHIPPED_CONFIG).get(capability_key)
+    evidence = Evidence(
+        source_system="gmail",
+        source_thread_id="t1",
+        subject=subject,
+        participants=[sender],
+        received_at=NOW - timedelta(days=1),
+    )
+    outcome = evaluate_policy(capability, evidence, NOW)
+    return outcome.recommendation, outcome.params.get(DESTINATION_PARAM)
+
+
+@pytest.mark.parametrize(
+    ("subject", "sender"),
+    [
+        ("New Paid Survey (Warehouse)  | Arbolus", "team@arbolus.com"),
+        ("Dialectica new survey project request: HR Software Space", "x@dialecticanet.com"),
+        ("Survey Request: Voice AI Platforms", "research@alphasights.com"),
+        ("Follow Up: True North Insights Survey", "s@truenorthinsights.com"),
+    ],
+)
+def test_an_expert_network_survey_is_filed_with_the_surveys(subject: str, sender: str) -> None:
+    """Brian keeps surveys and calls apart, so a survey names the survey folder."""
+    assert recommend("career_advisor_calls", subject, sender) == (
+        ActionKind.GMAIL_MOVE,
+        "Career - Advisory/Expert Survey",
+    )
+
+
+@pytest.mark.parametrize(
+    ("subject", "sender"),
+    [
+        ("AlphaSights Availability Request - Enterprise Software", "p@alphasights.com"),
+        ("Third Bridge: New request on the IT Services Space", "r@thirdbridge.com"),
+        ("Cloud Recovery Solutions Industry - Tegus Research Call", "c@tegus.com"),
+    ],
+)
+def test_a_request_for_a_call_is_left_in_the_inbox(subject: str, sender: str) -> None:
+    """A call is answered, and a thread filed out of the inbox is one nobody takes."""
+    assert recommend("career_advisor_calls", subject, sender) == ("needs_review", None)
+
+
+@pytest.mark.parametrize(
+    ("subject", "sender"),
+    [
+        ("YOUR 1099 TAX INFORMATION STATEMENT IS NOW AVAILABLE", "no-reply@mail.schwab.com"),
+        ("FBAR Submission Accepted FX26-00463852", "no-reply@fincen.gov"),
+        ("IRS Direct Pay Confirmation of Scheduled Transaction", "no-reply@directpay.irs.gov"),
+        ("KPMG México - BRIAN PATRICK TIMMENY - TAX - Edo de cuenta", "adviser@kpmg.com.mx"),
+    ],
+)
+def test_a_tax_record_is_filed_with_the_tax_year(subject: str, sender: str) -> None:
+    """A form or an acknowledgement is a record: what it needs is somewhere to live."""
+    assert recommend("financial_taxes", subject, sender) == (
+        ActionKind.GMAIL_MOVE,
+        "Financial/Taxes",
+    )
+
+
+@pytest.mark.parametrize(
+    ("subject", "sender"),
+    [
+        ("Walmart | Brian Timmeny | Missing information request", "adviser@kpmg.com.mx"),
+        ("Brian Timmeny - Fee proposal 2026", "adviser@kpmg.com.mx"),
+        ("RE: US Tax Briefing", "adviser@kpmg.com"),
+    ],
+)
+def test_tax_mail_that_asks_for_something_is_left_in_the_inbox(subject: str, sender: str) -> None:
+    """Filing answers nothing, and out of the inbox is how a deadline is missed."""
+    assert recommend("financial_taxes", subject, sender) == ("needs_review", None)
+
+
+def test_every_shipped_filing_rule_names_a_folder_the_capability_has() -> None:
+    """A recommendation the move endpoint would refuse is worse than none."""
+    for capability in load_capabilities(SHIPPED_CONFIG).enabled():
+        for rule in capability.recommendation_policy.rules:
+            if rule.recommend == ActionKind.GMAIL_MOVE:
+                assert rule.move_to in capability.gmail.destinations
 
 
 def test_no_shipped_destination_is_a_system_label() -> None:

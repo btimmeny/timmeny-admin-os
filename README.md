@@ -843,7 +843,17 @@ The file is validated on load and rejected outright — with `503` rather than a
 
 Rules read only retained metadata — subject, participants, dates — never message content, because there is none to read. The first matching rule wins; unmatched mail falls to `needs_review`.
 
-The shipped configuration carries two rules, both on Admin, both narrow and both recommending only `gmail.archive`: a USPS Informed Delivery digest, and a GitHub notification more than a week old. Everything else — all of Financial/Taxes, all of Career — arrives as `needs_review`. No capability auto-approves anything, so a matched rule still waits for a decision.
+The shipped configuration carries five rules, each written against mail the mailbox actually receives, and each recommending only what is reversible:
+
+| Capability | Rule | Recommends |
+|---|---|---|
+| Admin | a USPS Informed Delivery digest | `gmail.archive` |
+| Admin | a GitHub notification more than a week old | `gmail.archive` |
+| Financial/Taxes | a tax form or an authority's acknowledgement — 1099, FBAR, IRS Direct Pay, Buzón Tributario | file in `Financial/Taxes` |
+| Financial/Taxes | a KPMG statement or document notice | file in `Financial/Taxes` |
+| Career | an expert network asking for a survey rather than a call | file in `Career - Advisory/Expert Survey` |
+
+The filing rules deliberately match records rather than requests: mail that asks for something — a fee proposal, a missing-information request, an availability request for a call — matches none of them and stays in the inbox, because filing answers nothing and out of the inbox is how an obligation is missed. Everything else arrives as `needs_review`. No capability auto-approves anything, so a matched rule still waits for a decision.
 
 Rules are the place to encode a pattern once it has been seen often enough to be worth stating, which is what the [learning](#learning) routes are for.
 

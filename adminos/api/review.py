@@ -3,18 +3,20 @@ from contextlib import contextmanager
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from adminos.adapters.gmail import GmailError, open_gmail_client
 from adminos.api.deps import read_capability, read_capability_config
 from adminos.api.security import require_api_key
 from adminos.capabilities.config import (
+    ACTION_ALIASES,
     ACTION_VALUES,
     ActionKind,
     CapabilityConfig,
     LoadedCapabilities,
     UnknownCapability,
+    read_action_kind,
 )
 from adminos.config import get_gmail_credentials
 from adminos.db.engine import DatabaseNotConfigured, session_scope
@@ -28,6 +30,7 @@ from adminos.domain.evidence import (
 from adminos.domain.presentation import ScreenView, render_group
 from adminos.domain.review import (
     Assessment,
+    BulkDecisionRefused,
     DecisionKind,
     DecisionRefused,
     GroupView,
@@ -151,18 +154,52 @@ class RunResponse(BaseModel):
     warnings: list[str]
 
 
+ACTION_DESCRIPTION = (
+    "The action to take, by its stored name or its spoken one: "
+    f"{', '.join(sorted(ACTION_ALIASES))}."
+)
+
+
+def read_requested_action(value: object) -> object:
+    """Accept a spoken action name where a stored one is expected."""
+    if isinstance(value, str):
+        try:
+            return read_action_kind(value)
+        except ValueError:
+            return value
+    return value
+
+
 class DecisionRequest(BaseModel):
     decision: DecisionKind
-    action: ActionKind | None = None
+    action: ActionKind | None = Field(default=None, description=ACTION_DESCRIPTION)
     action_params: JsonObject | None = None
     note: str | None = None
+
+    _read_action = field_validator("action", mode="before")(read_requested_action)
 
 
 class BulkDecisionRequest(BaseModel):
     decision: DecisionKind
     item_ids: list[str] | None = None
-    action: ActionKind | None = None
+    action: ActionKind | None = Field(default=None, description=ACTION_DESCRIPTION)
     note: str | None = None
+
+    _read_action = field_validator("action", mode="before")(read_requested_action)
+
+
+class IneligibleItemResponse(BaseModel):
+    item_id: str
+    thread_id: str
+    subject: str | None
+    reason: str
+
+
+class BulkRefusalResponse(BaseModel):
+    """Why a bulk decision was refused, row by row. Nothing was recorded."""
+
+    message: str
+    ineligible: list[IneligibleItemResponse]
 
 
 class AssessmentRequest(BaseModel):
@@ -303,6 +340,22 @@ def decide_items(
                 note=request.note,
                 batch_id=group.id,
             )
+        except BulkDecisionRefused as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=BulkRefusalResponse(
+                    message=str(exc),
+                    ineligible=[
+                        IneligibleItemResponse(
+                            item_id=entry.item_id,
+                            thread_id=entry.thread_id,
+                            subject=entry.subject,
+                            reason=entry.reason,
+                        )
+                        for entry in exc.ineligible
+                    ],
+                ).model_dump(),
+            ) from exc
         except DecisionRefused as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ReviewNotFound as exc:

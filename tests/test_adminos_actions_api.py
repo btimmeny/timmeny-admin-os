@@ -73,6 +73,12 @@ class FakeGmail:
                 labels.remove(label_id)
         return await self.fetch_thread(thread_id)
 
+    async def trash_thread(self, thread_id: str) -> GmailThread:
+        self.writes.append(("trash", thread_id))
+        labels = [label for label in self.thread_labels[thread_id] if label != "INBOX"]
+        self.thread_labels[thread_id] = labels + ["TRASH"]
+        return await self.fetch_thread(thread_id)
+
     async def create_draft(
         self,
         thread_id: str,
@@ -418,19 +424,163 @@ def test_an_approved_send_is_still_only_an_approval(
     assert gmail.sent == ["draft-1"]
 
 
-def test_nothing_can_ask_for_a_thread_to_be_deleted(
+def test_an_eligible_row_offers_both_dispositions_by_their_canonical_names(
     client: TestClient, gmail: FakeGmail
 ) -> None:
-    """Trash is not a permitted action anywhere, so the decision is refused."""
+    """The row carries the permission, so nothing has to be assumed about it."""
+    gmail.serve("t1", "Newsletter: weekly")
+
+    body = client.post("/review/start", headers=AUTH, json={}).json()
+
+    row = body["current_group"]["screen"]["rows"][0]
+    assert "archive_gmail_thread" in row["actions"]
+    assert "move_gmail_thread_to_trash" in row["actions"]
+
+
+def test_deleting_one_thread_records_a_trash_override(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """\"Delete row 1\" is a Trash override, and it writes nothing by itself."""
+    run_id, _ = approved_run(
+        client, gmail, decision="override", action="move_gmail_thread_to_trash"
+    )
+
+    body = client.get(f"/review/runs/{run_id}", headers=AUTH).json()
+
+    assert body["groups"][0]["counts"]["approved"] == 1
+    assert gmail.writes == []
+
+
+def test_delete_all_of_them_moves_every_thread_to_trash(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """\"Delete all 11\": one bulk decision, one confirmation, eleven verified moves."""
+    for number in range(1, 12):
+        gmail.serve(f"t{number}", f"Newsletter: issue {number}")
+    body = client.post("/review/start", headers=AUTH, json={}).json()
+    run_id = body["run_id"]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/admin/decisions",
+        headers=AUTH,
+        json={"decision": "override", "action": "move_gmail_thread_to_trash"},
+    )
+
+    assert decided.status_code == 200, decided.text
+    assert len(decided.json()["decided"]) == 11
+    assert {item["approved_action"] for item in decided.json()["decided"]} == {"gmail.trash"}
+
+    prepared = prepare(client, run_id)
+
+    assert {action["action"] for action in prepared["actions"]} == {"gmail.trash"}
+    assert gmail.writes == []
+
+    unconfirmed = client.post(f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={})
+
+    assert unconfirmed.status_code == 400
+    assert gmail.writes == []
+
+    executed = client.post(
+        f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={"confirm": True}
+    )
+
+    states = [action["state"] for action in executed.json()["actions"]]
+    assert states == ["completed"] * 11
+    assert sorted(gmail.writes) == sorted(
+        ("trash", f"t{number}") for number in range(1, 12)
+    )
+    assert all("TRASH" in labels for labels in gmail.thread_labels.values())
+
+
+def test_a_bulk_delete_naming_one_ineligible_row_records_nothing(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """One refusal answers for the whole request, and names itself."""
+    for number in (1, 2, 3):
+        gmail.serve(f"t{number}", f"Newsletter: issue {number}")
+    body = client.post("/review/start", headers=AUTH, json={}).json()
+    run_id = body["run_id"]
+    rows = {row["thread_id"]: row["item_id"] for row in body["current_group"]["screen"]["rows"]}
+    client.post(
+        f"/review/runs/{run_id}/items/{rows['t2']}/decision",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    )
+
+    refused = client.post(
+        f"/review/runs/{run_id}/groups/admin/decisions",
+        headers=AUTH,
+        json={
+            "decision": "override",
+            "action": "move_gmail_thread_to_trash",
+            "item_ids": [rows["t1"], rows["t2"], rows["t3"]],
+        },
+    )
+
+    detail = refused.json()["detail"]
+    assert refused.status_code == 409
+    assert [entry["thread_id"] for entry in detail["ineligible"]] == ["t2"]
+    assert "already dismissed" in detail["ineligible"][0]["reason"]
+
+    unchanged = client.get(f"/review/runs/{run_id}", headers=AUTH).json()
+    assert unchanged["groups"][0]["counts"]["pending"] == 2
+    assert gmail.writes == []
+
+
+def test_a_trashed_thread_leaves_the_table_but_not_the_record(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    run_id, item_id = approved_run(
+        client, gmail, decision="override", action="move_gmail_thread_to_trash"
+    )
+    prepare(client, run_id)
+    client.post(f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={"confirm": True})
+
+    body = client.get(f"/review/runs/{run_id}", headers=AUTH).json()
+    history = client.get(f"/review/runs/{run_id}/actions", headers=AUTH).json()
+
+    group = body["groups"][0]
+    assert group["counts"] == {"total": 1, "executed": 1}
+    assert [action["item_id"] for action in history["actions"]] == [item_id]
+
+
+def test_running_the_same_trash_again_changes_nothing(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """Retrying after a lost response must not trash twice or fail."""
+    run_id, _ = approved_run(
+        client, gmail, decision="override", action="move_gmail_thread_to_trash"
+    )
+    prepare(client, run_id)
+    first = client.post(
+        f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={"confirm": True}
+    )
+    action_id = first.json()["actions"][0]["action_id"]
+
+    again = client.post(
+        f"/review/runs/{run_id}/actions/execute",
+        headers=AUTH,
+        json={"confirm": True, "action_ids": [action_id]},
+    )
+
+    assert again.status_code == 200, again.text
+    assert gmail.writes == [("trash", "t1")]
+
+
+def test_nothing_can_ask_for_a_thread_to_be_destroyed(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """Trash is as far as it goes: permanent deletion is not a nameable action."""
     gmail.serve("t1", "Newsletter: weekly")
     body = client.post("/review/start", headers=AUTH, json={}).json()
     item_id = body["current_group"]["items"][0]["item_id"]
 
-    response = client.post(
-        f"/review/runs/{body['run_id']}/items/{item_id}/decision",
-        headers=AUTH,
-        json={"decision": "override", "action": "gmail.trash"},
-    )
+    for action in ("gmail.delete", "delete_gmail_thread", "gmail.destroy"):
+        response = client.post(
+            f"/review/runs/{body['run_id']}/items/{item_id}/decision",
+            headers=AUTH,
+            json={"decision": "override", "action": action},
+        )
+        assert response.status_code == 422, response.text
 
-    assert response.status_code in {409, 422}
     assert gmail.writes == []

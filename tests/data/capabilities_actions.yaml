@@ -4,6 +4,7 @@ channel: email
 screens:
   - id: admin-test-v1
     title: Admin test review
+    rows: unresolved
     columns:
       - label: "#"
         source: index
@@ -23,20 +24,29 @@ screens:
       - id: approve
         label: Do what is recommended
         decision: approve
-      - id: archive
-        label: Archive it
+      - id: archive_gmail_thread
+        label: Archive
         decision: override
         action: gmail.archive
+      - id: move_gmail_thread_to_trash
+        label: Move to Trash
+        decision: override
+        action: gmail.trash
       - id: dismiss
         label: Leave it alone
         decision: dismiss
       - id: defer
         label: Not today
         decision: defer
-      - id: archive_all
+      - id: archive_gmail_thread_all
         label: Archive all of these
         decision: override
         action: gmail.archive
+        scope: group
+      - id: move_gmail_thread_to_trash_all
+        label: Move all of these to Trash
+        decision: override
+        action: gmail.trash
         scope: group
 
   - id: test-review-v1
@@ -98,6 +108,7 @@ capabilities:
     allowed_actions:
       - gmail.label
       - gmail.archive
+      - gmail.trash
       - gmail.draft_reply
       - gmail.send_draft
       - monday.create_task
@@ -105,6 +116,7 @@ capabilities:
       permitted_actions:
         - gmail.label
         - gmail.archive
+        - gmail.trash
         - gmail.draft_reply
         - gmail.send_draft
     learning:

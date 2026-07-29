@@ -12,6 +12,7 @@ from adminos.capabilities.config import ActionKind, CapabilityConfig, LoadedCapa
 from adminos.db.models import Evidence, ReviewDecision, ReviewItem
 from adminos.domain.review import (
     Assessment,
+    BulkDecisionRefused,
     DecisionKind,
     DecisionRefused,
     GroupState,
@@ -731,9 +732,11 @@ def test_a_bulk_decision_refused_for_one_item_changes_none(session: Session) -> 
     add_evidence(session, "t2", "Lunch on Thursday?")
     view = start(session, TAXES)
 
-    with pytest.raises(DecisionRefused, match="nothing to approve"):
+    with pytest.raises(BulkDecisionRefused) as refusal:
         decide_group(session, TAXES, view.run, view.groups[0].group, DecisionKind.APPROVE)
 
+    assert [entry.thread_id for entry in refusal.value.ineligible] == ["t2"]
+    assert "nothing to approve" in refusal.value.ineligible[0].reason
     states = {item.state for item in read_group_items(session, view.groups[0].group)}
     assert states == {ItemState.PENDING}
 

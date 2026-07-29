@@ -1,12 +1,16 @@
 import asyncio
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import httpx
 import pytest
 
+import adminos.adapters.gmail
+
 from adminos.adapters.gmail import (
     INBOX_LABEL_ID,
+    TRASH_LABEL_ID,
     GmailAuthError,
     GmailClient,
     GmailError,
@@ -55,8 +59,14 @@ class FakeAsyncClient:
         self.routes = routes
         self.requests: list[tuple[str, str, dict[str, object] | None]] = []
 
-    async def post(self, url: str, data: dict[str, str] | None = None) -> httpx.Response:
-        self.requests.append(("POST", url, data))
+    async def post(
+        self,
+        url: str,
+        data: dict[str, str] | None = None,
+        json: dict[str, object] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        self.requests.append(("POST", url, data if data is not None else json))
         return self.respond(url)
 
     async def get(
@@ -146,6 +156,49 @@ def test_list_thread_ids_stops_at_the_limit() -> None:
     )
 
     assert asyncio.run(client.list_thread_ids(["Label_9"], limit=2)) == ["t1", "t2"]
+
+
+def test_archiving_only_removes_the_inbox_label() -> None:
+    """The thread and its other labels survive: archiving files mail, it does
+    not dispose of it."""
+    client, http_client = build_client(
+        {
+            "/modify": {},
+            "/threads/t1": {
+                "messages": [message("m1", "Digest", "a@x.com", "b@x.com", "1700000000000")]
+            },
+        }
+    )
+
+    asyncio.run(client.modify_thread("t1", remove_label_ids=[INBOX_LABEL_ID]))
+
+    method, url, payload = http_client.requests[1]
+    assert (method, url.endswith("/threads/t1/modify")) == ("POST", True)
+    assert payload == {"addLabelIds": [], "removeLabelIds": [INBOX_LABEL_ID]}
+
+
+def test_trashing_uses_the_reversible_thread_endpoint() -> None:
+    """`threads.trash` is recoverable; `threads.delete` is never called."""
+    trashed = message("m1", "Digest", "a@x.com", "b@x.com", "1700000000000")
+    trashed["labelIds"] = [TRASH_LABEL_ID]
+    client, http_client = build_client({"/trash": {}, "/threads/t1": {"messages": [trashed]}})
+
+    thread = asyncio.run(client.trash_thread("t1"))
+
+    method, url, payload = http_client.requests[1]
+    assert (method, url.endswith("/threads/t1/trash")) == ("POST", True)
+    assert payload == {}
+    assert thread.label_ids == [TRASH_LABEL_ID]
+
+
+def test_the_client_cannot_delete_anything() -> None:
+    """Gmail's destructive calls are absent rather than guarded."""
+    source = (Path(adminos.adapters.gmail.__file__)).read_text()
+
+    assert not hasattr(GmailClient, "delete_thread")
+    assert not hasattr(GmailClient, "delete_message")
+    assert "messages/{message_id}/delete" not in source
+    assert '"DELETE"' not in source
 
 
 def test_list_thread_ids_sends_every_label() -> None:

@@ -56,6 +56,32 @@ class DecisionRefused(ReviewError):
     """Raised when configuration forbids the decision that was asked for."""
 
 
+@dataclass(frozen=True)
+class IneligibleItem:
+    """One row a bulk decision could not be applied to, and why not."""
+
+    item_id: str
+    thread_id: str
+    subject: str | None
+    reason: str
+
+
+class BulkDecisionRefused(DecisionRefused):
+    """Raised when any selected row refuses the decision, so none is applied.
+
+    Carries every offending row rather than the first, because "trash 2, 4 and
+    7" is answered usefully only by naming which of them cannot be trashed.
+    """
+
+    def __init__(self, ineligible: Sequence[IneligibleItem]) -> None:
+        self.ineligible = list(ineligible)
+        names = ", ".join(entry.item_id for entry in self.ineligible)
+        super().__init__(
+            f"{len(self.ineligible)} of the selected items do not permit that "
+            f"decision, so none was recorded: {names}."
+        )
+
+
 class RunState(StrEnum):
     IN_PROGRESS = "in_progress"
     AWAITING_ACTIONS = "awaiting_actions"
@@ -658,14 +684,29 @@ def decide_group(
     items = read_group_items(session, group)
     selected = [item for item in items if item_ids is None or item.id in set(item_ids)]
     if item_ids is not None:
-        missing = set(item_ids) - {item.id for item in selected}
+        missing = sorted(set(item_ids) - {item.id for item in selected})
         if missing:
-            raise ReviewNotFound(f"Group {group.capability_key!r} has no item {missing.pop()!r}.")
+            raise ReviewNotFound(
+                f"Group {group.capability_key!r} has no item {', '.join(repr(m) for m in missing)}."
+            )
     if item_ids is None:
         selected = [item for item in selected if item.state == ItemState.PENDING]
 
+    ineligible: list[IneligibleItem] = []
     for item in selected:
-        check_decision(capability, item, decision, action)
+        try:
+            check_decision(capability, item, decision, action)
+        except DecisionRefused as refusal:
+            ineligible.append(
+                IneligibleItem(
+                    item_id=item.id,
+                    thread_id=item.source_thread_id,
+                    subject=item.subject,
+                    reason=str(refusal),
+                )
+            )
+    if ineligible:
+        raise BulkDecisionRefused(ineligible)
 
     return [
         record_decision(

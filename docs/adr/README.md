@@ -27,6 +27,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0009 — Capability Configuration and the Persisted Review State Machine](./ADR-0009-review-engine-implementation.md)
 - [ADR-0010 — The Action Lifecycle and How a Correction Becomes a Rule](./ADR-0010-action-lifecycle-and-learning.md)
 - [ADR-0011 — Presentation Is a Versioned Contract Owned by Admin OS](./ADR-0011-presentation-contracts.md)
+- [ADR-0012 — Archive and Trash Are the Two Dispositions, and Neither Deletes](./ADR-0012-gmail-dispositions.md)
 
 ## Candidate Decisions
 

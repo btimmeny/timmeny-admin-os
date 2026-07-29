@@ -28,6 +28,7 @@ REQUEST_SHAPES: dict[str, str] = {
     "0.12.0": "0e8d7f37f4a88e9e3086e99968d06253f4670c258ff0bb5ddfd97a9a1c021b05",
     "0.12.1": "0e8d7f37f4a88e9e3086e99968d06253f4670c258ff0bb5ddfd97a9a1c021b05",
     "0.13.0": "bfe017ada84890a3e901660f575f59c7855f55e77e3a30af0ef6958d394a1fed",
+    "0.14.0": "bfe017ada84890a3e901660f575f59c7855f55e77e3a30af0ef6958d394a1fed",
 }
 """Every version of the contract, and the request shapes it published.
 

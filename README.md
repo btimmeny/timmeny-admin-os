@@ -551,6 +551,10 @@ An action may be named as it is spoken (`archive_gmail_thread`, `move_gmail_thre
 
 Approval is the only route to an action, and configuration decides which actions exist for a capability at all: an action it is not granted is refused with `409` however the request is phrased. An approved item is recorded as approved and **not executed**: approval creates an action in `approved`, and reaching the mailbox takes the separate steps below. A run holding unexecuted actions reports `awaiting_actions` rather than claiming completion.
 
+A decision is not a done thing, and the review says so rather than leaving it to be inferred. The row reads `Move it to Trash — decided, not yet done` until execution has been verified; the group carries a `notice` saying nothing has changed in Gmail; the group and the run carry `outstanding_execution`, naming the exact `item_ids` waiting and the exact request that carries them out; and the review stays on that group instead of presenting the next one, because a review that has moved on reads as a review that is finished with what it moved on from. See [ADR-0018](docs/adr/ADR-0018-a-decision-is-not-a-done-thing.md).
+
+A group is addressed by its `capability_key` — `admin`, not `admin.v2`, which is the version of what Admin recommends, and not `admin-review-v1`, which is how it is drawn. A request naming one of those is refused with the key it meant.
+
 `override` may carry `action_params` — `add_labels` and `remove_labels` for `gmail.label`, `to`/`cc`/`subject`/`body` for `gmail.draft_reply`, and `label` for `gmail.move`, which is the folder to file the thread in and must be one the capability lists.
 
 Approving a recommended move with no `action_params` files the thread in the folder the row named. Agreeing with a recommendation takes the action that was shown, not a version of it that has to be spelled out again.

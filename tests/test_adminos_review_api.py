@@ -747,3 +747,124 @@ def test_an_abandoned_review_records_no_assessment(
 
     assert response.status_code == 409
     assert response.json()["detail"]["error"] == "ReviewAbandoned"
+
+def test_a_group_addressed_by_its_policy_version_is_told_the_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`admin.test` is a version of what Admin recommends, not a way to reach it."""
+    mailbox(monkeypatch, admin=[thread("t2", "Newsletter: weekly")])
+    run_id = start(client)["run_id"]
+
+    response = client.get(f"/review/runs/{run_id}/groups/admin.test", headers=AUTH)
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert "not a capability key" in detail
+    assert "'admin'" in detail
+
+
+def test_a_bulk_decision_addressed_by_policy_version_names_the_key_it_wanted(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    run_id = start(client)["run_id"]
+
+    response = client.post(
+        f"/review/runs/{run_id}/groups/taxes.test/decisions",
+        headers=AUTH,
+        json={"decision": "approve"},
+    )
+
+    assert response.status_code == 404
+    assert "'financial_taxes'" in response.json()["detail"]
+
+
+def test_deciding_a_group_does_not_move_the_review_on(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Brian's three rows: decided in bulk, and nothing in Gmail has happened.
+
+    The review used to present the next capability at this point, which reads
+    as though the first one had been carried out. The group it is still on is
+    the group whose decisions are outstanding.
+    """
+    mailbox(
+        monkeypatch,
+        taxes=[thread("t1", "KPMG Activities"), thread("t2", "KPMG follow-up")],
+        admin=[thread("t3", "Newsletter: weekly")],
+    )
+    run_id = start(client)["run_id"]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/financial_taxes/decisions",
+        headers=AUTH,
+        json={"decision": "approve"},
+    ).json()
+
+    run = decided["run"]
+    assert run["state"] == "in_progress"
+    assert run["current_group"]["capability_key"] == "financial_taxes"
+    assert run["current_group"]["state"] == "awaiting_actions"
+
+
+def test_a_decided_group_says_what_has_not_happened_and_how_to_do_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(
+        monkeypatch,
+        taxes=[thread("t1", "KPMG Activities"), thread("t2", "KPMG follow-up")],
+    )
+    run_id = start(client)["run_id"]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/financial_taxes/decisions",
+        headers=AUTH,
+        json={"decision": "approve"},
+    ).json()
+
+    outstanding = decided["run"]["outstanding_execution"]
+    item_ids = [item["item_id"] for item in decided["decided"]]
+    assert len(outstanding) == 1
+    assert outstanding[0]["capability_key"] == "financial_taxes"
+    assert sorted(outstanding[0]["item_ids"]) == sorted(item_ids)
+    assert outstanding[0]["approved"] == 2
+    assert outstanding[0]["operation"] == "prepareReviewActions"
+    assert outstanding[0]["path"] == f"/review/runs/{run_id}/actions/prepare"
+    assert outstanding[0]["body"] == {
+        "capability_key": "financial_taxes",
+        "item_ids": outstanding[0]["item_ids"],
+    }
+    assert "Nothing has changed in Gmail" in outstanding[0]["message"]
+
+
+def test_a_decided_row_reads_as_decided_rather_than_done(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    run_id = start(client)["run_id"]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/financial_taxes/decisions",
+        headers=AUTH,
+        json={"decision": "approve"},
+    ).json()
+
+    screen = decided["run"]["current_group"]["screen"]
+    assert screen["rows"][0]["cells"][4] == "Create a Monday task — decided, not yet done"
+    assert "not yet carried out" in screen["notice"]
+
+
+def test_a_review_with_nothing_outstanding_says_nothing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mailbox(monkeypatch, taxes=[thread("t1", "KPMG Activities")])
+    run_id = start(client)["run_id"]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/financial_taxes/decisions",
+        headers=AUTH,
+        json={"decision": "dismiss"},
+    ).json()
+
+    assert decided["run"]["outstanding_execution"] == []
+    assert decided["run"]["state"] == "completed"

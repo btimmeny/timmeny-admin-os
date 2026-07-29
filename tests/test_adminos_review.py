@@ -53,6 +53,26 @@ TAXES = build_capability(
     objectives={"default_keys": ["financial_compliance"]},
 )
 ADMIN = build_capability(key="admin", labels=["Admin"], position=20)
+FILES = build_capability(
+    key="financial_taxes",
+    gmail={"labels": ["financial/taxes"], "destinations": ["Later", "Notes"]},
+    recommendation_policy={
+        "version": "taxes.test",
+        "categories": ["obligation", "reference"],
+        "rules": [
+            {
+                "id": "alphasights_is_reference",
+                "when": {"subject_contains": ["AlphaSights"]},
+                "recommend": "gmail.move",
+                "move_to": "Later",
+                "confidence": 0.9,
+                "rationale": "Worth keeping, not worth the inbox.",
+            }
+        ],
+    },
+    allowed_actions=["gmail.label", "gmail.move", "monday.create_task"],
+    execution={"permitted_actions": ["gmail.label", "gmail.move"]},
+)
 
 
 def load(*capabilities: CapabilityConfig) -> LoadedCapabilities:
@@ -290,6 +310,131 @@ def test_an_override_may_choose_a_different_permitted_action(session: Session) -
 
     assert decided.approved_action == ActionKind.GMAIL_ARCHIVE
     assert session.query(ReviewDecision).one().followed_recommendation is False
+
+
+def test_a_move_recommendation_names_the_folder_it_would_use(session: Session) -> None:
+    add_evidence(session, "t1", "AlphaSights expertise request")
+
+    item = start(session, FILES).groups[0].items[0]
+
+    assert item.recommendation == ActionKind.GMAIL_MOVE
+    assert item.recommendation_params == {"label": "Later"}
+
+
+def test_approving_a_move_files_it_where_the_recommendation_said(session: Session) -> None:
+    """Agreeing is agreeing with the folder too, not just with the verb."""
+    add_evidence(session, "t1", "AlphaSights expertise request")
+    view = start(session, FILES)
+
+    decided = record_decision(
+        session, FILES, view.run, view.groups[0].items[0], DecisionKind.APPROVE
+    )
+
+    assert decided.approved_action == ActionKind.GMAIL_MOVE
+    assert decided.approved_params == {"label": "Later"}
+    assert session.query(ReviewDecision).one().action_params == {"label": "Later"}
+
+
+def test_an_override_may_name_a_different_folder(session: Session) -> None:
+    add_evidence(session, "t1", "AlphaSights expertise request")
+    view = start(session, FILES)
+
+    decided = record_decision(
+        session,
+        FILES,
+        view.run,
+        view.groups[0].items[0],
+        DecisionKind.OVERRIDE,
+        action=ActionKind.GMAIL_MOVE,
+        action_params={"label": "Notes"},
+    )
+
+    assert decided.approved_params == {"label": "Notes"}
+
+
+def test_a_move_without_a_folder_is_refused(session: Session) -> None:
+    add_evidence(session, "t1", "Lunch on Thursday?")
+    view = start(session, FILES)
+
+    with pytest.raises(DecisionRefused, match="must name the folder"):
+        record_decision(
+            session,
+            FILES,
+            view.run,
+            view.groups[0].items[0],
+            DecisionKind.OVERRIDE,
+            action=ActionKind.GMAIL_MOVE,
+            action_params={},
+        )
+
+
+def test_a_folder_the_capability_does_not_use_is_refused(session: Session) -> None:
+    """The destination set is closed: no folder is invented at the boundary."""
+    add_evidence(session, "t1", "Lunch on Thursday?")
+    view = start(session, FILES)
+
+    with pytest.raises(DecisionRefused, match="does not file mail in 'Career/Citi'"):
+        record_decision(
+            session,
+            FILES,
+            view.run,
+            view.groups[0].items[0],
+            DecisionKind.OVERRIDE,
+            action=ActionKind.GMAIL_MOVE,
+            action_params={"label": "Career/Citi"},
+        )
+
+
+def test_a_bulk_move_files_every_row_in_the_named_folder(session: Session) -> None:
+    add_evidence(session, "t1", "Lunch on Thursday?")
+    add_evidence(session, "t2", "Another one")
+    view = start(session, FILES)
+
+    decided = decide_group(
+        session,
+        FILES,
+        view.run,
+        view.groups[0].group,
+        DecisionKind.OVERRIDE,
+        action=ActionKind.GMAIL_MOVE,
+        action_params={"label": "Notes"},
+    )
+
+    assert [item.approved_params for item in decided] == [{"label": "Notes"}] * 2
+
+
+def test_a_bulk_move_with_no_folder_records_nothing(session: Session) -> None:
+    add_evidence(session, "t1", "Lunch on Thursday?")
+    add_evidence(session, "t2", "Another one")
+    view = start(session, FILES)
+
+    with pytest.raises(BulkDecisionRefused) as refusal:
+        decide_group(
+            session,
+            FILES,
+            view.run,
+            view.groups[0].group,
+            DecisionKind.OVERRIDE,
+            action=ActionKind.GMAIL_MOVE,
+        )
+
+    assert len(refusal.value.ineligible) == 2
+    assert session.query(ReviewDecision).count() == 0
+
+
+def test_approving_a_group_of_moves_keeps_each_row_its_own_folder(session: Session) -> None:
+    """A bulk "yes" is many agreements, and each was to a folder of its own."""
+    add_evidence(session, "t1", "AlphaSights expertise request")
+    view = start(session, FILES)
+    item = view.groups[0].items[0]
+    item.recommendation_params = {"label": "Notes"}
+    session.flush()
+
+    decided = decide_group(
+        session, FILES, view.run, view.groups[0].group, DecisionKind.APPROVE
+    )
+
+    assert [row.approved_params for row in decided] == [{"label": "Notes"}]
 
 
 def test_an_override_to_a_forbidden_action_is_refused(session: Session) -> None:

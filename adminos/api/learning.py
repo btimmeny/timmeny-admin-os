@@ -45,6 +45,14 @@ class ProposeRuleRequest(BaseModel):
     capability_key: str
     match: MatchRule
     action: ActionKind
+    action_params: JsonObject | None = Field(
+        default=None,
+        description=(
+            "What the action needs: a move names its folder here as "
+            '{"label": "Later"}, and the folder must be one the capability '
+            "files mail in."
+        ),
+    )
     rationale: str
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
@@ -60,6 +68,7 @@ class RuleResponse(BaseModel):
     state: str
     match: JsonObject
     action: str
+    action_params: JsonObject | None
     rationale: str
     confidence: float
     observed_count: int
@@ -163,6 +172,7 @@ def propose_rule(
                 rationale=request.rationale,
                 state=RuleState.PROPOSED,
                 source=HUMAN_SOURCE,
+                params=request.action_params,
                 confidence=request.confidence,
                 actor=HUMAN_ACTOR,
             )
@@ -270,6 +280,7 @@ def build_rule_response(rule: CandidateRule) -> RuleResponse:
         state=state.value,
         match=dump_match(MatchRule.model_validate(rule.match_conditions)),
         action=rule.action,
+        action_params=rule.action_params,
         rationale=rule.rationale,
         confidence=rule.confidence,
         observed_count=rule.observed_count,

@@ -44,6 +44,14 @@ capabilities:
 """
 
 
+FILING = MINIMAL.replace(
+    "      labels: [financial/taxes]",
+    "      labels: [financial/taxes]\n      destinations: [Later]",
+) + """    allowed_actions: [gmail.move]
+"""
+"""The same capability, allowed to file mail in one folder."""
+
+
 def parse(document: str) -> LoadedCapabilities:
     return parse_capabilities(document.encode())
 
@@ -90,6 +98,92 @@ def test_no_shipped_capability_disposes_of_mail_unattended() -> None:
     for capability in load_capabilities(SHIPPED_CONFIG).enabled():
         assert ActionKind.GMAIL_ARCHIVE not in capability.approval.auto_approve
         assert ActionKind.GMAIL_TRASH not in capability.approval.auto_approve
+
+
+def test_every_shipped_capability_can_file_mail_somewhere_named() -> None:
+    """Filing is the disposition that keeps mail, so all three have folders."""
+    for capability in load_capabilities(SHIPPED_CONFIG).enabled():
+        assert capability.permits(ActionKind.GMAIL_MOVE)
+        assert capability.execution.permits(ActionKind.GMAIL_MOVE)
+        assert capability.gmail.destinations
+
+
+def test_no_shipped_destination_is_a_system_label() -> None:
+    """A folder is somewhere to keep mail, not the inbox, Trash, or spam."""
+    reserved = {"INBOX", "TRASH", "SPAM", "SENT", "DRAFT", "STARRED", "UNREAD", "IMPORTANT"}
+
+    for capability in load_capabilities(SHIPPED_CONFIG).enabled():
+        assert not reserved & {name.upper() for name in capability.gmail.destinations}
+
+
+def test_a_gmail_system_label_cannot_be_a_folder() -> None:
+    """The inbox is what a move leaves; it is not somewhere to move mail to."""
+    document = MINIMAL.replace(
+        "      labels: [financial/taxes]",
+        "      labels: [financial/taxes]\n      destinations: [INBOX]",
+    )
+
+    with pytest.raises(CapabilityConfigError, match="is a Gmail system label"):
+        parse(document)
+
+
+def test_filing_without_anywhere_to_file_is_refused() -> None:
+    document = MINIMAL + """    allowed_actions: [gmail.move]
+"""
+
+    with pytest.raises(CapabilityConfigError, match="without any destination"):
+        parse(document)
+
+
+def test_a_rule_that_files_must_say_where() -> None:
+    """A recommendation to move is not a recommendation until it names a folder."""
+    document = FILING.replace(
+        "      categories: [obligation]",
+        """      categories: [obligation]
+      rules:
+        - id: file_it
+          when: {subject_contains: [Statement]}
+          recommend: gmail.move
+          rationale: Worth keeping.
+""",
+    )
+
+    with pytest.raises(CapabilityConfigError, match="without saying where to"):
+        parse(document)
+
+
+def test_a_rule_may_not_file_mail_outside_the_capabilitys_folders() -> None:
+    document = FILING.replace(
+        "      categories: [obligation]",
+        """      categories: [obligation]
+      rules:
+        - id: file_it
+          when: {subject_contains: [Statement]}
+          recommend: gmail.move
+          move_to: Career/Citi
+          rationale: Worth keeping.
+""",
+    )
+
+    with pytest.raises(CapabilityConfigError, match="which is not one of"):
+        parse(document)
+
+
+def test_a_destination_on_an_action_that_moves_nothing_is_refused() -> None:
+    document = MINIMAL.replace(
+        "      categories: [obligation]",
+        """      categories: [obligation]
+      rules:
+        - id: archive_it
+          when: {subject_contains: [Statement]}
+          recommend: gmail.archive
+          move_to: Later
+          rationale: Nothing to act on.
+""",
+    )
+
+    with pytest.raises(CapabilityConfigError, match="does not move anything"):
+        parse(document)
 
 
 def test_being_allowed_to_approve_an_action_is_not_permission_to_run_it() -> None:

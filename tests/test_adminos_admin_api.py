@@ -11,7 +11,7 @@ from adminos.db import engine as engine_module
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 API_KEY = "test-api-key"
-HEAD_REVISION = "0004_action_lifecycle"
+HEAD_REVISION = "0005_move_destinations"
 
 
 @pytest.fixture

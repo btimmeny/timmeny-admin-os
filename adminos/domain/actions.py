@@ -16,6 +16,7 @@ from adminos.adapters.gmail import (
     GmailError,
 )
 from adminos.capabilities.config import (
+    DESTINATION_PARAM,
     GMAIL_ACTIONS,
     ActionKind,
     CapabilityConfig,
@@ -270,7 +271,25 @@ def check_executable(capability: CapabilityConfig, action: ReviewAction) -> Acti
         )
     if kind not in EXECUTORS:
         raise ActionRefused(f"There is no executor for {kind.value!r}.")
+    if kind is ActionKind.GMAIL_MOVE:
+        check_move_destination(capability, action)
     return kind
+
+
+def check_move_destination(capability: CapabilityConfig, action: ReviewAction) -> None:
+    """Re-check the folder, for the same reason permission is re-checked.
+
+    A destination withdrawn from the capability since the approval must stop
+    the action rather than file mail somewhere no longer sanctioned.
+    """
+    destination = read_text(action.params or {}, DESTINATION_PARAM)
+    if destination is None:
+        raise ActionRefused("A move must name the folder to file the thread in.")
+    if destination not in capability.gmail.destinations:
+        raise ActionRefused(
+            f"{capability.key!r} does not file mail in {destination!r}. Its folders "
+            f"are: {', '.join(capability.gmail.destinations) or 'none'}."
+        )
 
 
 def prepare_action(
@@ -668,6 +687,79 @@ async def verify_archive(
     )
 
 
+def prepare_move(item: ReviewItem, params: JsonObject) -> JsonObject:
+    """Plan filing a thread in a folder, which is where it leaves the inbox.
+
+    One action rather than a label followed by an archive: the two together
+    are what "move it" means, and doing them as one keeps a thread from
+    resting labelled-but-still-in-the-inbox if the second half fails.
+    """
+    destination = read_text(params, DESTINATION_PARAM)
+    if destination is None:
+        raise ActionRefused("A move must name the folder to file the thread in.")
+    return {
+        "thread_id": item.source_thread_id,
+        DESTINATION_PARAM: destination,
+        "add_labels": [destination],
+        "remove_labels": [INBOX_LABEL_ID],
+    }
+
+
+async def execute_move(
+    client: GmailClient,
+    action: ReviewAction,
+    item: ReviewItem,
+) -> ExecutionOutcome:
+    destination = await resolve_destination(client, action)
+    thread = await client.fetch_thread(item.source_thread_id)
+    if destination in thread.label_ids and INBOX_LABEL_ID not in thread.label_ids:
+        return ExecutionOutcome(
+            external_kind=GMAIL_THREAD,
+            external_ref=item.source_thread_id,
+            detail={"labels": thread.label_ids, "already": "filed there"},
+            already_applied=True,
+        )
+
+    await client.modify_thread(
+        item.source_thread_id,
+        add_label_ids=[destination],
+        remove_label_ids=[INBOX_LABEL_ID],
+    )
+    return ExecutionOutcome(
+        external_kind=GMAIL_THREAD,
+        external_ref=item.source_thread_id,
+        detail={"added": [destination], "removed": [INBOX_LABEL_ID]},
+    )
+
+
+async def verify_move(
+    client: GmailClient,
+    action: ReviewAction,
+    item: ReviewItem,
+) -> VerificationOutcome:
+    """Both halves, read back: the folder is on, and the inbox is off."""
+    destination = await resolve_destination(client, action)
+    thread = await client.fetch_thread(item.source_thread_id)
+    filed = destination in thread.label_ids
+    left_inbox = INBOX_LABEL_ID not in thread.label_ids
+    return VerificationOutcome(
+        verified=filed and left_inbox,
+        detail={"filed": filed, "left_inbox": left_inbox, "labels": thread.label_ids},
+    )
+
+
+async def resolve_destination(client: GmailClient, action: ReviewAction) -> str:
+    """The label id of the folder, refusing to file mail in one Gmail lacks."""
+    prepared = action.prepared_params or {}
+    name = read_text(prepared, DESTINATION_PARAM)
+    if name is None:
+        raise ActionRefused("This move has no folder to file the thread in.")
+    label_id = await client.resolve_label_id(name)
+    if label_id is None:
+        raise ActionRefused(f"The mailbox has no label named {name!r}.")
+    return label_id
+
+
 def prepare_trash(item: ReviewItem, params: JsonObject) -> JsonObject:
     """Plan a move to Trash, which is where a deleted thread goes.
 
@@ -843,6 +935,7 @@ async def verify_send(
 EXECUTORS: dict[ActionKind, Executor] = {
     ActionKind.GMAIL_LABEL: Executor(prepare_label, execute_label, verify_label),
     ActionKind.GMAIL_ARCHIVE: Executor(prepare_archive, execute_archive, verify_archive),
+    ActionKind.GMAIL_MOVE: Executor(prepare_move, execute_move, verify_move),
     ActionKind.GMAIL_TRASH: Executor(prepare_trash, execute_trash, verify_trash),
     ActionKind.GMAIL_DRAFT_REPLY: Executor(prepare_draft, execute_draft, verify_draft),
     ActionKind.GMAIL_SEND_DRAFT: Executor(prepare_send, execute_send, verify_send),

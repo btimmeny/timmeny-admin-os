@@ -44,6 +44,14 @@ DISPOSES = build_capability(
     allowed_actions=["gmail.label", "gmail.archive", "gmail.trash"],
     execution={"permitted_actions": ["gmail.label", "gmail.archive", "gmail.trash"]},
 )
+FILES = build_capability(
+    key="admin",
+    labels=["Admin"],
+    position=10,
+    gmail={"labels": ["Admin"], "destinations": ["Later", "Notes"]},
+    allowed_actions=["gmail.label", "gmail.archive", "gmail.move"],
+    execution={"permitted_actions": ["gmail.label", "gmail.archive", "gmail.move"]},
+)
 NO_EXECUTION = build_capability(
     key="admin",
     labels=["Admin"],
@@ -59,7 +67,11 @@ class FakeGmail:
         labels: dict[str, str] | None = None,
         thread_labels: Sequence[str] = ("INBOX", "Label_admin"),
     ) -> None:
-        self.labels = labels or {"Admin": "Label_admin", "Reviewed": "Label_reviewed"}
+        self.labels = labels or {
+            "Admin": "Label_admin",
+            "Reviewed": "Label_reviewed",
+            "Later": "Label_later",
+        }
         self.thread_labels = list(thread_labels)
         self.drafts: dict[str, GmailDraft] = {}
         self.sent: list[str] = []
@@ -432,6 +444,162 @@ def test_trashing_needs_the_capability_to_permit_it(session: Session) -> None:
     assert "is not allowed to 'gmail.trash'" in str(error.value)
 
 
+def test_filing_adds_the_folder_and_removes_the_inbox_in_one_write(session: Session) -> None:
+    """"Keep it, but not here": the two halves of a move happen together."""
+    action, item, _ = approve(
+        session,
+        capability=FILES,
+        action=ActionKind.GMAIL_MOVE,
+        params={"label": "Later"},
+    )
+    client = FakeGmail()
+
+    executed = run_execute(session, client, action, capability=FILES)
+
+    assert client.writes == [("modify", (THREAD, ["Label_later"], ["INBOX"]))]
+    assert executed.prepared_params == {
+        "thread_id": THREAD,
+        "label": "Later",
+        "add_labels": ["Later"],
+        "remove_labels": ["INBOX"],
+    }
+    assert executed.state == ActionState.COMPLETED
+    assert executed.verification == {
+        "filed": True,
+        "left_inbox": True,
+        "labels": ["Label_admin", "Label_later"],
+    }
+    assert item.state == ItemState.EXECUTED
+
+
+def test_filing_keeps_the_thread_and_its_other_labels(session: Session) -> None:
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+    client = FakeGmail(thread_labels=("INBOX", "Label_admin", "STARRED"))
+
+    run_execute(session, client, action, capability=FILES)
+
+    assert client.thread_labels == ["Label_admin", "STARRED", "Label_later"]
+    assert "TRASH" not in client.thread_labels
+
+
+def test_filing_a_thread_already_filed_writes_nothing(session: Session) -> None:
+    """Both halves already hold, so the move is complete without a write."""
+    action, item, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+    client = FakeGmail(thread_labels=("Label_admin", "Label_later"))
+
+    executed = run_execute(session, client, action, capability=FILES)
+
+    assert client.writes == []
+    assert executed.state == ActionState.COMPLETED
+    assert item.state == ItemState.EXECUTED
+    assert ActionEventKind.ALREADY_APPLIED in {
+        event.event for event in read_action_events(session, action)
+    }
+
+
+def test_a_filed_thread_still_in_the_inbox_is_not_complete(session: Session) -> None:
+    """Half a move is not a move: the folder without the archive fails."""
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+    client = FakeGmail(thread_labels=("INBOX", "Label_admin", "Label_later"))
+    client.silently_ignore_writes = True
+
+    executed = run_execute(session, client, action, capability=FILES)
+
+    assert client.writes == [("modify", (THREAD, ["Label_later"], ["INBOX"]))]
+    assert executed.state == ActionState.FAILED
+    assert executed.verification == {
+        "filed": True,
+        "left_inbox": False,
+        "labels": ["INBOX", "Label_admin", "Label_later"],
+    }
+
+
+def test_running_a_move_twice_writes_once(session: Session) -> None:
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+    client = FakeGmail()
+    run_execute(session, client, action, capability=FILES)
+
+    asyncio.run(execute_action(session, client, FILES, action, now=NOW))
+
+    assert client.writes == [("modify", (THREAD, ["Label_later"], ["INBOX"]))]
+
+
+def test_a_move_prepares_without_touching_gmail(session: Session) -> None:
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+    client = FakeGmail()
+
+    prepare_action(session, FILES, action, now=NOW)
+
+    assert client.writes == []
+    assert action.state == ActionState.PREPARED
+
+
+def test_a_move_with_no_folder_is_refused_before_it_runs(session: Session) -> None:
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+    action.params = {}
+
+    with pytest.raises(ActionRefused) as error:
+        prepare_action(session, FILES, action, now=NOW)
+
+    assert "must name the folder" in str(error.value)
+
+
+def test_a_folder_the_mailbox_does_not_have_is_not_created(session: Session) -> None:
+    """A destination Gmail lacks fails the action rather than inventing a label."""
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Notes"}
+    )
+    client = FakeGmail()
+
+    executed = run_execute(session, client, action, capability=FILES)
+
+    assert client.writes == []
+    assert executed.state == ActionState.FAILED
+    assert "no label named 'Notes'" in (executed.last_error or "")
+
+
+def test_a_folder_withdrawn_since_the_approval_stops_the_move(session: Session) -> None:
+    """Permission is re-read at every step, and so is where mail may go."""
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+    narrowed = build_capability(
+        key="admin",
+        labels=["Admin"],
+        gmail={"labels": ["Admin"], "destinations": ["Notes"]},
+        allowed_actions=["gmail.move"],
+        execution={"permitted_actions": ["gmail.move"]},
+    )
+
+    with pytest.raises(ActionRefused) as error:
+        prepare_action(session, narrowed, action, now=NOW)
+
+    assert "does not file mail in 'Later'" in str(error.value)
+
+
+def test_filing_needs_the_capability_to_permit_it(session: Session) -> None:
+    action, _, _ = approve(
+        session, capability=FILES, action=ActionKind.GMAIL_MOVE, params={"label": "Later"}
+    )
+
+    with pytest.raises(ActionRefused) as error:
+        prepare_action(session, ADMIN, action, now=NOW)
+
+    assert "is not allowed to 'gmail.move'" in str(error.value)
+
+
 def test_labelling_adds_and_removes_by_resolved_id(session: Session) -> None:
     action, _, _ = approve(
         session,
@@ -594,6 +762,7 @@ def test_there_is_no_executor_for_permanent_deletion() -> None:
     assert set(EXECUTORS) == {
         ActionKind.GMAIL_LABEL,
         ActionKind.GMAIL_ARCHIVE,
+        ActionKind.GMAIL_MOVE,
         ActionKind.GMAIL_TRASH,
         ActionKind.GMAIL_DRAFT_REPLY,
         ActionKind.GMAIL_SEND_DRAFT,

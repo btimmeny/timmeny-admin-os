@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from adminos.capabilities.config import (
     ACTION_VALUES,
+    DESTINATION_PARAM,
     ActionKind,
     CapabilityConfig,
     LoadedCapabilities,
@@ -116,6 +117,10 @@ class PolicyOutcome:
     rule_id: str | None
     objective_keys: list[str]
     automatable: bool = False
+    params: JsonObject = field(default_factory=dict)
+    """What the recommendation needs to be actionable, such as the folder to
+    file the thread in. Carried through approval so that agreeing with a
+    recommendation takes exactly the action that was shown."""
 
 
 @dataclass(frozen=True)
@@ -279,6 +284,7 @@ def populate_group(
             recommendation_source=outcome.source,
             recommendation_confidence=outcome.confidence,
             recommendation_rationale=outcome.rationale,
+            recommendation_params=outcome.params or None,
             policy_version=capability.recommendation_policy.version,
             rule_id=outcome.rule_id,
             objective_keys=outcome.objective_keys,
@@ -355,7 +361,7 @@ def authorise_by_rule(
     action = ActionKind(outcome.recommendation)
     item.state = ItemState.APPROVED
     item.approved_action = action.value
-    item.approved_params = {}
+    item.approved_params = dict(outcome.params)
     item.decided_at = now
 
     session.add(
@@ -365,7 +371,7 @@ def authorise_by_rule(
             capability_key=capability.key,
             decision=DecisionKind.APPROVE.value,
             action=action.value,
-            action_params=None,
+            action_params=dict(outcome.params) or None,
             followed_recommendation=True,
             recommendation=item.recommendation,
             actor=f"{RULE_ACTOR_PREFIX}{outcome.rule_id}",
@@ -402,6 +408,7 @@ def evaluate_policy(
                 rule_id=learned.id,
                 objective_keys=list(capability.objectives.default_keys),
                 automatable=learned.automatable,
+                params=dict(learned.params),
             )
         for rule in policy.rules:
             if not matches(rule.when, evidence, now):
@@ -413,6 +420,7 @@ def evaluate_policy(
                 source=POLICY_SOURCE,
                 rule_id=rule.id,
                 objective_keys=rule.aligns_with or list(capability.objectives.default_keys),
+                params=rule.params(),
             )
 
     return PolicyOutcome(
@@ -551,12 +559,13 @@ def record_decision(
     """
     moment = now or datetime.now(UTC)
 
-    chosen = check_decision(capability, item, decision, action)
+    params = action_params if action_params is not None else recommended_params(item, decision)
+    chosen = check_decision(capability, item, decision, action, params)
 
     if chosen is not None:
         item.state = ItemState.APPROVED
         item.approved_action = chosen.value
-        item.approved_params = action_params or {}
+        item.approved_params = params or {}
     elif decision is DecisionKind.DEFER:
         item.state = ItemState.DEFERRED
         item.approved_action = None
@@ -574,7 +583,7 @@ def record_decision(
         capability_key=capability.key,
         decision=decision.value,
         action=chosen.value if chosen else None,
-        action_params=action_params if capability.learning.record_decisions else None,
+        action_params=params if capability.learning.record_decisions else None,
         followed_recommendation=followed_recommendation(item, decision, chosen),
         recommendation=item.recommendation,
         actor=actor,
@@ -588,16 +597,30 @@ def record_decision(
     return item
 
 
+def recommended_params(item: ReviewItem, decision: DecisionKind) -> JsonObject:
+    """The parameters an approval inherits when the caller names none.
+
+    Approving is agreeing with what was shown, and what was shown named a
+    folder: "yes" must file the thread there rather than ask again.
+    """
+    if decision is not DecisionKind.APPROVE:
+        return {}
+    return dict(item.recommendation_params or {})
+
+
 def check_decision(
     capability: CapabilityConfig,
     item: ReviewItem,
     decision: DecisionKind,
     action: ActionKind | None,
+    action_params: JsonObject | None,
 ) -> ActionKind | None:
     """Refuse a decision configuration does not permit, and name the action it authorises.
 
     Separated from applying it so a bulk decision can be checked across every
-    item before any of them changes.
+    item before any of them changes. ``action_params`` is what the caller is
+    actually asking for; ``None`` means the caller is only asking whether the
+    decision is available at all, and has not chosen a folder yet.
     """
     if not capability.playbook.allows(PlaybookStep.AWAIT_DECISION):
         raise DecisionRefused(f"{capability.key!r} does not take decisions in its playbook.")
@@ -617,7 +640,36 @@ def check_decision(
         raise DecisionRefused(
             f"{capability.key!r} requires an objective for every action, and this item has none."
         )
+    if chosen is ActionKind.GMAIL_MOVE:
+        if action_params is None:
+            if not capability.gmail.destinations:
+                raise DecisionRefused(f"{capability.key!r} has nowhere to file mail.")
+        else:
+            check_destination(capability, action_params)
     return chosen
+
+
+def check_destination(capability: CapabilityConfig, params: JsonObject) -> str:
+    """The folder a move files the thread in, or a refusal naming the choices.
+
+    A destination outside the capability's list is refused here rather than at
+    execution, so "file it under Career/Citi" fails while it is still a
+    sentence and not yet a mailbox change.
+    """
+    destination = params.get(DESTINATION_PARAM)
+    allowed = capability.gmail.destinations
+    if not isinstance(destination, str) or not destination.strip():
+        raise DecisionRefused(
+            "A move must name the folder to file the thread in: "
+            f"{', '.join(allowed) or 'no folder is configured'}."
+        )
+    destination = destination.strip()
+    if destination not in allowed:
+        raise DecisionRefused(
+            f"{capability.key!r} does not file mail in {destination!r}. Its folders "
+            f"are: {', '.join(allowed) or 'none'}."
+        )
+    return destination
 
 
 def followed_recommendation(
@@ -669,6 +721,7 @@ def decide_group(
     decision: DecisionKind,
     item_ids: Sequence[str] | None = None,
     action: ActionKind | None = None,
+    action_params: JsonObject | None = None,
     note: str | None = None,
     batch_id: str | None = None,
     now: datetime | None = None,
@@ -695,7 +748,15 @@ def decide_group(
     ineligible: list[IneligibleItem] = []
     for item in selected:
         try:
-            check_decision(capability, item, decision, action)
+            check_decision(
+                capability,
+                item,
+                decision,
+                action,
+                action_params
+                if action_params is not None
+                else recommended_params(item, decision),
+            )
         except DecisionRefused as refusal:
             ineligible.append(
                 IneligibleItem(
@@ -716,6 +777,7 @@ def decide_group(
             item,
             decision,
             action=action,
+            action_params=action_params,
             note=note,
             batch_id=batch_id,
             now=now,

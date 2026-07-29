@@ -278,6 +278,45 @@ def test_retiring_a_rule_stops_it_recommending(
     assert item["recommendation_source"] != "learned_rule"
 
 
+def test_a_rule_that_files_mail_names_the_folder_it_files_into(
+    client: TestClient, mailbox: FakeGmail
+) -> None:
+    """A learned move is only reviewable if the reader can see where it files."""
+    rule_id = propose(
+        client,
+        action="gmail.move",
+        action_params={"label": "Later"},
+        rationale="Utility receipts are kept, out of the inbox.",
+    )["rule_id"]
+    client.post(f"/learning/rules/{rule_id}/confirm", headers=AUTH, json={})
+
+    rule = client.get(f"/learning/rules/{rule_id}", headers=AUTH).json()
+    item = client.post("/review/start", headers=AUTH, json={}).json()["current_group"]["items"][0]
+
+    assert rule["action_params"] == {"label": "Later"}
+    assert item["recommendation"] == "gmail.move"
+    assert item["recommendation_params"] == {"label": "Later"}
+
+
+def test_a_rule_may_not_file_mail_in_a_folder_the_capability_lacks(client: TestClient) -> None:
+    response = client.post(
+        "/learning/rules",
+        headers=AUTH,
+        json={**RULE, "action": "gmail.move", "action_params": {"label": "Career/Citi"}},
+    )
+
+    assert response.status_code == 409
+    assert "not one of" in response.json()["detail"]
+
+
+def test_a_rule_that_files_mail_nowhere_is_refused(client: TestClient) -> None:
+    """A move with no folder is not a rule anyone could confirm."""
+    response = client.post("/learning/rules", headers=AUTH, json={**RULE, "action": "gmail.move"})
+
+    assert response.status_code == 409
+    assert "None" in response.json()["detail"]
+
+
 def test_one_rule_can_be_read_in_full(client: TestClient) -> None:
     rule_id = propose(client)["rule_id"]
 

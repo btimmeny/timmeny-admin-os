@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 from adminos.capabilities.config import (
     ACTION_VALUES,
+    DESTINATION_PARAM,
     ActionKind,
     CapabilityConfig,
     Recommendation,
@@ -24,7 +25,7 @@ from adminos.capabilities.screens import (
     ScreenColumn,
     ScreenConfig,
 )
-from adminos.db.models import ReviewItem, ReviewRun
+from adminos.db.models import JsonObject, ReviewItem, ReviewRun
 from adminos.domain.decisions import ItemState
 from adminos.domain.review import (
     OPEN_ITEM_STATES,
@@ -39,6 +40,7 @@ ELLIPSIS = "…"
 DEFAULT_ACTION_LABELS: dict[str, str] = {
     ActionKind.GMAIL_LABEL: "Re-label it",
     ActionKind.GMAIL_ARCHIVE: "Archive it",
+    ActionKind.GMAIL_MOVE: "File it",
     ActionKind.GMAIL_TRASH: "Move it to Trash",
     ActionKind.GMAIL_DRAFT_REPLY: "Draft a reply",
     ActionKind.GMAIL_SEND_DRAFT: "Send the approved draft",
@@ -70,6 +72,20 @@ class RenderedColumn:
 
 
 @dataclass(frozen=True)
+class RenderedParam:
+    """Something an action needs to be said before it can be taken.
+
+    `choices` is exhaustive where it is given: a move may only name one of
+    this capability's folders, so the reader picks rather than types.
+    """
+
+    name: str
+    label: str
+    required: bool
+    choices: list[str]
+
+
+@dataclass(frozen=True)
 class RenderedAction:
     """One offered decision, and the request that sends it."""
 
@@ -81,6 +97,7 @@ class RenderedAction:
     method: str
     path: str
     body: dict[str, str]
+    params: list[RenderedParam] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -239,7 +256,7 @@ def read_source(
         case ColumnSource.KEY_FACTS:
             return key_facts(item, now)
         case ColumnSource.RECOMMENDED_ACTION:
-            return labels.get(item.recommendation, item.recommendation)
+            return recommended_action(item, labels)
         case ColumnSource.WHY:
             return item.recommendation_rationale
         case ColumnSource.CONFIDENCE:
@@ -280,6 +297,23 @@ def format_value(column: ScreenColumn, value: object, now: datetime) -> str:
             return str(value)
 
 
+def recommended_action(item: ReviewItem, labels: dict[str, str]) -> str:
+    """What is recommended, said with its destination where it has one.
+
+    "File it" is not a recommendation anyone can answer; "File it in
+    Career/Citi" is.
+    """
+    text = labels.get(item.recommendation, item.recommendation)
+    return with_destination(text, item.recommendation, item.recommendation_params)
+
+
+def with_destination(text: str, action: str | None, params: JsonObject | None) -> str:
+    if action != ActionKind.GMAIL_MOVE:
+        return text
+    destination = (params or {}).get(DESTINATION_PARAM)
+    return f"{text} in {destination}" if isinstance(destination, str) else text
+
+
 def what_it_is(item: ReviewItem) -> str:
     """The subject, said as the kind of thing it is when that is known."""
     subject = (item.subject or "").strip()
@@ -310,7 +344,8 @@ def decision_text(item: ReviewItem, labels: dict[str, str]) -> str:
     """What has been decided, if anything."""
     state = STATE_LABELS.get(item.state, item.state)
     if item.approved_action:
-        return f"{state}: {labels.get(item.approved_action, item.approved_action)}"
+        taken = labels.get(item.approved_action, item.approved_action)
+        return f"{state}: {with_destination(taken, item.approved_action, item.approved_params)}"
     return state
 
 
@@ -357,7 +392,7 @@ def available_actions(
             continue
         action = ActionKind(offered.action) if offered.action else None
         try:
-            check_decision(capability, item, offered.decision, action)
+            check_decision(capability, item, offered.decision, action, None)
         except DecisionRefused:
             continue
         allowed.append(offered.id)
@@ -387,7 +422,27 @@ def render_action(
         method="POST",
         path=path,
         body=body,
+        params=action_params(offered, capability),
     )
+
+
+def action_params(offered: ScreenAction, capability: CapabilityConfig) -> list[RenderedParam]:
+    """What the reader must add to the body for this action to be taken.
+
+    Only a move needs anything, and what it needs is a folder from this
+    capability's own list, so the contract carries the list rather than
+    leaving a renderer to guess at folder names.
+    """
+    if offered.action != ActionKind.GMAIL_MOVE:
+        return []
+    return [
+        RenderedParam(
+            name=DESTINATION_PARAM,
+            label="Folder",
+            required=True,
+            choices=list(capability.gmail.destinations),
+        )
+    ]
 
 
 def render_footer(screen: ScreenConfig, view: GroupView, run: ReviewRun) -> str:

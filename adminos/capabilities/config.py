@@ -36,6 +36,7 @@ class ActionKind(StrEnum):
 
     GMAIL_LABEL = "gmail.label"
     GMAIL_ARCHIVE = "gmail.archive"
+    GMAIL_MOVE = "gmail.move"
     GMAIL_TRASH = "gmail.trash"
     GMAIL_DRAFT_REPLY = "gmail.draft_reply"
     GMAIL_SEND_DRAFT = "gmail.send_draft"
@@ -66,22 +67,40 @@ RECOMMENDATION_VALUES = ACTION_VALUES | {outcome.value for outcome in Recommenda
 GMAIL_ACTIONS = {
     ActionKind.GMAIL_LABEL,
     ActionKind.GMAIL_ARCHIVE,
+    ActionKind.GMAIL_MOVE,
     ActionKind.GMAIL_TRASH,
     ActionKind.GMAIL_DRAFT_REPLY,
     ActionKind.GMAIL_SEND_DRAFT,
 }
 """The actions that reach the mailbox, and so pass the Gmail kill switch."""
 
+DESTINATION_PARAM = "label"
+"""The parameter a move names: the folder the thread ends up in."""
+
+RESERVED_LABELS = {
+    "INBOX",
+    "TRASH",
+    "SPAM",
+    "SENT",
+    "DRAFT",
+    "STARRED",
+    "UNREAD",
+    "IMPORTANT",
+    "CHAT",
+}
+"""Gmail's own labels, which are states rather than folders to file mail in."""
+
 ACTION_ALIASES: dict[str, ActionKind] = {
     "archive_gmail_thread": ActionKind.GMAIL_ARCHIVE,
+    "move_gmail_thread_to_label": ActionKind.GMAIL_MOVE,
     "move_gmail_thread_to_trash": ActionKind.GMAIL_TRASH,
 }
-"""Spoken names for the two Gmail dispositions.
+"""Spoken names for the three ways a thread leaves the inbox.
 
-The stored action is `gmail.archive` or `gmail.trash`; these are the names a
-reader sees and may send back. Accepting both means the audit keeps one name
-for a thing while the contract can say it in words — and `delete` never
-reaches an alias at all, because deleting is not what happens.
+The stored action is `gmail.archive`, `gmail.move`, or `gmail.trash`; these
+are the names a reader sees and may send back. Accepting both means the audit
+keeps one name for a thing while the contract can say it in words — and
+`delete` never reaches an alias at all, because deleting is not what happens.
 """
 
 
@@ -100,8 +119,26 @@ class StrictModel(BaseModel):
 
 
 class GmailScope(StrictModel):
+    """Which mail this capability reviews, and where it may file it.
+
+    `destinations` is a closed list on purpose: a move names a folder, and a
+    folder Brian has not sanctioned for this capability is refused rather than
+    created. Gmail would happily invent `Carrer/Citi` from a typo.
+    """
+
     labels: list[str] = Field(min_length=1)
     require_inbox: bool = True
+    destinations: list[str] = []
+
+    @model_validator(mode="after")
+    def check_destinations(self) -> Self:
+        for destination in self.destinations:
+            if destination.upper() in RESERVED_LABELS:
+                raise ValueError(
+                    f"{destination!r} is a Gmail system label, not a folder to keep "
+                    "mail in."
+                )
+        return self
 
 
 class Playbook(StrictModel):
@@ -140,6 +177,7 @@ class RecommendationRule(StrictModel):
     id: str
     when: MatchRule
     recommend: str
+    move_to: str | None = None
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     rationale: str
     aligns_with: list[str] = []
@@ -148,7 +186,21 @@ class RecommendationRule(StrictModel):
     def check_recommendation(self) -> Self:
         if self.recommend not in RECOMMENDATION_VALUES:
             raise ValueError(f"{self.recommend!r} is not a recommendable outcome.")
+        if self.recommend == ActionKind.GMAIL_MOVE and not self.move_to:
+            raise ValueError(
+                f"Rule {self.id!r} recommends a move without saying where to; a move "
+                "is only a recommendation if it names the folder."
+            )
+        if self.move_to and self.recommend != ActionKind.GMAIL_MOVE:
+            raise ValueError(
+                f"Rule {self.id!r} names a destination for {self.recommend!r}, which "
+                "does not move anything."
+            )
         return self
+
+    def params(self) -> dict[str, str]:
+        """The parameters this recommendation carries into a decision."""
+        return {DESTINATION_PARAM: self.move_to} if self.move_to else {}
 
 
 class RecommendationPolicy(StrictModel):
@@ -277,6 +329,17 @@ class CapabilityConfig(StrictModel):
                 raise ValueError(
                     f"{self.key!r} may execute {action.value!r} without being allowed "
                     "to approve it."
+                )
+        if ActionKind.GMAIL_MOVE in self.allowed_actions and not self.gmail.destinations:
+            raise ValueError(
+                f"{self.key!r} may move mail without any destination to move it to; "
+                "list the folders under gmail.destinations."
+            )
+        for rule in self.recommendation_policy.rules:
+            if rule.move_to and rule.move_to not in self.gmail.destinations:
+                raise ValueError(
+                    f"Rule {rule.id!r} files mail in {rule.move_to!r}, which is not "
+                    f"one of {self.key!r}'s destinations."
                 )
         if (
             ActionKind.GMAIL_SEND_DRAFT in self.execution.permitted_actions

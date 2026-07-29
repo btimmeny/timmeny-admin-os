@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from adminos.capabilities.config import (
     ACTION_VALUES,
+    DESTINATION_PARAM,
     ActionKind,
     CapabilityConfig,
     MatchRule,
@@ -132,6 +133,7 @@ def observe_candidate(
     if match is None:
         return None
 
+    params = dict(decision.action_params or {})
     try:
         return record_rule(
             session,
@@ -140,16 +142,25 @@ def observe_candidate(
             ActionKind(decision.action),
             rationale=(
                 f"Observed after {capability.name} mail from these senders was "
-                f"corrected to {decision.action}."
+                f"corrected to {describe(decision.action, params)}."
             ),
             state=RuleState.OBSERVED,
             source=LEARNED_SOURCE,
+            params=params,
             confidence=0.0,
             now=now,
         )
     except RuleRefused as exc:
         logger.info("no candidate rule recorded for item %s: %s", item.id, exc)
         return None
+
+
+def describe(action: str, params: JsonObject) -> str:
+    """An action said with the part of it that varies, for a rule's rationale."""
+    destination = params.get(DESTINATION_PARAM)
+    if action == ActionKind.GMAIL_MOVE and isinstance(destination, str):
+        return f"{action} into {destination}"
+    return action
 
 
 def derive_signals(item: ReviewItem) -> JsonObject:

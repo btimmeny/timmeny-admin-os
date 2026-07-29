@@ -231,12 +231,21 @@ paths:
                   type: string
                   description: >-
                     The action to take, named as the row offers it. Gmail
-                    dispositions are archive_gmail_thread and
+                    dispositions are archive_gmail_thread,
+                    move_gmail_thread_to_label, and
                     move_gmail_thread_to_trash; "delete", "remove", and
                     "trash" all mean move to Trash, which is recoverable.
                 action_params:
                   type: object
+                  description: >-
+                    What the action needs. move_gmail_thread_to_label needs
+                    the folder to file the thread in, as
+                    {"label": "Later"}, chosen from the choices the action
+                    carries on the screen. Approving a recommended move with
+                    no action_params files it in the folder the row showed.
                   properties:
+                    label:
+                      type: string
                     value:
                       type: string
                   additionalProperties: true
@@ -302,6 +311,16 @@ paths:
                     rows offer it. If any selected row does not permit it the
                     whole request is refused with 409 and nothing is recorded;
                     the response names each ineligible item and why.
+                action_params:
+                  type: object
+                  description: >-
+                    What the action needs, applied to every selected row.
+                    Filing several threads at once names one folder for all
+                    of them, as {"label": "Later"}.
+                  properties:
+                    label:
+                      type: string
+                  additionalProperties: true
                 note:
                   type: string
       responses:
@@ -566,6 +585,16 @@ paths:
                   additionalProperties: false
                 action:
                   type: string
+                action_params:
+                  type: object
+                  description: >-
+                    What the action needs. A rule that files mail names its
+                    folder here, as {"label": "Later"}, and the folder must
+                    be one the capability files mail in.
+                  properties:
+                    label:
+                      type: string
+                  additionalProperties: true
                 rationale:
                   type: string
                 confidence:

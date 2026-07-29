@@ -75,3 +75,11 @@ def test_the_contract_never_offers_permanent_deletion() -> None:
     assert "move_gmail_thread_to_trash" in contract
     for phrase in PERMANENT_DELETION:
         assert phrase not in contract
+
+
+def test_the_contract_says_a_move_names_its_folder() -> None:
+    """A GPT reading only this must know a move is refused without a folder."""
+    contract = CONTRACT_PATH.read_text()
+
+    assert "move_gmail_thread_to_label" in contract
+    assert '{"label": "Later"}' in contract

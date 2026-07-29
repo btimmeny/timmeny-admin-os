@@ -36,6 +36,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0018 — A Decision Is Not a Done Thing, and the Review Says So](./ADR-0018-a-decision-is-not-a-done-thing.md)
 - [ADR-0019 — A Review States Its Plan Before It Works](./ADR-0019-a-review-states-its-plan.md)
 - [ADR-0020 — A Session Opens With the Playbook, in Admin OS's Words](./ADR-0020-a-session-opens-with-the-playbook.md)
+- [ADR-0021 — Refreshing the Mail Is a Restart, and Says So in Data](./ADR-0021-refreshing-mail-is-a-restart.md)
 
 ## Candidate Decisions
 

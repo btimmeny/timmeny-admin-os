@@ -424,6 +424,20 @@ class ReviewChoiceResponse(BaseModel):
     body: JsonObject
 
 
+class RestartActionResponse(BaseModel):
+    """The request that opens a fresh review on refreshed mail.
+
+    Returned as data rather than left to be inferred from the prose: "refresh
+    mail" answered by starting again hands back the finished review and calls
+    it a check, which is the one way this can lie about the mailbox.
+    """
+
+    name: str = "restartDailyReview"
+    method: str = "POST"
+    path: str = "/review/restart"
+    body: JsonObject
+
+
 class ReviewPromptResponse(BaseModel):
     """A question for Brian that Admin OS will not answer on his behalf.
 
@@ -468,6 +482,11 @@ class RunResponse(BaseModel):
     """Every group holding decisions the mailbox has not seen. A review with
     anything here is not finished, whatever the table above shows."""
     prompt: ReviewPromptResponse | None = None
+    restart_available: bool = False
+    """Whether a fresh review of this date is the honest way on: true only
+    where the review returned is finished rather than under way."""
+    restart_action: RestartActionResponse | None = None
+    """The exact request that opens that fresh review, where one is offered."""
     warnings: list[str]
 
 
@@ -579,7 +598,7 @@ async def start_review(
             except ReviewClosed as exc:
                 return build_closed_response(session, loaded, exc.run, request, refresh.warnings)
             return build_run_response(
-                view, refresh.warnings, loaded, opening=entry_mode(view.run)
+                view, refresh.warnings, loaded, opening=entry_mode(view)
             )
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -623,7 +642,7 @@ async def continue_daily_review(
                     },
                 ) from exc
             return build_run_response(
-                view, refresh.warnings, loaded, opening=entry_mode(view.run)
+                view, refresh.warnings, loaded, opening=entry_mode(view)
             )
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -661,13 +680,15 @@ async def restart_daily_review(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-def entry_mode(run: ReviewRun) -> OpeningMode:
+def entry_mode(view: RunView) -> OpeningMode:
     """Whether this is a morning being laid out or one being carried on with.
 
-    A review that exists but has settled nothing is still new: what makes a
-    review resumable is work in it, not a row in a table.
+    A review that exists and has been shown nothing is still new: what makes a
+    review resumable is work in it, not a row in a table. Agreeing the plan is
+    work in it — rows have been presented by then — and so is deciding one.
     """
-    if RunState(run.state) is RunState.NOT_STARTED:
+    begun = view.plan is not None and PlanStatus(view.plan.status) is PlanStatus.ACTIVE
+    if RunState(view.run.state) is RunState.NOT_STARTED and not begun:
         return OpeningMode.NEW
     return OpeningMode.RESUMED
 
@@ -1040,6 +1061,7 @@ def build_run_response(
     scope = read_stored_scope(view.run.scope)
     current = view.current_group()
     rendered = build_group_response(current, loaded, view.run) if current else None
+    restart = build_restart(view.run) if restartable(view.run) else None
     return RunResponse(
         review_id=view.run.id,
         run_id=view.run.id,
@@ -1077,8 +1099,30 @@ def build_run_response(
             if outstanding is not None
         ],
         prompt=prompt or plan_prompt(view),
+        restart_available=restart is not None,
+        restart_action=restart,
         warnings=warnings,
     )
+
+
+def restartable(run: ReviewRun) -> bool:
+    """Whether the way on from this review is a fresh one rather than more of it.
+
+    A review under way is continued, not restarted: offering to start over on a
+    morning half worked is offering to throw the morning away. A finished one
+    has no other way to see the mail that has arrived since.
+    """
+    return RunState(run.state) in (RunState.COMPLETED, RunState.ABANDONED)
+
+
+def build_restart(run: ReviewRun) -> RestartActionResponse:
+    """The request that reviews this date again, on mail read afresh.
+
+    Named as data because "refresh my mail" answered by `startDailyReview`
+    returns the finished review unchanged, and a caller with nothing but prose
+    to go on will report that as a check for new mail.
+    """
+    return RestartActionResponse(body={"sync": True, "scope": run.scope_name})
 
 
 def build_plan_response(

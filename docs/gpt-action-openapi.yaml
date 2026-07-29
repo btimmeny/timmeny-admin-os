@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.16.0
+  version: 0.17.0
   description: >-
     API for the Timmeny Admin OS daily review workflow.
 
@@ -27,7 +27,11 @@ paths:
         review's plan and no group: what the morning consists of is stated
         before any of it is presented. Print plan.opening.text first, then
         plan.message and plan.groups, then call beginReviewPlan when Brian says
-        to begin.
+        to begin. It never refreshes a finished review: where today's is
+        complete it returns that review with a prompt, restart_available true
+        and restart_action, and the mailbox has not been read for new mail.
+        "Refresh mail", "check again", "anything new?" are restartDailyReview,
+        not this.
       requestBody:
         required: false
         content:
@@ -108,6 +112,14 @@ paths:
                       fresh is this?" from here, never from the clock.
                   prompt:
                     $ref: "#/components/schemas/ReviewPrompt"
+                  restart_available:
+                    type: boolean
+                    description: >-
+                      True where the review returned is finished and the only
+                      way to see the mail that has arrived since is a fresh
+                      one. False where it is under way: continue that instead.
+                  restart_action:
+                    $ref: "#/components/schemas/RestartAction"
                   plan:
                     $ref: "#/components/schemas/ReviewPlan"
                   summary:
@@ -233,14 +245,22 @@ paths:
   /review/restart:
     post:
       operationId: restartDailyReview
-      summary: Set today's review aside and open a fresh one
+      summary: Review the day again, on mail read afresh
       description: >-
-        Only when Brian has said he wants to review the day again. It abandons
-        the review that exists, refreshes Gmail, and opens the next revision of
-        the same date, with a new review_id. The abandoned review keeps its
-        decisions and its actions; what it loses is any preparation still open
-        in it, which stops being executable at once. Never call this to clear a
-        confusing state, and never call it without being asked.
+        The one operation that checks for new mail once today's review is
+        finished: "refresh mail", "check again", "review again", "rerun
+        today's review", "look for new mail", "anything new?", "start over
+        with refreshed mail". startDailyReview hands back the finished review
+        without reading Gmail at all, so answering those with it reports a
+        check that never happened. This refreshes the mailbox, sets the
+        existing review aside and opens the next revision of the same date
+        with a new review_id; the review replaced keeps its decisions and its
+        actions, and loses any preparation still open in it, which stops being
+        executable at once. Call it where a response carried
+        restart_available true, or where Brian asked for a fresh run in so
+        many words - never to clear a confusing state, and never on a review
+        still under way, which is continueDailyReview. Say the mail was
+        refreshed only if this ran.
       requestBody:
         required: false
         content:
@@ -391,6 +411,14 @@ paths:
                       fresh is this?" from here, never from the clock.
                   prompt:
                     $ref: "#/components/schemas/ReviewPrompt"
+                  restart_available:
+                    type: boolean
+                    description: >-
+                      True where the review returned is finished and the only
+                      way to see the mail that has arrived since is a fresh
+                      one. False where it is under way: continue that instead.
+                  restart_action:
+                    $ref: "#/components/schemas/RestartAction"
                   plan:
                     $ref: "#/components/schemas/ReviewPlan"
                   summary:
@@ -1404,6 +1432,26 @@ components:
         message:
           type: string
           description: The end-of-review summary, safe to show as written.
+    RestartAction:
+      type: object
+      nullable: true
+      description: >-
+        The exact request that reviews this date again on refreshed mail,
+        returned as data so that acting on it takes no interpretation. Present
+        where restart_available is true; call it as given when Brian asks to
+        check again, and not otherwise.
+      properties:
+        name:
+          type: string
+          enum: [restartDailyReview]
+        method:
+          type: string
+        path:
+          type: string
+        body:
+          type: object
+          additionalProperties: true
+      required: [name, method, path, body]
     ReviewPrompt:
       type: object
       description: >-

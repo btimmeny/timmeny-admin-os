@@ -508,7 +508,9 @@ A review is an object rather than a scratchpad: `review_id`, `review_date`, its 
 | --- | --- |
 | `POST /review/start` | Opens today's review, or resumes the one under way. A review already worked through and completed is **not** re-served: the response carries a `prompt` saying so and offering to read it again or start a fresh one. |
 | `POST /review/continue` | Resumes, and only resumes. `404` where there is no review of today, `409` where today's is finished. It never opens one. |
-| `POST /review/restart` | Abandons the review that exists — keeping its decisions, its actions and its audit — refreshes Gmail, and opens the next revision of the same date. |
+| `POST /review/restart` | Abandons the review that exists — keeping its decisions, its actions, its audit and the hour it was completed at — refreshes Gmail, and opens the next revision of the same date. |
+
+A finished review returns `restart_available: true` and a `restart_action`: the exact request that reviews the date again on refreshed mail, `{"sync": true, "scope": "inbox"}` to `POST /review/restart`. See [ADR-0021](docs/adr/ADR-0021-refreshing-mail-is-a-restart.md). It is returned as data because "refresh my mail" answered by `start` hands the finished review back without reading Gmail at all, and a caller with nothing but prose to go on reports that as a check for new mail. A review under way carries neither: the way on from a morning half worked is to continue it, and offering to start over is offering to throw it away.
 
 Abandoning a review supersedes every action scope prepared in it, so a preparation from a review Brian has set aside can never execute, and every mutating route refuses an abandoned review outright. A restart is the only thing that produces revision 2 of a date; the calendar turning over opens revision 1 of the new one.
 
@@ -518,7 +520,7 @@ A review that completed having settled nothing — an empty inbox at eight, mail
 
 Whatever the words that start a morning, they arrive as a start, a continue or a restart, and each of those opens with `plan.opening`: what will be worked through, that it follows the playbook Brian and the agent hold together, and that the playbook evolves by agreement rather than by itself. The text is Admin OS's, in `config/capabilities.yaml` under `opening`, so it is versioned with the workflow it describes and rendered as written rather than composed afresh each morning. See [ADR-0020](docs/adr/ADR-0020-a-session-opens-with-the-playbook.md).
 
-`mode` is `new` where a morning is being laid out and `resumed` where one is being carried on with; a review that exists but has settled nothing is still new, because what makes a review resumable is work in it rather than a row in a table. Only `start`, `continue` and `restart` carry an opening — beginning the plan, deciding a row and reading the review back carry `null` — so it is said once on entering and cannot be repeated between groups. A completed review carries none: its prompt already says the day was worked, and promising to guide him through a review that is not happening would be a lie about the state of the world.
+`mode` is `new` where a morning is being laid out and `resumed` where one is being carried on with; a review that exists and has been shown nothing is still new, because what makes a review resumable is work in it rather than a row in a table — and agreeing the plan is work in it, since rows have been presented by then. Only `start`, `continue` and `restart` carry an opening — beginning the plan, deciding a row and reading the review back carry `null` — so it is said once on entering and cannot be repeated between groups. A completed review carries none: its prompt already says the day was worked, and promising to guide him through a review that is not happening would be a lie about the state of the world.
 
 ### The plan a review states before it works
 

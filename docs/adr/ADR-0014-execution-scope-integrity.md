@@ -64,4 +64,4 @@ Trash is recoverable, so the cost this time was three threads and Brian's confid
 - [ADR-0010](./ADR-0010-action-lifecycle-and-learning.md) — the lifecycle this scopes
 - [ADR-0012](./ADR-0012-gmail-dispositions.md) — the dispositions, and the absence of deletion
 - [81 — Action Execution Runbook](../81-Action-Execution-Runbook.md)
-- [Daily Review GPT instructions](../gpt-instructions/daily-review-gpt-instructions.md)
+- [Daily Review GPT instructions](../gpt-daily-review-instructions.md)

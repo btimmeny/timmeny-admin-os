@@ -58,7 +58,7 @@ That turns a recommendation into something with a variable in it. "Archive it" i
 - [README](../../README.md) — Actions, Presentation, Learning, Capabilities
 - [ADR-0012](./ADR-0012-gmail-dispositions.md) — the dispositions this extends
 - [81 — Action Execution Runbook](../81-Action-Execution-Runbook.md)
-- [82 — Daily Review GPT Instructions](../gpt-instructions/daily-review-gpt-instructions.md)
+- [82 — Daily Review GPT Instructions](../gpt-daily-review-instructions.md)
 - [docs/gpt-action-openapi.yaml](../gpt-action-openapi.yaml)
 
 ## Validation

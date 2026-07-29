@@ -312,3 +312,27 @@ def test_a_restart_of_one_scope_leaves_another_scope_s_review_alone(
 
     assert session.get(ReviewRun, inbox.run.id).state == RunState.ABANDONED
     assert session.get(ReviewRun, archive.run.id).state != RunState.ABANDONED
+
+
+def test_a_review_emptied_by_mail_leaving_the_inbox_is_still_topped_up(
+    session: Session,
+) -> None:
+    """Threads archiving themselves out of a review is not a morning's work.
+
+    Every row was withdrawn by scope rather than decided by Brian, so the
+    review completed without him: mail arriving afterwards belongs in it.
+    """
+    evidence = add_evidence(session, "t1")
+    first = start(session)
+    evidence.label_ids = []
+    session.flush()
+
+    emptied = start(session, now=NOW + timedelta(hours=1))
+    assert emptied.run.state == RunState.COMPLETED
+    assert emptied.groups[0].items[0].state == ItemState.DEFERRED
+
+    add_evidence(session, "t2", "IRS notice")
+    resumed = start(session, now=NOW + timedelta(hours=2))
+
+    assert resumed.run.id == first.run.id
+    assert {item.source_thread_id for item in resumed.groups[0].items} == {"t1", "t2"}

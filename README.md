@@ -514,6 +514,12 @@ Abandoning a review supersedes every action scope prepared in it, so a preparati
 
 A review that completed having settled nothing — an empty inbox at eight, mail at ten — is topped up by `start` rather than fenced off, and so is one whose rows were all withdrawn as their threads left the inbox. Only a completed review carrying a decision Brian made needs a deliberate restart.
 
+### How a session opens
+
+Whatever the words that start a morning, they arrive as a start, a continue or a restart, and each of those opens with `plan.opening`: what will be worked through, that it follows the playbook Brian and the agent hold together, and that the playbook evolves by agreement rather than by itself. The text is Admin OS's, in `config/capabilities.yaml` under `opening`, so it is versioned with the workflow it describes and rendered as written rather than composed afresh each morning. See [ADR-0020](docs/adr/ADR-0020-a-session-opens-with-the-playbook.md).
+
+`mode` is `new` where a morning is being laid out and `resumed` where one is being carried on with; a review that exists but has settled nothing is still new, because what makes a review resumable is work in it rather than a row in a table. Only `start`, `continue` and `restart` carry an opening — beginning the plan, deciding a row and reading the review back carry `null` — so it is said once on entering and cannot be repeated between groups. A completed review carries none: its prompt already says the day was worked, and promising to guide him through a review that is not happening would be a lie about the state of the world.
+
 ### The plan a review states before it works
 
 A review says what it is going to do before it does any of it. `POST /review/start` returns a `plan` and **no** `current_group`: the ordered groups with their item counts, which of them are empty, the mailboxes left out, whether this is a new review or one being resumed, the ten steps working a group consists of, and what the review already owes the mailbox. Nothing is presented and nothing is decided until `POST /review/runs/{run_id}/plan` says to begin. See [ADR-0019](docs/adr/ADR-0019-a-review-states-its-plan.md).

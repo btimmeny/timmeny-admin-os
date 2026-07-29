@@ -12,8 +12,28 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-08-04.1"
+version: "2026-08-08.1"
 channel: email
+
+# What a review says it is, before it shows anything. Every entry into a review
+# opens with one of these: what will be worked through, that it follows a
+# playbook Brian and the agent hold together, and that the playbook changes by
+# agreement rather than by itself. The words live here so that they are
+# versioned with the workflow they describe, rather than composed afresh each
+# morning by whatever is doing the talking.
+opening:
+  new: |-
+    **Here's what we'll work through together.**
+
+    We'll follow our admin playbook to review your administrative items, work through your inbox, review your current priorities and to-dos, handle follow-ups or decisions, and make sure nothing important is being missed.
+
+    I'll guide you through each step. As we learn what works best, we can evolve the playbook together.
+  resumed: |-
+    **Here's what we'll do next.**
+
+    We'll continue from where we left off, work through the remaining admin items, review priorities and follow-ups, and finish the current playbook.
+
+    I'll guide you through each step, and we can continue improving the playbook as we learn.
 
 # Presentation contracts. A screen decides what a review looks like — the
 # columns, their order, the wording, the sort, and the decisions offered — so

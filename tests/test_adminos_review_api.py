@@ -868,3 +868,50 @@ def test_a_review_with_nothing_outstanding_says_nothing(
 
     assert decided["run"]["outstanding_execution"] == []
     assert decided["run"]["state"] == "completed"
+
+def test_a_partly_decided_group_still_reports_what_it_owes_the_mailbox(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three rows decided and a fourth pending is a group owing three writes.
+
+    The group is `in_progress` rather than `awaiting_actions`, and reading the
+    outstanding work off that state left the run saying nothing was owed.
+    """
+    mailbox(
+        monkeypatch,
+        taxes=[
+            thread("t1", "KPMG Activities"),
+            thread("t2", "KPMG follow-up"),
+            thread("t3", "KPMG statement"),
+        ],
+    )
+    body = start(client)
+    run_id = body["run_id"]
+    item_ids = [item["item_id"] for item in body["current_group"]["items"]]
+
+    decided = client.post(
+        f"/review/runs/{run_id}/groups/financial_taxes/decisions",
+        headers=AUTH,
+        json={"decision": "approve", "item_ids": item_ids[:2]},
+    ).json()
+
+    run = decided["run"]
+    assert run["current_group"]["state"] == "in_progress"
+    assert [outstanding["item_ids"] for outstanding in run["outstanding_execution"]] == [
+        item_ids[:2]
+    ]
+
+
+def test_an_undecided_row_says_no_rule_matched_without_naming_a_version(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Why column named `admin.v2`, and it was then sent as a capability key.
+
+    A policy version belongs in `policy_version`, where it is labelled as one.
+    """
+    mailbox(monkeypatch, admin=[thread("t2", "Parking permit renewal")])
+    group = start(client)["current_group"]
+    row = group["items"][0]
+
+    assert row["recommendation_rationale"] == "No Admin rule matched, so it defers to review."
+    assert group["policy_version"] not in row["recommendation_rationale"]

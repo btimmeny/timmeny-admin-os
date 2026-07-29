@@ -130,6 +130,13 @@ review and lets the same thread return tomorrow.
 
 OPEN_ITEM_STATES = {ItemState.PENDING, ItemState.APPROVED, ItemState.FAILED}
 
+UNEXECUTED_DECISION_STATES = {ItemState.APPROVED, ItemState.FAILED}
+"""Rows Brian has decided that Gmail has not been told about.
+
+A failure belongs here with an approval: it was attempted and it did not
+happen, which is the question these rows are gathered to answer.
+"""
+
 
 @dataclass(frozen=True)
 class PolicyOutcome:
@@ -189,9 +196,16 @@ class RunView:
         return None
 
     def awaiting_execution(self) -> list[GroupView]:
-        """Groups holding decisions that have not reached the mailbox."""
+        """Groups holding decisions that have not reached the mailbox.
+
+        Read from the rows rather than from the group's state, because a group
+        with three rows decided and a fourth still pending is `in_progress`
+        and owes the mailbox three writes all the same.
+        """
         return [
-            view for view in self.groups if view.group.state == GroupState.AWAITING_ACTIONS
+            view
+            for view in self.groups
+            if any(item.state in UNEXECUTED_DECISION_STATES for item in view.items)
         ]
 
 
@@ -725,7 +739,7 @@ def evaluate_policy(
     return PolicyOutcome(
         recommendation=policy.default,
         confidence=0.0,
-        rationale=f"No rule in {policy.version} matched, so {capability.name} defers to review.",
+        rationale=f"No {capability.name} rule matched, so it defers to review.",
         source=DEFAULT_SOURCE,
         rule_id=None,
         objective_keys=list(capability.objectives.default_keys),

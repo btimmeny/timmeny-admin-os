@@ -50,6 +50,7 @@ from adminos.domain.review import (
     ReviewNotFound,
     RunState,
     RunView,
+    UNEXECUTED_DECISION_STATES,
     continue_review,
     decide_group,
     read_group,
@@ -919,7 +920,7 @@ def build_outstanding(view: GroupView, run: ReviewRun) -> OutstandingExecutionRe
     field's presence is itself the answer to "has this happened yet?".
     """
     waiting = [
-        item for item in view.items if item.state in {ItemState.APPROVED, ItemState.FAILED}
+        item for item in view.items if item.state in UNEXECUTED_DECISION_STATES
     ]
     if not waiting:
         return None

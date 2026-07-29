@@ -19,6 +19,15 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 INBOX_LABEL_ID = "INBOX"
 TRASH_LABEL_ID = "TRASH"
+SPAM_LABEL_ID = "SPAM"
+SENT_LABEL_ID = "SENT"
+DRAFT_LABEL_ID = "DRAFT"
+"""Gmail's own labels for where a thread lives.
+
+There is deliberately no SNOOZED constant: Gmail's API exposes no such label,
+so being snoozed can only be asked about in a search query. See
+`adminos.domain.mailboxes`.
+"""
 SOURCE_SYSTEM = "gmail"
 REQUEST_TIMEOUT_SECONDS = 20.0
 TOKEN_EXPIRY_MARGIN_SECONDS = 60
@@ -183,11 +192,18 @@ class GmailClient:
                 return label_id
         return None
 
-    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
+    async def list_thread_ids(
+        self,
+        label_ids: Sequence[str],
+        limit: int,
+        query: str | None = None,
+    ) -> list[str]:
         """Return up to `limit` thread ids carrying *every* label, newest first.
 
         Gmail ANDs the ids, so passing INBOX alongside the intake label excludes
-        archived threads that still carry the label.
+        archived threads that still carry the label. `query` narrows further in
+        Gmail's search language, which is the only way to ask about states it
+        has no label for, such as being snoozed.
         """
         thread_ids: list[str] = []
         page_token: str | None = None
@@ -197,6 +213,8 @@ class GmailClient:
                 "labelIds": list(label_ids),
                 "maxResults": min(limit - len(thread_ids), 100),
             }
+            if query:
+                params["q"] = query
             if page_token:
                 params["pageToken"] = page_token
 

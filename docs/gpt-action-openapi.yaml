@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.10.0
+  version: 0.11.0
   description: API for the Timmeny Admin OS daily review workflow.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
@@ -25,6 +25,16 @@ paths:
                 limit:
                   type: integer
                   default: 50
+                scope:
+                  type: string
+                  enum: [inbox, archived, snoozed, everything]
+                  description: >-
+                    Which mail to review. Omit it: the review is of the inbox,
+                    and that is not a preference to confirm. Send one only when
+                    Brian asks for other mail in so many words - "show me my
+                    archive", "review my snoozed mail", "review everything".
+                    Another scope opens its own review of the day rather than
+                    adding to the one already under way.
       responses:
         "200":
           description: Review started or resumed.
@@ -37,6 +47,8 @@ paths:
                     type: string
                   state:
                     type: string
+                  scope:
+                    $ref: "#/components/schemas/ReviewScope"
                   current_group:
                     type: object
                     properties:
@@ -105,6 +117,8 @@ paths:
                     type: string
                   state:
                     type: string
+                  scope:
+                    $ref: "#/components/schemas/ReviewScope"
                   current_group:
                     type: object
                     properties:
@@ -169,6 +183,8 @@ paths:
                     type: string
                   state:
                     type: string
+                  scope:
+                    $ref: "#/components/schemas/ReviewScope"
                   screen:
                     type: object
                     properties:
@@ -825,7 +841,41 @@ paths:
                     type: boolean
                 additionalProperties: true
 components:
-  schemas: {}
+  schemas:
+    ReviewScope:
+      type: object
+      description: >-
+        What the review looked at, stated by Admin OS. Answer questions about
+        what was reviewed from this and nothing else - never infer the scope
+        from which rows came back, and never propose a rule about it.
+      properties:
+        name:
+          type: string
+          enum: [inbox, archived, snoozed, everything]
+        mailbox:
+          type: string
+          enum: [INBOX, ARCHIVE, SNOOZED, ANYWHERE]
+        include_snoozed:
+          type: boolean
+        include_archived:
+          type: boolean
+        include_trash:
+          type: boolean
+        include_spam:
+          type: boolean
+        include_sent:
+          type: boolean
+        include_drafts:
+          type: boolean
+        requested:
+          type: boolean
+          description: True when this review was opened because a scope was asked for.
+        gmail_query:
+          type: string
+          description: The Gmail search the review was built from.
+        description:
+          type: string
+          description: One sentence about what was reviewed, safe to show as written.
   securitySchemes:
     ApiKeyAuth:
       type: http

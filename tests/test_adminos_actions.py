@@ -192,6 +192,7 @@ def approve(
             received_at=NOW,
             content_hash="hash-t1",
             capability_keys=[capability.key],
+            label_ids=["INBOX"],
         )
     )
     session.flush()

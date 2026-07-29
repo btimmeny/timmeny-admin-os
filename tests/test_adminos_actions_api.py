@@ -38,6 +38,7 @@ class FakeGmail:
         self.sent: list[str] = []
         self.writes: list[tuple[str, object]] = []
         self.subjects: dict[str, str] = {}
+        self.queries: list[str | None] = []
 
     def serve(self, thread_id: str, subject: str) -> None:
         self.subjects[thread_id] = subject
@@ -46,10 +47,19 @@ class FakeGmail:
     async def resolve_label_id(self, label_name: str) -> str | None:
         return self.labels.get(label_name)
 
-    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
-        if ADMIN_LABEL_ID not in label_ids:
-            return []
-        return list(self.subjects)[:limit]
+    async def list_thread_ids(
+        self,
+        label_ids: Sequence[str],
+        limit: int,
+        query: str | None = None,
+    ) -> list[str]:
+        self.queries.append(query)
+        wanted = [
+            thread_id
+            for thread_id in self.subjects
+            if set(label_ids) <= set(self.thread_labels[thread_id])
+        ]
+        return wanted[:limit]
 
     async def fetch_thread(self, thread_id: str) -> GmailThread:
         return GmailThread(

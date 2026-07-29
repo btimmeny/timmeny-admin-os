@@ -51,6 +51,16 @@ os -X POST "$ADMIN_OS/review/start" -d '{}'
 
 Returns the run and the first group needing attention, capabilities in configured order — Admin, then Financial/Taxes, then Career. Calling it again the same day resumes; it does not restart.
 
+The response says what it looked at, and it is the inbox unless another scope was named:
+
+```json
+{"scope":{"name":"inbox","mailbox":"INBOX","include_snoozed":false,"include_archived":false,
+          "include_trash":false,"include_spam":false,"include_sent":false,"include_drafts":false,
+          "requested":false,"gmail_query":"-in:snoozed","description":"Mail in the inbox now: …"}}
+```
+
+Reviewing elsewhere is a named scope — `{"scope":"archived"}`, `"snoozed"`, or `"everything"` — and opens a *second* run of the same day rather than widening this one. An unknown name is `422`. A thread that leaves the inbox between two calls comes back `deferred` on the next start, decided by `scope:inbox`; nothing about it was settled, and it returns to the review if it returns to the inbox. See [ADR-0015](./adr/ADR-0015-review-mailbox-scope.md).
+
 ```bash
 export RUN=<run_id>
 

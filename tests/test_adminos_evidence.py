@@ -10,22 +10,30 @@ from alembic.config import Config
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from adminos.adapters.gmail import INBOX_LABEL_ID, GmailThread
-from adminos.capabilities.config import CapabilityConfig
+from adminos.adapters.gmail import INBOX_LABEL_ID, GmailNotFound, GmailThread
+from adminos.capabilities.config import CapabilityConfig, Mailbox
 from adminos.db.models import Classification, Evidence
 from adminos.domain.classification import classify_evidence
 from adminos.domain.evidence import (
     DEFAULT_SYNC_LIMIT,
     EvidenceSyncResult,
     PruneScanTruncated,
+    PruneScopeRefused,
     record_gmail_thread,
     sync_gmail_evidence,
+)
+from adminos.domain.mailboxes import (
+    ARCHIVED_SCOPE,
+    DEFAULT_SCOPE,
+    EVERYTHING_SCOPE,
+    ReviewScope,
 )
 from tests.conftest import build_capability
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 TAXES = build_capability()
+TAXES_LABEL_ID = "Label_9"
 
 
 class FakeGmailClient:
@@ -36,24 +44,43 @@ class FakeGmailClient:
         self.threads = threads
         self.fetched: list[str] = []
         self.requested_labels: list[list[str]] = []
+        self.requested_queries: list[str | None] = []
         self.threads_by_label: dict[str, list[str]] = {}
 
     async def resolve_label_id(self, label_name: str) -> str | None:
         return self.labels.get(label_name)
 
-    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
+    async def list_thread_ids(
+        self,
+        label_ids: Sequence[str],
+        limit: int,
+        query: str | None = None,
+    ) -> list[str]:
         self.requested_labels.append(list(label_ids))
+        self.requested_queries.append(query)
         wanted = self.threads_by_label.get(label_ids[-1])
         if wanted is None:
-            return list(self.threads)[:limit]
+            wanted = [
+                thread_id
+                for thread_id, thread in self.threads.items()
+                if set(label_ids) <= set(thread.label_ids)
+            ]
         return wanted[:limit]
 
     async def fetch_thread(self, thread_id: str) -> GmailThread:
         self.fetched.append(thread_id)
-        return self.threads[thread_id]
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            raise GmailNotFound(f"No thread {thread_id!r}.")
+        return thread
 
 
-def build_thread(thread_id: str, subject: str, message_id: str = "m1") -> GmailThread:
+def build_thread(
+    thread_id: str,
+    subject: str,
+    message_id: str = "m1",
+    label_ids: Sequence[str] = (INBOX_LABEL_ID, TAXES_LABEL_ID),
+) -> GmailThread:
     return GmailThread(
         thread_id=thread_id,
         message_id=message_id,
@@ -61,6 +88,7 @@ def build_thread(thread_id: str, subject: str, message_id: str = "m1") -> GmailT
         participants=["cpa@example.com"],
         received_at=datetime(2026, 3, 1, tzinfo=UTC),
         snippet="Attached is the estimate.",
+        label_ids=list(label_ids),
     )
 
 
@@ -70,9 +98,17 @@ def sync(
     capabilities: Sequence[CapabilityConfig] = (TAXES,),
     limit: int = DEFAULT_SYNC_LIMIT,
     prune: bool = False,
+    scope: ReviewScope = DEFAULT_SCOPE,
 ) -> EvidenceSyncResult:
     return asyncio.run(
-        sync_gmail_evidence(client, session, capabilities, limit=limit, prune=prune)
+        sync_gmail_evidence(
+            client,
+            session,
+            capabilities,
+            scope=scope,
+            limit=limit,
+            prune=prune,
+        )
     )
 
 
@@ -200,16 +236,19 @@ def test_sync_scopes_intake_to_the_inbox(session: Session) -> None:
     assert client.requested_labels == [[INBOX_LABEL_ID, "Label_9"]]
 
 
-def test_a_capability_may_opt_out_of_the_inbox_scope(session: Session) -> None:
-    capability = build_capability(gmail={"labels": ["financial/taxes"], "require_inbox": False})
+def test_a_capability_may_be_configured_to_watch_another_mailbox(session: Session) -> None:
+    capability = build_capability(
+        gmail={"labels": ["financial/taxes"], "mailbox": Mailbox.ARCHIVE}
+    )
     client = FakeGmailClient(
         labels={"financial/taxes": "Label_9"},
-        threads={"t1": build_thread("t1", "Q3 estimate")},
+        threads={"t1": build_thread("t1", "Q3 estimate", label_ids=["Label_9"])},
     )
 
     sync(client, session, [capability])
 
     assert client.requested_labels == [["Label_9"]]
+    assert client.requested_queries == ["-in:inbox -in:snoozed"]
 
 
 def test_sync_is_idempotent(session: Session) -> None:
@@ -378,3 +417,108 @@ def test_sync_stores_no_message_body(session: Session) -> None:
     columns = {column.name for column in Evidence.__table__.columns}
     assert "body" not in columns
     assert session.query(Evidence).one().snippet == "Attached is the estimate."
+
+
+def test_evidence_records_where_the_thread_was(session: Session) -> None:
+    """The labels are kept so scope can be judged later without asking Gmail."""
+    client = FakeGmailClient(
+        labels={"financial/taxes": TAXES_LABEL_ID},
+        threads={"t1": build_thread("t1", "Q3 estimate")},
+    )
+
+    sync(client, session)
+    session.commit()
+
+    assert session.query(Evidence).one().label_ids == [INBOX_LABEL_ID, TAXES_LABEL_ID]
+
+
+def test_a_thread_that_left_the_inbox_is_re_read_rather_than_assumed(
+    session: Session,
+) -> None:
+    """A scan of the inbox cannot report a thread that has left the inbox.
+
+    Without asking after it directly, its evidence would keep the labels it had
+    when it was last seen, and every future review would go on offering to
+    archive mail that is already archived.
+    """
+    client = FakeGmailClient(
+        labels={"financial/taxes": TAXES_LABEL_ID},
+        threads={"t1": build_thread("t1", "Q3 estimate")},
+    )
+    sync(client, session)
+    session.commit()
+
+    client.threads["t1"] = build_thread("t1", "Q3 estimate", label_ids=[TAXES_LABEL_ID])
+    sync(client, session)
+    session.commit()
+
+    assert session.query(Evidence).one().label_ids == [TAXES_LABEL_ID]
+
+
+def test_a_thread_gmail_no_longer_has_is_recorded_as_being_nowhere(
+    session: Session,
+) -> None:
+    client = FakeGmailClient(
+        labels={"financial/taxes": TAXES_LABEL_ID},
+        threads={"t1": build_thread("t1", "Q3 estimate")},
+    )
+    sync(client, session)
+    session.commit()
+
+    del client.threads["t1"]
+    sync(client, session)
+    session.commit()
+
+    assert session.query(Evidence).one().label_ids == []
+
+
+def test_the_default_scan_asks_for_the_inbox_and_excludes_snoozed(
+    session: Session,
+) -> None:
+    client = FakeGmailClient(
+        labels={"financial/taxes": TAXES_LABEL_ID},
+        threads={"t1": build_thread("t1", "Q3 estimate")},
+    )
+
+    sync(client, session)
+
+    assert client.requested_labels == [[INBOX_LABEL_ID, TAXES_LABEL_ID]]
+    assert client.requested_queries == ["-in:snoozed"]
+
+
+def test_a_scan_of_somewhere_else_may_not_prune(session: Session) -> None:
+    """Pruning treats what it did not see as gone, and an archive scan saw no inbox."""
+    client = FakeGmailClient(labels={"financial/taxes": TAXES_LABEL_ID}, threads={})
+
+    with pytest.raises(PruneScopeRefused):
+        sync(client, session, prune=True, scope=ARCHIVED_SCOPE)
+
+
+def test_a_scan_of_everything_reads_trash_and_spam(session: Session) -> None:
+    client = FakeGmailClient(
+        labels={"financial/taxes": TAXES_LABEL_ID},
+        threads={
+            "binned": build_thread("binned", "Old receipt", label_ids=["TRASH", TAXES_LABEL_ID]),
+        },
+    )
+
+    result = sync(client, session, scope=EVERYTHING_SCOPE)
+    session.commit()
+
+    assert result.created == 1
+    assert "in:anywhere" in (client.requested_queries[0] or "")
+
+
+def test_the_default_scan_leaves_trash_alone(session: Session) -> None:
+    client = FakeGmailClient(
+        labels={"financial/taxes": TAXES_LABEL_ID},
+        threads={
+            "binned": build_thread("binned", "Old receipt", label_ids=["TRASH", TAXES_LABEL_ID]),
+        },
+    )
+    client.threads_by_label = {TAXES_LABEL_ID: ["binned"]}
+
+    result = sync(client, session)
+    session.commit()
+
+    assert (result.created, session.query(Evidence).count()) == (0, 0)

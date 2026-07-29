@@ -123,6 +123,8 @@ class GmailStatusResponse(BaseModel):
 
 
 class GmailSyncResponse(BaseModel):
+    scope: str
+    """Where the scan looked, so an empty result can be told from a narrow one."""
     labels: list[str]
     scanned: int
     created: int
@@ -281,6 +283,7 @@ async def sync_gmail(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return GmailSyncResponse(
+        scope=result.scope.name,
         labels=result.labels,
         scanned=result.scanned,
         created=result.created,

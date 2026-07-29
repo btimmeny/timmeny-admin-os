@@ -76,7 +76,7 @@ Records threads that are **in the inbox and carry an enabled capability's label*
 
 Read-only with respect to both Gmail and Monday.com: no labels change, no mail is archived, and no task is created. Classification and task creation are separate steps.
 
-Intake is the intersection of `INBOX` and the label, not the label alone. Archiving a thread is how the mailbox owner says they are finished with it, so archived mail stays out of scope even when it still carries the label.
+Intake is the intersection of `INBOX` and the label, not the label alone, and the search also excludes snoozed mail. Archiving a thread is how the mailbox owner says they are finished with it, so archived mail stays out of scope even when it still carries the label. See [the review scope](#what-a-review-looks-at).
 
 | Query parameter | Default | Effect |
 |---|---|---|
@@ -85,6 +85,7 @@ Intake is the intersection of `INBOX` and the label, not the label alone. Archiv
 
 ```json
 {
+  "scope": "inbox",
   "labels": ["Financial/Taxes", "Admin"],
   "scanned": 12,
   "created": 3,
@@ -456,7 +457,7 @@ run (one per day)
 Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_URL`.
 
 ```json
-{"review_date": null, "sync": true, "limit": 50}
+{"review_date": null, "sync": true, "limit": 50, "scope": null}
 ```
 
 ```json
@@ -467,6 +468,19 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
   "config_version": "2026-07-28.1",
   "config_digest": "…",
   "screen_id": "tax-review-v1",
+  "scope": {
+    "name": "inbox",
+    "mailbox": "INBOX",
+    "include_snoozed": false,
+    "include_archived": false,
+    "include_trash": false,
+    "include_spam": false,
+    "include_sent": false,
+    "include_drafts": false,
+    "requested": false,
+    "gmail_query": "-in:snoozed",
+    "description": "Mail in the inbox now: archived, snoozed, trashed, spam, sent-only and draft-only threads were excluded."
+  },
   "groups": [
     {"capability_key": "financial_taxes", "state": "pending", "counts": {"total": 3, "pending": 3}}
   ],
@@ -475,9 +489,28 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
 }
 ```
 
-Identity is the review date, so calling it twice in a day resumes rather than restarts: decisions already made are kept and only mail that has arrived since is added. Gmail being unreachable is a warning, not a failure — the review still opens over the evidence already recorded.
+Identity is the review date and the scope, so calling it twice in a day resumes rather than restarts: decisions already made are kept and only mail that has arrived since is added. Gmail being unreachable is a warning, not a failure — the review still opens over the evidence already recorded.
 
 A thread settled in an earlier review does not come back, unless its content has changed since. A reply reopens a conversation; sitting in the inbox does not.
+
+### What a review looks at
+
+The default review is the inbox, and that is a property of the query rather than a preference anyone was asked about. Intake asks Gmail for threads carrying `INBOX` *and* the capability's label, with `-in:snoozed`, and every thread is checked again against the labels it actually carries before it enters a review. Nothing archived, snoozed, trashed, spam, sent-only or draft-only reaches the table, and a thread that loses `INBOX` — because it was archived, in the review or in Gmail — is off the table by the next review.
+
+Snoozing is the one state with no label of its own: Gmail's API publishes none, so it can only be asked about in the search language. It is excluded by `-in:snoozed`, which is a query and not a label check. See [ADR-0015](docs/adr/ADR-0015-review-mailbox-scope.md).
+
+Every review response carries the scope it used, on the run and on each group, so "did you look at my archive?" is answered from the response rather than inferred from what came back. A row withdrawn because its thread left the scope is `deferred`, with a decision recorded by `scope:inbox` — nothing was decided about the mail, and if it returns to the inbox it is reviewable again.
+
+Another scope happens only when it is named, and is its own run of the same day rather than an addition to the one already under way:
+
+| `scope` | Mail | Gmail search |
+|---|---|---|
+| omitted or `inbox` | in the inbox now | `-in:snoozed` |
+| `archived` | carries the label, left the inbox | `-in:inbox -in:snoozed` |
+| `snoozed` | held back until the snooze expires | `in:snoozed` |
+| `everything` | all of it, Trash and Spam included | `in:anywhere` |
+
+A scope that does not exist is `422`. `prune` is refused outside the default scope: pruning retires everything the scan did not see, and a scan of the archive has not seen the inbox.
 
 ### `GET /review/runs/{run_id}` and `GET /review/runs/{run_id}/groups/{capability_key}`
 
@@ -753,7 +786,7 @@ Capabilities are data, in `config/capabilities.yaml` — not branches in code. A
   position: 20
   gmail:
     labels: [Financial/Taxes]
-    require_inbox: true
+    mailbox: INBOX
     destinations: [Financial, Financial/Taxes, Later]
   presentation:
     screen: tax-review-v1

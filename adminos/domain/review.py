@@ -31,9 +31,13 @@ from adminos.domain.decisions import (
     ItemState,
 )
 from adminos.domain.learning import record_learning
+from adminos.domain.mailboxes import DEFAULT_SCOPE, ReviewScope, capability_scope
 from adminos.domain.rules import LearnedRule, read_active_rules
 from adminos.logging import get_logger
 
+
+SCOPE_ACTOR_PREFIX = "scope:"
+"""Marks a row taken off the table by where the thread is, not by a decision."""
 
 POLICY_SOURCE = "policy"
 DEFAULT_SOURCE = "default"
@@ -168,12 +172,17 @@ def start_or_resume_review(
     loaded: LoadedCapabilities,
     review_date: date | None = None,
     now: datetime | None = None,
+    scope: ReviewScope = DEFAULT_SCOPE,
 ) -> RunView:
     """Return today's review, creating it or topping it up with new mail.
 
     Resuming is the normal case: a second "start my review" on the same day
     returns the same run, keeps decisions already made, and adds only threads
     that have arrived since.
+
+    A run belongs to one scope. "Show me my archive" is therefore a second run
+    of the same day rather than an addition to the first, so that a request to
+    see mail outside the inbox cannot widen the review that was already made.
     """
     moment = now or datetime.now(UTC)
     day = review_date or moment.date()
@@ -182,6 +191,7 @@ def start_or_resume_review(
         select(ReviewRun).where(
             ReviewRun.review_date == day,
             ReviewRun.channel == loaded.channel,
+            ReviewRun.scope_name == scope.name,
         )
     ).scalar_one_or_none()
 
@@ -189,16 +199,25 @@ def start_or_resume_review(
         run = ReviewRun(
             review_date=day,
             channel=loaded.channel,
+            scope_name=scope.name,
+            scope=scope.as_json(),
             state=RunState.IN_PROGRESS,
             config_version=loaded.version,
             config_digest=loaded.digest,
         )
         session.add(run)
         session.flush()
-        logger.info("review run opened for %s on capabilities %s", day, loaded.version)
+        logger.info(
+            "review run opened for %s in the %s scope on capabilities %s",
+            day,
+            scope.name,
+            loaded.version,
+        )
 
     for capability in loaded.enabled():
+        watched = capability_scope(scope, capability)
         group = get_or_create_group(session, run, capability)
+        withdraw_out_of_scope(session, run, group, capability, watched, moment)
         populate_group(
             session,
             run,
@@ -206,6 +225,7 @@ def start_or_resume_review(
             capability,
             moment,
             read_active_rules(session, capability),
+            watched,
         )
 
     session.flush()
@@ -245,12 +265,18 @@ def populate_group(
     capability: CapabilityConfig,
     now: datetime,
     learned_rules: Sequence[LearnedRule] = (),
+    scope: ReviewScope = DEFAULT_SCOPE,
 ) -> int:
     """Add this capability's outstanding evidence to the group. Returns the count.
 
     A thread already decided in an earlier run stays out unless its content has
     changed since: a reply reopens a conversation, but a thread that merely sat
     in the inbox does not come back to be dismissed twice.
+
+    Every thread is checked against the scope as it goes in, using the labels it
+    carried when it was last seen. Evidence outlives a review, so a thread that
+    has since been archived or trashed still has a row here; the scope, not the
+    row's existence, is what decides whether it is reviewed again.
     """
     if not capability.playbook.allows(PlaybookStep.COLLECT_EVIDENCE):
         return 0
@@ -265,6 +291,8 @@ def populate_group(
     added = 0
     for evidence in read_capability_evidence(session, capability.key):
         if evidence.id in present:
+            continue
+        if not scope.admits(evidence.label_ids):
             continue
         if evidence.content_hash is not None and settled.get(evidence.id) == evidence.content_hash:
             continue
@@ -303,6 +331,75 @@ def populate_group(
     if added:
         session.flush()
     return added
+
+
+def withdraw_out_of_scope(
+    session: Session,
+    run: ReviewRun,
+    group: ReviewGroup,
+    capability: CapabilityConfig,
+    scope: ReviewScope,
+    now: datetime,
+) -> int:
+    """Take undecided rows off the table once their thread has left the scope.
+
+    Archiving a thread in Gmail is Brian saying he is done with it, and it
+    should not still be sitting in a review he resumes an hour later asking to
+    be decided again. The row is deferred rather than dismissed: nothing was
+    decided about the mail, and if the thread comes back to the inbox it is
+    reviewable again.
+
+    Only a thread known to have left is withdrawn. A row whose labels have
+    never been read says nothing about where the thread is, and guessing there
+    would empty a review on the strength of missing information.
+    """
+    labels = {
+        evidence.id: evidence.label_ids
+        for evidence in read_capability_evidence(session, capability.key)
+        if evidence.label_ids is not None
+    }
+
+    withdrawn = 0
+    for item in read_group_items(session, group):
+        if item.state != ItemState.PENDING:
+            continue
+        if item.evidence_id not in labels:
+            continue
+        if scope.admits(labels[item.evidence_id]):
+            continue
+
+        item.state = ItemState.DEFERRED
+        item.decided_at = now
+        session.add(
+            ReviewDecision(
+                run_id=run.id,
+                item_id=item.id,
+                capability_key=capability.key,
+                decision=DecisionKind.DEFER.value,
+                action=None,
+                action_params=None,
+                followed_recommendation=False,
+                recommendation=item.recommendation,
+                actor=f"{SCOPE_ACTOR_PREFIX}{scope.name}",
+                batch_id=None,
+                learning_scope=capability.learning.scope,
+                note=(
+                    f"Left the {scope.name} scope before it was decided, so it is no "
+                    "longer part of this review."
+                ),
+            )
+        )
+        withdrawn += 1
+
+    if withdrawn:
+        session.flush()
+        logger.info(
+            "%d items left the %s scope and were withdrawn from %s",
+            withdrawn,
+            scope.name,
+            capability.key,
+        )
+    return withdrawn
 
 
 def read_capability_evidence(session: Session, capability_key: str) -> list[Evidence]:

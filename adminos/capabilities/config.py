@@ -79,6 +79,22 @@ GMAIL_ACTIONS = {
 DESTINATION_PARAM = "label"
 """The parameter a move names: the folder the thread ends up in."""
 
+
+class Mailbox(StrEnum):
+    """Where a review looks for mail.
+
+    Not a label set but a place: `INBOX` is what is actually in the inbox now,
+    `ARCHIVE` is what has been filed away, `SNOOZED` is what Gmail is holding
+    back, and `ANYWHERE` includes Spam and Trash. Anything other than `INBOX`
+    has to be asked for.
+    """
+
+    INBOX = "INBOX"
+    ARCHIVE = "ARCHIVE"
+    SNOOZED = "SNOOZED"
+    ANYWHERE = "ANYWHERE"
+
+
 RESERVED_LABELS = {
     "INBOX",
     "TRASH",
@@ -125,13 +141,17 @@ class StrictModel(BaseModel):
 class GmailScope(StrictModel):
     """Which mail this capability reviews, and where it may file it.
 
+    `mailbox` is where the review looks, and it is configuration rather than a
+    preference to be learned: the default is the inbox, and a capability that
+    reviews anything else has to say so here.
+
     `destinations` is a closed list on purpose: a move names a folder, and a
     folder Brian has not sanctioned for this capability is refused rather than
     created. Gmail would happily invent `Carrer/Citi` from a typo.
     """
 
     labels: list[str] = Field(min_length=1)
-    require_inbox: bool = True
+    mailbox: Mailbox = Mailbox.INBOX
     destinations: list[str] = []
 
     @model_validator(mode="after")

@@ -8,7 +8,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 
 import main
-from adminos.adapters.gmail import GmailAuthError, GmailThread
+from adminos.adapters.gmail import GmailAuthError, GmailNotFound, GmailThread
 from adminos.capabilities.config import clear_cache
 from adminos.api import admin as admin_module
 from adminos.db import engine as engine_module
@@ -35,11 +35,19 @@ class FakeGmailClient:
             raise self.error
         return self.labels.get(label_name)
 
-    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
+    async def list_thread_ids(
+        self,
+        label_ids: Sequence[str],
+        limit: int,
+        query: str | None = None,
+    ) -> list[str]:
         return list(self.threads)[:limit]
 
     async def fetch_thread(self, thread_id: str) -> GmailThread:
-        return self.threads[thread_id]
+        thread = self.threads.get(thread_id)
+        if thread is None:
+            raise GmailNotFound(f"No thread {thread_id!r}.")
+        return thread
 
 
 def install_client(monkeypatch: pytest.MonkeyPatch, fake: FakeGmailClient) -> None:
@@ -89,6 +97,7 @@ def thread(thread_id: str, subject: str) -> GmailThread:
         participants=["cpa@example.com"],
         received_at=None,
         snippet="Attached is the estimate.",
+        label_ids=["INBOX", "Label_9"],
     )
 
 
@@ -196,6 +205,7 @@ def test_gmail_sync_records_evidence(
 
     assert response.status_code == 200
     assert response.json() == {
+        "scope": "inbox",
         "labels": ["financial/taxes"],
         "scanned": 2,
         "created": 2,

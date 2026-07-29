@@ -36,8 +36,13 @@ class FakeGmail:
     async def resolve_label_id(self, label_name: str) -> str | None:
         return {"Admin": ADMIN_LABEL_ID}.get(label_name)
 
-    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
-        if ADMIN_LABEL_ID not in label_ids:
+    async def list_thread_ids(
+        self,
+        label_ids: Sequence[str],
+        limit: int,
+        query: str | None = None,
+    ) -> list[str]:
+        if not {"INBOX", ADMIN_LABEL_ID} >= set(label_ids):
             return []
         return list(self.subjects)[:limit]
 

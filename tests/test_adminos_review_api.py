@@ -35,20 +35,37 @@ class FakeGmailClient:
         self.threads = threads or {}
         self.threads_by_label = threads_by_label or {}
         self.error = error
+        self.queries: list[str | None] = []
 
     async def resolve_label_id(self, label_name: str) -> str | None:
         if self.error is not None:
             raise self.error
         return self.labels.get(label_name)
 
-    async def list_thread_ids(self, label_ids: Sequence[str], limit: int) -> list[str]:
+    async def list_thread_ids(
+        self,
+        label_ids: Sequence[str],
+        limit: int,
+        query: str | None = None,
+    ) -> list[str]:
+        self.queries.append(query)
         return self.threads_by_label.get(label_ids[-1], [])[:limit]
 
     async def fetch_thread(self, thread_id: str) -> GmailThread:
         return self.threads[thread_id]
 
 
-def thread(thread_id: str, subject: str) -> GmailThread:
+def thread(
+    thread_id: str,
+    subject: str,
+    label_ids: Sequence[str] = ("INBOX",),
+) -> GmailThread:
+    """A thread as Gmail returns it, labels and all.
+
+    Labels are not decoration here: they are what decides whether a thread is
+    in the review at all, so a test that wants an archived or trashed thread
+    says so by giving it the labels one carries.
+    """
     return GmailThread(
         thread_id=thread_id,
         message_id="m1",
@@ -56,6 +73,7 @@ def thread(thread_id: str, subject: str) -> GmailThread:
         participants=["cpa@kpmg.com"],
         received_at=datetime(2026, 7, 20, tzinfo=UTC),
         snippet="Attached is the estimate.",
+        label_ids=list(label_ids),
     )
 
 

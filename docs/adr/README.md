@@ -30,6 +30,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0012 — Archive and Trash Are the Two Dispositions, and Neither Deletes](./ADR-0012-gmail-dispositions.md)
 - [ADR-0013 — A Recommendation to File Mail Names the Folder](./ADR-0013-filing-mail-in-a-named-folder.md)
 - [ADR-0014 — An Execution Runs the Rows That Were Selected, and No Others](./ADR-0014-execution-scope-integrity.md)
+- [ADR-0015 — The Review Is of the Inbox, and Says So](./ADR-0015-review-mailbox-scope.md)
 
 ## Candidate Decisions
 

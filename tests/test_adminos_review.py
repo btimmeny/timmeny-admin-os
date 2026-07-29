@@ -898,8 +898,8 @@ def test_a_bulk_decision_skips_items_already_settled(session: Session) -> None:
     assert len(decided) == 1
 
 
-def test_a_group_waiting_on_execution_does_not_hold_up_the_review(session: Session) -> None:
-    """Approving in the first group should move Brian on, not strand him."""
+def test_a_group_waiting_on_execution_stays_the_group_in_hand(session: Session) -> None:
+    """Moving on from a decided group is how "decided" comes to read as "done"."""
     add_evidence(session, "t1", "KPMG obligation")
     add_evidence(session, "t2", "Something admin", capabilities=["admin"])
     loaded = load(TAXES, ADMIN)
@@ -917,7 +917,10 @@ def test_a_group_waiting_on_execution_does_not_hold_up_the_review(session: Sessi
 
     assert refreshed.groups[0].group.state == GroupState.AWAITING_ACTIONS
     assert current is not None
-    assert current.group.capability_key == "admin"
+    assert current.group.capability_key == "financial_taxes"
+    assert [view.group.capability_key for view in refreshed.awaiting_execution()] == [
+        "financial_taxes"
+    ]
 
 
 def test_outstanding_actions_are_what_is_left_once_every_group_is_decided(

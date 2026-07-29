@@ -146,12 +146,12 @@ def test_an_unconfident_recommendation_shows_no_percentage() -> None:
     assert screen.rows[0].cells[6] == "—"
 
 
-def test_a_decided_item_shows_what_was_decided() -> None:
+def test_a_decided_item_shows_what_was_decided_and_that_it_has_not_happened() -> None:
     view = build_view(build_item(state="approved", approved_action="gmail.archive"))
 
     screen = render_group(build_screen(), view, build_run(), now=NOW)
 
-    assert screen.rows[0].cells[7] == "Approved: Archive it"
+    assert screen.rows[0].cells[7] == "Archive it — decided, not yet done"
 
 
 def test_a_recommended_move_names_the_folder_in_the_cell() -> None:
@@ -182,7 +182,7 @@ def test_a_decided_move_says_where_it_was_filed() -> None:
 
     screen = render_group(build_screen(), view, build_run(), now=NOW)
 
-    assert screen.rows[0].cells[7] == "Approved: File it in Later"
+    assert screen.rows[0].cells[7] == "File it in Later — decided, not yet done"
 
 
 def test_a_move_action_carries_the_folders_it_will_accept() -> None:

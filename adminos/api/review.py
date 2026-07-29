@@ -202,6 +202,11 @@ class ScreenResponse(BaseModel):
     rows: list[RowResponse]
     footer: str
     empty_text: str
+    notice: str = ""
+    """A sentence to show above the table where there is one.
+
+    Present it as written. It is where the review says that decisions taken
+    have not reached Gmail, which no cell of the table can say."""
 
 
 class RestorableItemResponse(BaseModel):
@@ -222,8 +227,31 @@ class RestorableItemResponse(BaseModel):
     body: dict[str, str]
 
 
+class OutstandingExecutionResponse(BaseModel):
+    """Decisions that have been recorded and have not happened yet.
+
+    A decision authorises an action; it does not take it. This is the exact
+    request that turns these approvals into inspectable plans, and until it
+    has been sent, confirmed and executed, the mailbox is as it was.
+    """
+
+    capability_key: str
+    capability_name: str
+    item_ids: list[str]
+    approved: int
+    failed: int
+    message: str
+    operation: str
+    method: str
+    path: str
+    body: JsonObject
+
+
 class GroupResponse(BaseModel):
     capability_key: str
+    """The only name a group is addressed by. `policy_version` and `screen_id`
+    are versions of what it recommends and how it is drawn, and neither is a
+    key: a request naming one of those is refused."""
     capability_name: str
     position: int
     state: str
@@ -236,6 +264,7 @@ class GroupResponse(BaseModel):
     screen: ScreenResponse
     items: list[ItemResponse]
     restorable: list[RestorableItemResponse] = Field(default_factory=list)
+    outstanding_execution: OutstandingExecutionResponse | None = None
 
 
 class GroupSummaryResponse(BaseModel):
@@ -291,6 +320,9 @@ class RunResponse(BaseModel):
     screen_id: str | None
     groups: list[GroupSummaryResponse]
     current_group: GroupResponse | None
+    outstanding_execution: list[OutstandingExecutionResponse] = Field(default_factory=list)
+    """Every group holding decisions the mailbox has not seen. A review with
+    anything here is not finished, whatever the table above shows."""
     prompt: ReviewPromptResponse | None = None
     warnings: list[str]
 
@@ -843,6 +875,13 @@ def build_run_response(
             for group in view.groups
         ],
         current_group=rendered,
+        outstanding_execution=[
+            outstanding
+            for outstanding in (
+                build_outstanding(group, view.run) for group in view.awaiting_execution()
+            )
+            if outstanding is not None
+        ],
         prompt=prompt,
         warnings=warnings,
     )
@@ -869,6 +908,40 @@ def build_group_response(
         screen=screen,
         items=[build_item_response(item, view.capability) for item in view.items],
         restorable=build_restorable(view, run),
+        outstanding_execution=build_outstanding(view, run),
+    )
+
+
+def build_outstanding(view: GroupView, run: ReviewRun) -> OutstandingExecutionResponse | None:
+    """The rows this group has decided and not done, and the way to do them.
+
+    Nothing is returned where every decision has been carried out, so the
+    field's presence is itself the answer to "has this happened yet?".
+    """
+    waiting = [
+        item for item in view.items if item.state in {ItemState.APPROVED, ItemState.FAILED}
+    ]
+    if not waiting:
+        return None
+
+    approved = sum(1 for item in waiting if item.state == ItemState.APPROVED)
+    failed = len(waiting) - approved
+    item_ids = [item.id for item in waiting]
+    return OutstandingExecutionResponse(
+        capability_key=view.capability.key,
+        capability_name=view.capability.name,
+        item_ids=item_ids,
+        approved=approved,
+        failed=failed,
+        message=(
+            f"{len(waiting)} {view.capability.name} rows are decided and have not been "
+            "carried out. Nothing has changed in Gmail: prepare them, check the scope "
+            "that comes back, and confirm."
+        ),
+        operation="prepareReviewActions",
+        method="POST",
+        path=f"/review/runs/{run.id}/actions/prepare",
+        body={"capability_key": view.capability.key, "item_ids": item_ids},
     )
 
 
@@ -953,6 +1026,7 @@ def as_screen_response(rendered: ScreenView) -> ScreenResponse:
         ],
         footer=rendered.footer,
         empty_text=rendered.empty_text,
+        notice=rendered.notice,
     )
 
 

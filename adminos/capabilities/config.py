@@ -496,7 +496,35 @@ class LoadedCapabilities:
         for capability in self.capabilities:
             if capability.key == key:
                 return capability
-        raise UnknownCapability(f"No capability named {key!r} is configured.")
+        raise UnknownCapability(self.explain_unknown(key))
+
+    def explain_unknown(self, key: str) -> str:
+        """Refuse the key, and say which one was meant.
+
+        A capability publishes several versioned names of its own — the policy
+        version, the screen id — and one of them being sent as the key is the
+        likeliest way to get here: `admin.v2` addressed a group and the review
+        answered that no such capability exists, which is true and unhelpful.
+        """
+        configured = ", ".join(sorted(capability.key for capability in self.capabilities))
+        owner = self.named_by(key)
+        if owner is not None:
+            return (
+                f"{key!r} is not a capability key: it is how {owner.key!r} names its "
+                f"policy or its screen. Address a group by its capability_key. "
+                f"Configured: {configured}."
+            )
+        return f"No capability named {key!r} is configured. Configured: {configured}."
+
+    def named_by(self, name: str) -> CapabilityConfig | None:
+        """The capability this string identifies something else about, if any."""
+        for capability in self.capabilities:
+            if name in (
+                capability.recommendation_policy.version,
+                capability.presentation.screen,
+            ):
+                return capability
+        return None
 
     def screen_for(self, capability: CapabilityConfig) -> ScreenConfig:
         """The presentation contract this capability is rendered with."""

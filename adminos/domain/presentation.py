@@ -52,12 +52,28 @@ DEFAULT_ACTION_LABELS: dict[str, str] = {
 
 STATE_LABELS: dict[str, str] = {
     ItemState.PENDING: "Pending",
-    ItemState.APPROVED: "Approved",
+    ItemState.APPROVED: "Decided, not yet done",
     ItemState.EXECUTED: "Done",
-    ItemState.FAILED: "Failed",
+    ItemState.FAILED: "Failed, not done",
     ItemState.DISMISSED: "Dismissed",
     ItemState.DEFERRED: "Deferred",
 }
+"""How a row's state reads on the table.
+
+"Approved" alone was read as "dealt with", by a GPT and then by Brian: a
+decision is an instruction, and the mailbox is untouched until the action it
+authorises is prepared, confirmed, executed and verified.
+"""
+
+DECISION_STATE_TEXT: dict[str, str] = {
+    ItemState.PENDING: "not decided",
+    ItemState.APPROVED: "decided, not yet done",
+    ItemState.EXECUTED: "done",
+    ItemState.FAILED: "attempted, and failed",
+    ItemState.DISMISSED: "left alone",
+    ItemState.DEFERRED: "put off",
+}
+"""How a decided row reads once the action it authorises has been named."""
 
 ITEM_DECISION_PATH = "/review/runs/{run_id}/items/{{item_id}}/decision"
 GROUP_DECISION_PATH = "/review/runs/{run_id}/groups/{capability_key}/decisions"
@@ -122,6 +138,13 @@ class ScreenView:
     rows: list[RenderedRow] = field(default_factory=list)
     footer: str = ""
     empty_text: str = ""
+    notice: str = ""
+    """What is true of this group that the table does not show.
+
+    Written by Admin OS rather than by the screen's configuration: that
+    decisions have not reached the mailbox is a fact about the review, and a
+    contract must not be able to leave it out.
+    """
 
 
 def render_group(
@@ -169,6 +192,32 @@ def render_group(
         rows=rows,
         footer=render_footer(screen, view, run, items),
         empty_text=screen.empty_text,
+        notice=render_notice(view),
+    )
+
+
+def render_notice(view: GroupView) -> str:
+    """Say that decided rows have not happened yet, where any have not.
+
+    A row is approved the moment Brian says what to do with it, and nothing
+    reaches Gmail until the action is prepared, confirmed, executed and read
+    back. Without this sentence the table shows a group of settled-looking
+    rows and a review that has moved on, which is how three threads came to be
+    reported as deleted while sitting in the inbox.
+    """
+    approved = sum(1 for item in view.items if item.state == ItemState.APPROVED)
+    failed = sum(1 for item in view.items if item.state == ItemState.FAILED)
+    if not approved and not failed:
+        return ""
+
+    said: list[str] = []
+    if approved:
+        said.append(f"{approved} decided and not yet carried out")
+    if failed:
+        said.append(f"{failed} attempted and failed")
+    return (
+        f"{' and '.join(said)}. Nothing has changed in Gmail yet: prepare these rows, "
+        "check the scope that comes back, and confirm before anything is done."
     )
 
 
@@ -343,12 +392,19 @@ def participants(item: ReviewItem) -> list[str]:
 
 
 def decision_text(item: ReviewItem, labels: dict[str, str]) -> str:
-    """What has been decided, if anything."""
-    state = STATE_LABELS.get(item.state, item.state)
-    if item.approved_action:
-        taken = labels.get(item.approved_action, item.approved_action)
-        return f"{state}: {with_destination(taken, item.approved_action, item.approved_params)}"
-    return state
+    """What has been decided, and whether it has happened.
+
+    The two are said in one cell because they were read as one thing:
+    "Approved: Move it to Trash" was taken for a thread in the Trash, when
+    what it meant was a thread in the inbox with an instruction against it.
+    """
+    if not item.approved_action:
+        return STATE_LABELS.get(item.state, item.state)
+
+    taken = labels.get(item.approved_action, item.approved_action)
+    named = with_destination(taken, item.approved_action, item.approved_params)
+    standing = DECISION_STATE_TEXT.get(item.state, item.state)
+    return f"{named} — {standing}"
 
 
 def relative_age(moment: datetime, now: datetime | None = None) -> str:

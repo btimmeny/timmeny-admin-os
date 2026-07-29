@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -80,16 +81,17 @@ class PrepareRequest(BaseModel):
 
 
 class ExecuteRequest(BaseModel):
-    """The prepared scope to run, named by id.
+    """The prepared scope to run, named by id and restated in full.
 
-    `item_ids` and `action_ids` are optional restatements of what the caller
-    believes it is confirming. If either disagrees with the prepared scope,
-    nothing runs.
+    `item_ids` and `action_ids` are what the caller believes it is confirming,
+    and they are required rather than offered: a caller that cannot restate
+    the scope has not read it, and this is the one request that writes to
+    Gmail. If either disagrees with the preparation, nothing runs.
     """
 
     scope_id: str
-    item_ids: list[str] | None = None
-    action_ids: list[str] | None = None
+    item_ids: list[str]
+    action_ids: list[str]
     confirm: bool = Field(
         default=False,
         description="Executing writes to Gmail, so it must be asked for explicitly.",
@@ -433,10 +435,8 @@ def select_actions(
     return scope, actions
 
 
-def check_action_ids(scope: ActionScope, action_ids: list[str] | None) -> None:
+def check_action_ids(scope: ActionScope, action_ids: Sequence[str]) -> None:
     """Refuse action ids that are not the ones this scope prepared."""
-    if action_ids is None:
-        return
     prepared = set(scope.action_ids)
     asked = set(action_ids)
     if prepared == asked:

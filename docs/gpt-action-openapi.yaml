@@ -1,8 +1,17 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.11.0
-  description: API for the Timmeny Admin OS daily review workflow.
+  version: 0.12.0
+  description: >-
+    API for the Timmeny Admin OS daily review workflow.
+
+
+    This document is served by the deployment that implements it, at
+    /gpt/action-schema.yaml, so an import from that URL is the same commit as
+    the running API. /gpt/action-schema/version returns the version and a
+    fingerprint of every request shape here; if it disagrees with this
+    document, the import is stale and must be replaced. The version changes
+    whenever a request shape does.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
 security:
@@ -546,17 +555,20 @@ paths:
       operationId: executeReviewActions
       summary: Execute one prepared scope, and verify it
       description: >-
-        The only operation that changes the mailbox. It requires the scope_id
-        returned by prepareReviewActions, and confirm: true given for the
-        execution itself rather than inherited from the decision. It runs that
-        scope's action_ids and nothing else: there is no capability-wide
-        execution.
+        The only operation that changes the mailbox. All four fields are
+        required: the scope_id returned by prepareReviewActions, the exact
+        prepared_item_ids and action_ids it returned alongside it, restated,
+        and confirm: true given for the execution itself rather than inherited
+        from the decision. It runs that scope's action_ids and nothing else:
+        there is no capability-wide execution.
 
 
-        Restate the selection in item_ids and action_ids. A scope that has
-        been superseded by a later preparation, already executed, or whose
-        rows were decided again since, answers 409 ScopeMismatch and writes
-        nothing; so does a restatement that disagrees with what was prepared.
+        A request missing any of them is refused as invalid and writes
+        nothing: a caller that cannot restate the scope has not read it. A
+        scope that has been superseded by a later preparation, already
+        executed, or whose rows were decided again since, answers 409
+        ScopeMismatch and writes nothing; so does a restatement that disagrees
+        with what was prepared.
 
 
         Every action is read back from Gmail: an archive is complete only once
@@ -576,24 +588,36 @@ paths:
           application/json:
             schema:
               type: object
-              required: [scope_id, confirm]
+              required: [scope_id, item_ids, action_ids, confirm]
               properties:
                 scope_id:
                   type: string
                   description: The scope returned by prepareReviewActions.
-                confirm:
-                  type: boolean
                 item_ids:
                   type: array
-                  description: The rows being confirmed, restated.
+                  description: >-
+                    The rows being confirmed, restated: exactly the
+                    prepared_item_ids the same preparation returned.
                   items:
                     type: string
                 action_ids:
                   type: array
-                  description: The action ids the scope prepared, restated.
+                  description: >-
+                    The action ids the scope prepared, restated: exactly the
+                    action_ids the same preparation returned.
                   items:
                     type: string
+                confirm:
+                  type: boolean
+                  description: >-
+                    True only when the user has confirmed this execution
+                    itself, after seeing what the preparation covers.
       responses:
+        "422":
+          description: >-
+            A required field was missing. Nothing was written. Read the
+            preparation again and restate scope_id, item_ids and action_ids
+            from it rather than filling any of them in from memory.
         "409":
           description: >-
             ScopeMismatch. Nothing was written. The body names the prepared

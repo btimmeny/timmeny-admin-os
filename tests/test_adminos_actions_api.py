@@ -204,13 +204,23 @@ def prepare(
 def execute(
     client: TestClient,
     run_id: str,
-    scope_id: str,
+    prepared: dict[str, Any],
     **extra: Any,
 ) -> Any:
+    """Confirm exactly what a preparation returned, unless a test says otherwise.
+
+    Execution requires the scope restated in full, so the honest default is the
+    preparation's own answer; a test that wants a disagreement passes it.
+    """
+    payload: dict[str, Any] = {
+        "scope_id": prepared["scope_id"],
+        "item_ids": prepared["prepared_item_ids"],
+        "action_ids": prepared["action_ids"],
+        "confirm": True,
+    }
+    payload.update(extra)
     return client.post(
-        f"/review/runs/{run_id}/actions/execute",
-        headers=AUTH,
-        json={"scope_id": scope_id, "confirm": True, **extra},
+        f"/review/runs/{run_id}/actions/execute", headers=AUTH, json=payload
     )
 
 
@@ -251,25 +261,98 @@ def test_executing_needs_to_be_asked_for_explicitly(
     client: TestClient, gmail: FakeGmail
 ) -> None:
     run_id, _ = approved_run(client, gmail)
-    scope_id = prepare(client, run_id)["scope_id"]
+    prepared = prepare(client, run_id)
 
-    response = client.post(
-        f"/review/runs/{run_id}/actions/execute", headers=AUTH, json={"scope_id": scope_id}
-    )
+    response = execute(client, run_id, prepared, confirm=False)
 
     assert response.status_code == 400
     assert "confirm=true" in response.json()["detail"]
     assert gmail.writes == []
 
 
+def test_executing_needs_the_scope_restated(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """A caller that cannot say what it is running has not read the preparation.
+
+    The restatement is the check: it is what turns "nineteen rows" from
+    something the caller believes into something the server agrees with. Left
+    optional, the one request that writes to Gmail could be sent by a client
+    that never looked at what it was confirming.
+    """
+    run_id, _ = approved_run(client, gmail)
+    prepared = prepare(client, run_id)
+    path = f"/review/runs/{run_id}/actions/execute"
+
+    without_items = client.post(
+        path,
+        headers=AUTH,
+        json={
+            "scope_id": prepared["scope_id"],
+            "action_ids": prepared["action_ids"],
+            "confirm": True,
+        },
+    )
+    without_actions = client.post(
+        path,
+        headers=AUTH,
+        json={
+            "scope_id": prepared["scope_id"],
+            "item_ids": prepared["prepared_item_ids"],
+            "confirm": True,
+        },
+    )
+    without_scope = client.post(
+        path,
+        headers=AUTH,
+        json={
+            "item_ids": prepared["prepared_item_ids"],
+            "action_ids": prepared["action_ids"],
+            "confirm": True,
+        },
+    )
+
+    assert without_items.status_code == 422
+    assert without_actions.status_code == 422
+    assert without_scope.status_code == 422
+    assert gmail.writes == []
+
+
+def test_the_exact_prepared_scope_executes(client: TestClient, gmail: FakeGmail) -> None:
+    """What preparation returns is what execution accepts, field for field."""
+    run_id, item_id = approved_run(client, gmail)
+    prepared = prepare(client, run_id)
+
+    assert prepared["scope_id"]
+    assert prepared["prepared_item_ids"] == [item_id]
+    assert prepared["action_ids"] == [prepared["actions"][0]["action_id"]]
+
+    executed = client.post(
+        f"/review/runs/{run_id}/actions/execute",
+        headers=AUTH,
+        json={
+            "scope_id": prepared["scope_id"],
+            "item_ids": prepared["prepared_item_ids"],
+            "action_ids": prepared["action_ids"],
+            "confirm": True,
+        },
+    )
+
+    action = executed.json()["actions"][0]
+    assert executed.status_code == 200, executed.text
+    assert action["state"] == "completed"
+    assert action["action_id"] == prepared["action_ids"][0]
+    assert gmail.writes == [("modify", ("t1", [], ["INBOX"]))]
+
+
 def test_the_kill_switch_refuses_execution(
     client: TestClient, gmail: FakeGmail, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run_id, _ = approved_run(client, gmail)
-    scope_id = prepare(client, run_id)["scope_id"]
+    prepared = prepare(client, run_id)
     monkeypatch.setenv("GMAIL_WRITE_ENABLED", "false")
 
-    response = execute(client, run_id, scope_id)
+    response = execute(client, run_id, prepared)
 
     assert response.status_code == 409
     assert "GMAIL_WRITE_ENABLED" in response.json()["detail"]
@@ -280,9 +363,9 @@ def test_executing_archives_the_thread_and_reads_it_back(
     client: TestClient, gmail: FakeGmail
 ) -> None:
     run_id, _ = approved_run(client, gmail)
-    scope_id = prepare(client, run_id)["scope_id"]
+    prepared = prepare(client, run_id)
 
-    response = execute(client, run_id, scope_id)
+    response = execute(client, run_id, prepared)
 
     action = response.json()["actions"][0]
     assert response.status_code == 200, response.text
@@ -296,10 +379,10 @@ def test_executing_twice_does_not_write_twice(
 ) -> None:
     """A scope runs once; running it again is refused rather than repeated."""
     run_id, _ = approved_run(client, gmail)
-    scope_id = prepare(client, run_id)["scope_id"]
+    prepared = prepare(client, run_id)
 
-    first = execute(client, run_id, scope_id)
-    again = execute(client, run_id, scope_id)
+    first = execute(client, run_id, prepared)
+    again = execute(client, run_id, prepared)
 
     assert first.status_code == 200, first.text
     assert again.status_code == 409
@@ -313,7 +396,7 @@ def test_an_action_carries_its_own_audit_trail(
     run_id, _ = approved_run(client, gmail)
     prepared = prepare(client, run_id)
     action_id = prepared["actions"][0]["action_id"]
-    execute(client, run_id, prepared["scope_id"])
+    execute(client, run_id, prepared)
 
     response = client.get(f"/review/runs/{run_id}/actions/{action_id}", headers=AUTH)
 
@@ -348,7 +431,7 @@ def test_verifying_re_reads_gmail_without_writing(
     run_id, _ = approved_run(client, gmail)
     prepared = prepare(client, run_id)
     action_id = prepared["actions"][0]["action_id"]
-    execute(client, run_id, prepared["scope_id"])
+    execute(client, run_id, prepared)
 
     response = client.post(f"/review/runs/{run_id}/actions/{action_id}/verify", headers=AUTH)
 
@@ -397,9 +480,9 @@ def test_a_draft_is_written_but_not_sent(client: TestClient, gmail: FakeGmail) -
         action="gmail.draft_reply",
         action_params={"to": ["news@example.com"], "body": "Please unsubscribe me."},
     )
-    scope_id = prepare(client, run_id)["scope_id"]
+    prepared = prepare(client, run_id)
 
-    response = execute(client, run_id, scope_id)
+    response = execute(client, run_id, prepared)
 
     action = response.json()["actions"][0]
     assert action["state"] == "completed"
@@ -417,7 +500,7 @@ def test_sending_a_draft_needs_the_exact_draft_and_a_confirmation(
         action="gmail.draft_reply",
         action_params={"to": ["news@example.com"], "body": "Please unsubscribe me."},
     )
-    execute(client, run_id, prepare(client, run_id)["scope_id"])
+    execute(client, run_id, prepare(client, run_id))
     path = f"/review/runs/{run_id}/items/{item_id}/send-draft"
 
     unconfirmed = client.post(
@@ -444,7 +527,7 @@ def test_an_approved_send_is_still_only_an_approval(
         action="gmail.draft_reply",
         action_params={"to": ["news@example.com"], "body": "Please unsubscribe me."},
     )
-    execute(client, run_id, prepare(client, run_id)["scope_id"])
+    execute(client, run_id, prepare(client, run_id))
 
     approval = client.post(
         f"/review/runs/{run_id}/items/{item_id}/send-draft",
@@ -460,7 +543,7 @@ def test_an_approved_send_is_still_only_an_approval(
     sent = execute(
         client,
         run_id,
-        prepared["scope_id"],
+        prepared,
         action_ids=[approval.json()["action_id"]],
     )
 
@@ -523,16 +606,12 @@ def test_delete_all_of_them_moves_every_thread_to_trash(
     assert prepared["scope_matches_request"] is True
     assert gmail.writes == []
 
-    unconfirmed = client.post(
-        f"/review/runs/{run_id}/actions/execute",
-        headers=AUTH,
-        json={"scope_id": prepared["scope_id"]},
-    )
+    unconfirmed = execute(client, run_id, prepared, confirm=False)
 
     assert unconfirmed.status_code == 400
     assert gmail.writes == []
 
-    executed = execute(client, run_id, prepared["scope_id"])
+    executed = execute(client, run_id, prepared)
 
     states = [action["state"] for action in executed.json()["actions"]]
     assert states == ["completed"] * 11
@@ -583,7 +662,7 @@ def test_a_trashed_thread_leaves_the_table_but_not_the_record(
     run_id, item_id = approved_run(
         client, gmail, decision="override", action="move_gmail_thread_to_trash"
     )
-    execute(client, run_id, prepare(client, run_id)["scope_id"])
+    execute(client, run_id, prepare(client, run_id))
 
     body = client.get(f"/review/runs/{run_id}", headers=AUTH).json()
     history = client.get(f"/review/runs/{run_id}/actions", headers=AUTH).json()
@@ -600,7 +679,7 @@ def test_running_the_same_trash_again_changes_nothing(
     run_id, item_id = approved_run(
         client, gmail, decision="override", action="move_gmail_thread_to_trash"
     )
-    first = execute(client, run_id, prepare(client, run_id)["scope_id"])
+    first = execute(client, run_id, prepare(client, run_id))
     action_id = first.json()["actions"][0]["action_id"]
 
     again = client.post(
@@ -653,16 +732,12 @@ def test_filing_one_thread_files_it_and_takes_it_out_of_the_inbox(
     }
     assert gmail.writes == []
 
-    unconfirmed = client.post(
-        f"/review/runs/{run_id}/actions/execute",
-        headers=AUTH,
-        json={"scope_id": prepared["scope_id"]},
-    )
+    unconfirmed = execute(client, run_id, prepared, confirm=False)
 
     assert unconfirmed.status_code == 400
     assert gmail.writes == []
 
-    executed = execute(client, run_id, prepared["scope_id"])
+    executed = execute(client, run_id, prepared)
     action = executed.json()["actions"][0]
 
     assert action["state"] == "completed"
@@ -691,7 +766,7 @@ def test_filing_all_of_them_puts_every_thread_in_the_named_folder(
     assert decided.status_code == 200, decided.text
     assert {item["approved_action"] for item in decided.json()["decided"]} == {"gmail.move"}
 
-    executed = execute(client, run_id, prepare(client, run_id)["scope_id"])
+    executed = execute(client, run_id, prepare(client, run_id))
 
     assert [action["state"] for action in executed.json()["actions"]] == ["completed"] * 3
     assert sorted(gmail.writes) == sorted(
@@ -813,7 +888,7 @@ def test_deleting_nineteen_of_twenty_two_rows_leaves_the_other_three_alone(
     assert prepared["entire_capability"] is False
     assert gmail.writes == []
 
-    executed = execute(client, run_id, prepared["scope_id"], item_ids=selected)
+    executed = execute(client, run_id, prepared, item_ids=selected)
 
     assert executed.status_code == 200, executed.text
     assert [action["state"] for action in executed.json()["actions"]] == ["completed"] * 19
@@ -835,14 +910,14 @@ def test_a_preparation_superseded_by_a_later_one_executes_nothing(
     stale = prepare(client, run_id, [rows[0]["item_id"]])
     current = prepare(client, run_id, [rows[1]["item_id"]])
 
-    refused = execute(client, run_id, stale["scope_id"])
+    refused = execute(client, run_id, stale)
 
     assert refused.status_code == 409
     assert refused.json()["detail"]["error"] == "ScopeMismatch"
     assert "superseded" in refused.json()["detail"]["message"]
     assert gmail.writes == []
 
-    executed = execute(client, run_id, current["scope_id"])
+    executed = execute(client, run_id, current)
 
     assert executed.status_code == 200, executed.text
     assert gmail.writes == [("trash", rows[1]["thread_id"])]
@@ -854,7 +929,16 @@ def test_a_scope_this_run_never_prepared_is_not_found(
     run_id, rows = start_with_threads(client, gmail, 2)
     approve_trash(client, run_id, rows)
 
-    refused = execute(client, run_id, "scope-from-somewhere-else")
+    refused = client.post(
+        f"/review/runs/{run_id}/actions/execute",
+        headers=AUTH,
+        json={
+            "scope_id": "scope-from-somewhere-else",
+            "item_ids": [rows[0]["item_id"]],
+            "action_ids": ["an-action-from-somewhere-else"],
+            "confirm": True,
+        },
+    )
 
     assert refused.status_code == 404
     assert gmail.writes == []
@@ -922,7 +1006,7 @@ def test_confirming_a_selection_that_was_not_prepared_executes_nothing(
     refused = execute(
         client,
         run_id,
-        prepared["scope_id"],
+        prepared,
         item_ids=[rows[0]["item_id"], rows[1]["item_id"]],
     )
 
@@ -942,7 +1026,7 @@ def test_action_ids_from_another_preparation_are_refused(
     second = prepare(client, run_id, [rows[1]["item_id"]])
 
     refused = execute(
-        client, run_id, second["scope_id"], action_ids=first["action_ids"]
+        client, run_id, second, action_ids=first["action_ids"]
     )
 
     detail = refused.json()["detail"]
@@ -965,7 +1049,7 @@ def test_a_row_decided_again_after_preparation_stops_the_whole_scope(
         headers=AUTH,
         json={"decision": "dismiss"},
     )
-    refused = execute(client, run_id, prepared["scope_id"])
+    refused = execute(client, run_id, prepared)
 
     detail = refused.json()["detail"]
     assert refused.status_code == 409
@@ -981,7 +1065,7 @@ def test_a_trashed_thread_can_be_taken_back_out_of_trash(
     run_id, item_id = approved_run(
         client, gmail, decision="override", action="move_gmail_thread_to_trash"
     )
-    execute(client, run_id, prepare(client, run_id)["scope_id"])
+    execute(client, run_id, prepare(client, run_id))
 
     assert "TRASH" in gmail.thread_labels["t1"]
 
@@ -998,7 +1082,7 @@ def test_a_trashed_thread_can_be_taken_back_out_of_trash(
     assert gmail.writes == [("trash", "t1")]
 
     prepared = prepare(client, run_id, [item_id])
-    executed = execute(client, run_id, prepared["scope_id"], item_ids=[item_id])
+    executed = execute(client, run_id, prepared, item_ids=[item_id])
 
     assert executed.status_code == 200, executed.text
     assert executed.json()["actions"][0]["state"] == "completed"
@@ -1013,7 +1097,7 @@ def test_restoring_a_thread_already_out_of_trash_writes_nothing(
     run_id, item_id = approved_run(
         client, gmail, decision="override", action="move_gmail_thread_to_trash"
     )
-    execute(client, run_id, prepare(client, run_id)["scope_id"])
+    execute(client, run_id, prepare(client, run_id))
     gmail.thread_labels["t1"] = ["INBOX", ADMIN_LABEL_ID]
     client.post(
         f"/review/runs/{run_id}/items/{item_id}/decision",
@@ -1022,7 +1106,7 @@ def test_restoring_a_thread_already_out_of_trash_writes_nothing(
     )
 
     prepared = prepare(client, run_id, [item_id])
-    executed = execute(client, run_id, prepared["scope_id"])
+    executed = execute(client, run_id, prepared)
 
     action = executed.json()["actions"][0]
     assert action["state"] == "completed"

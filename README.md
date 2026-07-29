@@ -723,7 +723,7 @@ The only route that changes the mailbox, behind five gates: the capability must 
  "action_ids": ["act-1", "act-2", "act-3"]}
 ```
 
-It runs that scope's action ids and nothing else; there is no capability-wide execution. `item_ids` and `action_ids` are optional restatements of what is being confirmed, and a restatement that disagrees stops the request instead of being reconciled with it.
+It runs that scope's action ids and nothing else; there is no capability-wide execution. All four fields are required: `item_ids` and `action_ids` restate what is being confirmed, and a caller that cannot restate the scope has not read it. A request missing either is `422` and writes nothing; a restatement that disagrees stops the request instead of being reconciled with it.
 
 A scope that was superseded by a later preparation, has already run, or whose rows were decided again since answers `409` with `ScopeMismatch`, naming the difference in both directions. Every one of those checks happens before the first Gmail call, so a `409` means nothing was written — and nothing partial was written either: a mismatch refuses the whole request rather than running the part that still agrees.
 
@@ -750,6 +750,17 @@ Creating a draft never sends it. Sending takes an explicit approval of one exact
 ```
 
 And approving still does not send: it creates a `gmail.send_draft` action that has to be executed like any other, and that refuses if the draft has changed since it was approved.
+
+## The GPT Action contract
+
+The Custom GPT holds a copy of `docs/gpt-action-openapi.yaml`, and a copy says nothing about its age. So the deployment serves the contract it was built with, and states its version:
+
+- `GET /gpt/action-schema.yaml` — the document to import into the GPT. Importing from the running service is what makes the schema and the API the same commit.
+- `GET /gpt/action-schema/version` — `version`, `request_shape`, `document_sha256`, and the deployed `commit` where the platform records one.
+
+Both are unauthenticated, because ChatGPT's import sends no headers; neither shows anything a caller could not learn from a `401`, and every operation still needs the API key.
+
+`info.version` changes whenever a request body in the contract changes, which is the only thing that turns a stale import into a refused call. `request_shape` is a digest of every request body in the document, ignoring prose, and `tests/test_adminos_gpt_schema.py` records the fingerprint each published version carried: changing a shape without a new version fails there rather than in front of Brian.
 
 ## Learning
 
@@ -1010,7 +1021,7 @@ The URL can be renamed later in Railway after the service/domain rename is compl
 - `requirements.txt` defines the Python dependencies.
 - `requirements-dev.txt` defines local test dependencies.
 - `railway.json` configures Railway deployment.
-- `docs/gpt-action-openapi.yaml` defines the GPT Action schema.
+- `docs/gpt-action-openapi.yaml` defines the GPT Action schema, served at `/gpt/action-schema.yaml`.
 - `tests/` covers the current API surface.
 - `docs/charter.md` defines the initial scope, values, and near-term direction.
 - `docs/architecture.md` describes the target operating model.

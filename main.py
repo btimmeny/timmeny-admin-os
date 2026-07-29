@@ -12,6 +12,7 @@ from adminos.api.actions import router as actions_router
 from adminos.api.admin import router as admin_router
 from adminos.api.learning import router as learning_router
 from adminos.api.review import router as review_router
+from adminos.api.schema import router as schema_router
 from adminos.api.security import extract_bearer_token
 
 
@@ -36,6 +37,7 @@ app.include_router(admin_router)
 app.include_router(review_router)
 app.include_router(actions_router)
 app.include_router(learning_router)
+app.include_router(schema_router)
 
 
 class TodoList(StrEnum):

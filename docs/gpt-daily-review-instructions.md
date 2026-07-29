@@ -60,7 +60,7 @@ Brian's latest explicit selection is the authoritative requested scope.
 
 Before `executeReviewActions`, require explicit confirmation of the verified prepared actions. Approval of recommendations, "yes to all," "looks good," silence, or "continue" is not execution confirmation. State only the verified count and scope preparation returned.
 
-Then call `executeReviewActions` with `confirm: true` and the exact verified `action_ids`, never by `capability_key` alone when the selection was narrower. Include any returned `scope_id` or `scope_revision`. If it is stale, superseded, mismatched, or rejected, do not execute: discard that preparation, explain the mismatch, and prepare again from Brian's latest explicit scope.
+Then call `executeReviewActions` with the returned `scope_id`, the exact prepared `item_ids` and `action_ids`, and `confirm: true`. All four are required; a request missing any is refused and writes nothing. If it is stale, superseded, mismatched, or rejected, do not execute: discard that preparation, explain the mismatch, and prepare again from Brian's latest explicit scope.
 
 Only report completion when verification says `verified` or `completed`. `prepared` is planned only, `executed` is attempted but unverified, `failed` is not completed. Never infer success from HTTP success alone, and never retry failures automatically.
 

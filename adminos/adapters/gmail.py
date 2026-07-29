@@ -18,6 +18,7 @@ GMAIL_API_BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 INBOX_LABEL_ID = "INBOX"
+TRASH_LABEL_ID = "TRASH"
 SOURCE_SYSTEM = "gmail"
 REQUEST_TIMEOUT_SECONDS = 20.0
 TOKEN_EXPIRY_MARGIN_SECONDS = 60
@@ -236,6 +237,20 @@ class GmailClient:
                 "removeLabelIds": list(remove_label_ids),
             },
         )
+        return await self.fetch_thread(thread_id)
+
+    async def trash_thread(self, thread_id: str) -> GmailThread:
+        """Move a whole thread to Gmail's Trash, where it stays recoverable.
+
+        Not deletion: the thread keeps its messages and can be restored from
+        Trash until Gmail empties it. The permanent operations Gmail offers,
+        `threads.delete` and `messages.delete`, are deliberately not written
+        here, so no caller can reach them.
+
+        Idempotent in Gmail's own terms: trashing an already-trashed thread
+        succeeds and leaves it where it is.
+        """
+        await self.post(f"/threads/{thread_id}/trash", {})
         return await self.fetch_thread(thread_id)
 
     async def create_draft(

@@ -63,6 +63,35 @@ class PlaybookStep(StrEnum):
 ACTION_VALUES = {kind.value for kind in ActionKind}
 RECOMMENDATION_VALUES = ACTION_VALUES | {outcome.value for outcome in Recommendation}
 
+GMAIL_ACTIONS = {
+    ActionKind.GMAIL_LABEL,
+    ActionKind.GMAIL_ARCHIVE,
+    ActionKind.GMAIL_TRASH,
+    ActionKind.GMAIL_DRAFT_REPLY,
+    ActionKind.GMAIL_SEND_DRAFT,
+}
+"""The actions that reach the mailbox, and so pass the Gmail kill switch."""
+
+ACTION_ALIASES: dict[str, ActionKind] = {
+    "archive_gmail_thread": ActionKind.GMAIL_ARCHIVE,
+    "move_gmail_thread_to_trash": ActionKind.GMAIL_TRASH,
+}
+"""Spoken names for the two Gmail dispositions.
+
+The stored action is `gmail.archive` or `gmail.trash`; these are the names a
+reader sees and may send back. Accepting both means the audit keeps one name
+for a thing while the contract can say it in words — and `delete` never
+reaches an alias at all, because deleting is not what happens.
+"""
+
+
+def read_action_kind(value: str) -> ActionKind:
+    """The action named, whether by its stored value or its spoken name."""
+    alias = ACTION_ALIASES.get(value)
+    if alias is not None:
+        return alias
+    return ActionKind(value)
+
 
 class StrictModel(BaseModel):
     """Rejects unknown keys, so a typo in configuration fails loudly."""
@@ -334,6 +363,14 @@ class CapabilitySet(StrictModel):
                     raise ValueError(
                         f"Screen {screen.id!r} offers {offered.action!r} to "
                         f"{capability.key!r}, which is not allowed to do it."
+                    )
+                if ActionKind(offered.action) in GMAIL_ACTIONS and not capability.may_execute(
+                    ActionKind(offered.action)
+                ):
+                    raise ValueError(
+                        f"Screen {screen.id!r} offers {offered.action!r} to "
+                        f"{capability.key!r}, which may approve it but cannot execute "
+                        "it, so the mailbox would never change."
                     )
             if not capability.approval.allow_bulk_decisions and any(
                 offered.scope == "group" for offered in screen.actions

@@ -10,7 +10,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from adminos.adapters.gmail import GmailDraft, GmailError, GmailThread
+from adminos.adapters.gmail import GmailClient, GmailDraft, GmailError, GmailThread
 from adminos.capabilities.config import ActionKind, CapabilityConfig, LoadedCapabilities
 from adminos.db.models import Evidence, ReviewAction, ReviewItem, ReviewRun
 from adminos.domain.actions import (
@@ -37,6 +37,13 @@ NOW = datetime(2026, 7, 28, 9, 0, tzinfo=UTC)
 THREAD = "t1"
 
 ADMIN = build_capability(key="admin", labels=["Admin"], position=10)
+DISPOSES = build_capability(
+    key="admin",
+    labels=["Admin"],
+    position=10,
+    allowed_actions=["gmail.label", "gmail.archive", "gmail.trash"],
+    execution={"permitted_actions": ["gmail.label", "gmail.archive", "gmail.trash"]},
+)
 NO_EXECUTION = build_capability(
     key="admin",
     labels=["Admin"],
@@ -90,6 +97,15 @@ class FakeGmail:
             for label_id in remove_label_ids:
                 if label_id in self.thread_labels:
                     self.thread_labels.remove(label_id)
+        return await self.fetch_thread(thread_id)
+
+    async def trash_thread(self, thread_id: str) -> GmailThread:
+        self.raise_if_asked()
+        self.writes.append(("trash", thread_id))
+        if not self.silently_ignore_writes:
+            self.thread_labels = [
+                label for label in self.thread_labels if label != "INBOX"
+            ] + ["TRASH"]
         return await self.fetch_thread(thread_id)
 
     async def create_draft(
@@ -309,6 +325,113 @@ def test_archiving_removes_the_inbox_label_and_is_verified(session: Session) -> 
     assert item.state == ItemState.EXECUTED
 
 
+def test_archiving_leaves_every_other_label_alone(session: Session) -> None:
+    """Archiving files a thread; it does not reorganise it."""
+    action, _, _ = approve(session)
+    client = FakeGmail(thread_labels=("INBOX", "Label_admin", "IMPORTANT", "STARRED"))
+
+    run_execute(session, client, action)
+
+    assert client.thread_labels == ["Label_admin", "IMPORTANT", "STARRED"]
+
+
+def test_archiving_a_thread_already_out_of_the_inbox_writes_nothing(session: Session) -> None:
+    """The requested state already holds, so the action is done, not failed."""
+    action, item, _ = approve(session)
+    client = FakeGmail(thread_labels=("Label_admin",))
+
+    executed = run_execute(session, client, action)
+
+    assert client.writes == []
+    assert executed.state == ActionState.COMPLETED
+    assert item.state == ItemState.EXECUTED
+    assert ActionEventKind.ALREADY_APPLIED in {
+        event.event for event in read_action_events(session, action)
+    }
+
+
+def test_trashing_moves_the_whole_thread_and_reads_it_back(session: Session) -> None:
+    """"Delete" reaches Trash and no further: the thread is still recoverable."""
+    action, item, _ = approve(session, capability=DISPOSES, action=ActionKind.GMAIL_TRASH)
+    client = FakeGmail()
+
+    executed = run_execute(session, client, action, capability=DISPOSES)
+
+    assert client.writes == [("trash", THREAD)]
+    assert executed.prepared_params == {
+        "thread_id": THREAD,
+        "moves_to": "TRASH",
+        "permanent": False,
+    }
+    assert executed.state == ActionState.COMPLETED
+    assert executed.verification == {"labels": ["Label_admin", "TRASH"]}
+    assert item.state == ItemState.EXECUTED
+
+
+def test_trashing_a_thread_already_in_the_trash_writes_nothing(session: Session) -> None:
+    action, _, _ = approve(session, capability=DISPOSES, action=ActionKind.GMAIL_TRASH)
+    client = FakeGmail(thread_labels=("Label_admin", "TRASH"))
+
+    executed = run_execute(session, client, action, capability=DISPOSES)
+
+    assert client.writes == []
+    assert executed.state == ActionState.COMPLETED
+    assert ActionEventKind.ALREADY_APPLIED in {
+        event.event for event in read_action_events(session, action)
+    }
+
+
+def test_running_a_trash_twice_trashes_once(session: Session) -> None:
+    action, _, _ = approve(session, capability=DISPOSES, action=ActionKind.GMAIL_TRASH)
+    client = FakeGmail()
+    run_execute(session, client, action, capability=DISPOSES)
+
+    asyncio.run(execute_action(session, client, DISPOSES, action, now=NOW))
+
+    assert client.writes == [("trash", THREAD)]
+
+
+def test_a_trash_gmail_does_not_confirm_is_not_reported_as_done(session: Session) -> None:
+    """Completion follows Gmail's own answer, not the fact that a call returned."""
+    action, item, _ = approve(session, capability=DISPOSES, action=ActionKind.GMAIL_TRASH)
+    client = FakeGmail()
+    client.silently_ignore_writes = True
+
+    executed = run_execute(session, client, action, capability=DISPOSES)
+
+    assert executed.state == ActionState.FAILED
+    assert item.state == ItemState.FAILED
+    assert ActionEventKind.VERIFICATION_FAILED in {
+        event.event for event in read_action_events(session, action)
+    }
+
+
+def test_a_failed_trash_stays_visible_and_retries_only_when_asked(session: Session) -> None:
+    action, _, _ = approve(session, capability=DISPOSES, action=ActionKind.GMAIL_TRASH)
+    client = FakeGmail()
+    client.fail_next_write = GmailError("Gmail is unavailable.")
+
+    failed = run_execute(session, client, action, capability=DISPOSES)
+
+    assert failed.state == ActionState.FAILED
+    assert failed.attempts == 1
+    assert failed.last_error == "Gmail is unavailable."
+
+    retried = asyncio.run(execute_action(session, client, DISPOSES, action, now=NOW))
+
+    assert retried.state == ActionState.COMPLETED
+    assert retried.attempts == 2
+
+
+def test_trashing_needs_the_capability_to_permit_it(session: Session) -> None:
+    action, _, _ = approve(session, capability=DISPOSES, action=ActionKind.GMAIL_TRASH)
+
+    with pytest.raises(ActionRefused) as error:
+        prepare_action(session, ADMIN, action, now=NOW)
+
+    assert "is not allowed to 'gmail.trash'" in str(error.value)
+
+
 def test_labelling_adds_and_removes_by_resolved_id(session: Session) -> None:
     action, _, _ = approve(
         session,
@@ -464,14 +587,19 @@ def test_verifying_again_re_reads_gmail_without_writing(session: Session) -> Non
 
 
 def test_there_is_no_executor_for_permanent_deletion() -> None:
-    """Deletion is not gated, it is absent: nothing can perform it."""
+    """Deletion is not gated, it is absent: nothing can perform it.
+
+    Trash is the furthest an action goes, and Gmail restores a trashed thread.
+    """
     assert set(EXECUTORS) == {
         ActionKind.GMAIL_LABEL,
         ActionKind.GMAIL_ARCHIVE,
+        ActionKind.GMAIL_TRASH,
         ActionKind.GMAIL_DRAFT_REPLY,
         ActionKind.GMAIL_SEND_DRAFT,
     }
-    assert ActionKind.GMAIL_TRASH not in EXECUTORS
+    assert not hasattr(GmailClient, "delete_thread")
+    assert not hasattr(GmailClient, "delete_message")
 
 
 def test_sending_requires_the_exact_draft_that_was_reviewed(session: Session) -> None:

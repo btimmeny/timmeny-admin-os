@@ -57,6 +57,19 @@ NO_LEARNING = build_capability(
     labels=["Admin"],
     learning={"scope": "none", "record_decisions": False, "record_message_content": False},
 )
+TRASHING_ADMIN = build_capability(
+    key="admin",
+    labels=["Admin"],
+    allowed_actions=["gmail.archive", "gmail.trash"],
+    execution={"permitted_actions": ["gmail.archive", "gmail.trash"]},
+    learning={
+        "scope": "capability",
+        "record_decisions": True,
+        "record_message_content": False,
+        "allow_rule_learning": True,
+        "allow_automatable_rules": True,
+    },
+)
 ARCHIVE_COUNCIL = MatchRule(participant_domains=[DOMAIN])
 
 
@@ -253,6 +266,36 @@ def test_only_a_promoted_rule_approves_without_being_asked(session: Session) -> 
 
     assert item.state == ItemState.APPROVED
     assert item.approved_action == ActionKind.GMAIL_ARCHIVE
+
+
+def test_a_confirmed_trash_rule_does_not_empty_the_inbox_by_itself(session: Session) -> None:
+    """Confirmation makes a rule recommend Trash; only promotion lets it act."""
+    rule = record_rule(
+        session,
+        TRASHING_ADMIN,
+        ARCHIVE_COUNCIL,
+        ActionKind.GMAIL_TRASH,
+        rationale="Council circulars are read and thrown away.",
+        state=RuleState.PROPOSED,
+        source=HUMAN_SOURCE,
+        actor="human",
+        now=NOW,
+    )
+    transition_rule(session, TRASHING_ADMIN, rule, RuleState.CONFIRMED, actor="human", now=NOW)
+    add_evidence(session)
+
+    item = review(session, TRASHING_ADMIN).groups[0].items[0]
+
+    assert item.recommendation == ActionKind.GMAIL_TRASH
+    assert item.state == ItemState.PENDING
+
+    transition_rule(session, TRASHING_ADMIN, rule, RuleState.AUTOMATABLE, actor="human", now=NOW)
+    add_evidence(session, thread_id="t2")
+    items = review(session, TRASHING_ADMIN).groups[0].items
+    promoted = [item for item in items if item.source_thread_id == "t2"][0]
+
+    assert promoted.state == ItemState.APPROVED
+    assert promoted.approved_action == ActionKind.GMAIL_TRASH
 
 
 def test_a_rule_approval_says_it_was_a_rule(session: Session) -> None:

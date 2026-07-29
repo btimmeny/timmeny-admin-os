@@ -9,8 +9,18 @@ from typing import Awaitable, Callable, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from adminos.adapters.gmail import INBOX_LABEL_ID, GmailClient, GmailError
-from adminos.capabilities.config import ActionKind, CapabilityConfig, PlaybookStep
+from adminos.adapters.gmail import (
+    INBOX_LABEL_ID,
+    TRASH_LABEL_ID,
+    GmailClient,
+    GmailError,
+)
+from adminos.capabilities.config import (
+    GMAIL_ACTIONS,
+    ActionKind,
+    CapabilityConfig,
+    PlaybookStep,
+)
 from adminos.config import is_gmail_write_enabled
 from adminos.db.models import (
     ActionEvent,
@@ -72,12 +82,6 @@ class ActionEventKind(StrEnum):
 
 TERMINAL_ACTION_STATES = {ActionState.COMPLETED}
 EXECUTABLE_ACTION_STATES = {ActionState.PREPARED, ActionState.EXECUTED, ActionState.FAILED}
-GMAIL_ACTIONS = {
-    ActionKind.GMAIL_LABEL,
-    ActionKind.GMAIL_ARCHIVE,
-    ActionKind.GMAIL_DRAFT_REPLY,
-    ActionKind.GMAIL_SEND_DRAFT,
-}
 
 
 @dataclass(frozen=True)
@@ -346,7 +350,7 @@ async def execute_action(
     record_event(
         session,
         action,
-        ActionEventKind.ADOPTED_EXISTING if outcome.adopted else ActionEventKind.EXECUTED,
+        execution_event(outcome),
         outcome.detail,
         external_ref=outcome.external_ref,
     )
@@ -377,6 +381,15 @@ async def execute_action(
         )
 
     return settle_verified(session, action, item, verification, moment)
+
+
+def execution_event(outcome: ExecutionOutcome) -> ActionEventKind:
+    """What the attempt turned out to be: a write, an adoption, or a no-op."""
+    if outcome.already_applied:
+        return ActionEventKind.ALREADY_APPLIED
+    if outcome.adopted:
+        return ActionEventKind.ADOPTED_EXISTING
+    return ActionEventKind.EXECUTED
 
 
 async def verify_action(
@@ -626,6 +639,15 @@ async def execute_archive(
     action: ReviewAction,
     item: ReviewItem,
 ) -> ExecutionOutcome:
+    thread = await client.fetch_thread(item.source_thread_id)
+    if INBOX_LABEL_ID not in thread.label_ids:
+        return ExecutionOutcome(
+            external_kind=GMAIL_THREAD,
+            external_ref=item.source_thread_id,
+            detail={"labels": thread.label_ids, "already": "out of the inbox"},
+            already_applied=True,
+        )
+
     await client.modify_thread(item.source_thread_id, remove_label_ids=[INBOX_LABEL_ID])
     return ExecutionOutcome(
         external_kind=GMAIL_THREAD,
@@ -642,6 +664,55 @@ async def verify_archive(
     thread = await client.fetch_thread(item.source_thread_id)
     return VerificationOutcome(
         verified=INBOX_LABEL_ID not in thread.label_ids,
+        detail={"labels": thread.label_ids},
+    )
+
+
+def prepare_trash(item: ReviewItem, params: JsonObject) -> JsonObject:
+    """Plan a move to Trash, which is where a deleted thread goes.
+
+    `permanent: false` is written into the plan rather than assumed, so what
+    was approved is legible in the audit years later: this moves the thread,
+    it does not destroy it.
+    """
+    return {
+        "thread_id": item.source_thread_id,
+        "moves_to": TRASH_LABEL_ID,
+        "permanent": False,
+    }
+
+
+async def execute_trash(
+    client: GmailClient,
+    action: ReviewAction,
+    item: ReviewItem,
+) -> ExecutionOutcome:
+    thread = await client.fetch_thread(item.source_thread_id)
+    if TRASH_LABEL_ID in thread.label_ids:
+        return ExecutionOutcome(
+            external_kind=GMAIL_THREAD,
+            external_ref=item.source_thread_id,
+            detail={"labels": thread.label_ids, "already": "in Trash"},
+            already_applied=True,
+        )
+
+    await client.trash_thread(item.source_thread_id)
+    return ExecutionOutcome(
+        external_kind=GMAIL_THREAD,
+        external_ref=item.source_thread_id,
+        detail={"moved_to": TRASH_LABEL_ID, "permanent": False},
+    )
+
+
+async def verify_trash(
+    client: GmailClient,
+    action: ReviewAction,
+    item: ReviewItem,
+) -> VerificationOutcome:
+    """Read the thread back and insist Gmail itself says it is in Trash."""
+    thread = await client.fetch_thread(item.source_thread_id)
+    return VerificationOutcome(
+        verified=TRASH_LABEL_ID in thread.label_ids,
         detail={"labels": thread.label_ids},
     )
 
@@ -772,11 +843,14 @@ async def verify_send(
 EXECUTORS: dict[ActionKind, Executor] = {
     ActionKind.GMAIL_LABEL: Executor(prepare_label, execute_label, verify_label),
     ActionKind.GMAIL_ARCHIVE: Executor(prepare_archive, execute_archive, verify_archive),
+    ActionKind.GMAIL_TRASH: Executor(prepare_trash, execute_trash, verify_trash),
     ActionKind.GMAIL_DRAFT_REPLY: Executor(prepare_draft, execute_draft, verify_draft),
     ActionKind.GMAIL_SEND_DRAFT: Executor(prepare_send, execute_send, verify_send),
 }
 """Every action Admin OS can perform.
 
-`gmail.trash` and any permanent deletion are deliberately absent: an action
-with no executor cannot run, whatever a capability or a caller asks for.
+Permanent deletion is deliberately absent. `gmail.trash` moves a thread to
+Trash, from which Gmail restores it; nothing here calls `threads.delete` or
+`messages.delete`, and an action with no executor cannot run whatever a
+capability or a caller asks for.
 """

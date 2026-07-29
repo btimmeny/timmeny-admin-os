@@ -14,8 +14,30 @@ import main
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 CONTRACT_PATH = REPOSITORY_ROOT / "docs/gpt-action-openapi.yaml"
-DOCUMENTED_PREFIXES = ("/review", "/learning")
 METHODS = {"get", "post", "patch", "put", "delete"}
+
+REQUIRED_OPERATIONS = {
+    ("/review/start", "post"),
+    ("/review/runs/{run_id}", "get"),
+    ("/review/runs/{run_id}/groups/{capability_key}", "get"),
+    ("/review/runs/{run_id}/items/{item_id}/decision", "post"),
+    ("/review/runs/{run_id}/groups/{capability_key}/decisions", "post"),
+    ("/review/runs/{run_id}/actions/prepare", "post"),
+    ("/review/runs/{run_id}/actions/execute", "post"),
+    ("/review/runs/{run_id}/items/{item_id}/send-draft", "post"),
+    ("/learning/rules", "post"),
+    ("/learning/rules/{rule_id}/confirm", "post"),
+    ("/learning/rules/{rule_id}/promote", "post"),
+}
+"""What the Daily GPT cannot work without.
+
+The contract is deliberately smaller than the API: routes for reading action
+history and learning events exist for operators, and adding every one of them
+would only give the GPT more ways to go wrong. These are the operations the
+conversation depends on, so losing one is a break rather than a trim.
+"""
+
+PERMANENT_DELETION = ("messages.delete", "threads.delete", "permanently delete")
 
 
 def read_contract() -> dict[str, object]:
@@ -38,16 +60,18 @@ def test_every_documented_operation_exists() -> None:
     assert documented - live == set()
 
 
-def test_every_review_and_learning_route_is_documented() -> None:
+def test_the_operations_the_gpt_depends_on_are_documented_and_live() -> None:
     documented = operations(read_contract()["paths"])
-    live = {
-        operation
-        for operation in operations(main.app.openapi()["paths"])
-        if operation[0].startswith(DOCUMENTED_PREFIXES)
-    }
+    live = operations(main.app.openapi()["paths"])
 
-    assert live - documented == set()
+    assert REQUIRED_OPERATIONS - documented == set()
+    assert REQUIRED_OPERATIONS - live == set()
 
 
 def test_the_contract_never_offers_permanent_deletion() -> None:
-    assert "gmail.trash" not in CONTRACT_PATH.read_text()
+    """Trash is offered; destroying mail is not, and is not describable here."""
+    contract = CONTRACT_PATH.read_text()
+
+    assert "move_gmail_thread_to_trash" in contract
+    for phrase in PERMANENT_DELETION:
+        assert phrase not in contract

@@ -12,7 +12,7 @@
 # records the version and a digest of this file, so a past run can be explained
 # by the configuration that produced it.
 
-version: "2026-07-30.1"
+version: "2026-07-31.1"
 channel: email
 
 # Presentation contracts. A screen decides what a review looks like — the
@@ -27,6 +27,7 @@ screens:
   - id: admin-review-v1
     kind: table
     title: Admin — today's review
+    rows: unresolved
     columns: &review_columns
       - label: "#"
         source: index
@@ -57,10 +58,16 @@ screens:
       - id: approve
         label: Do what is recommended
         decision: approve
-      - id: archive
-        label: Archive it
+      # `move_gmail_thread_to_trash` is what "delete" means here: Gmail's
+      # Trash, recoverable, never permanent deletion.
+      - id: archive_gmail_thread
+        label: Archive
         decision: override
         action: gmail.archive
+      - id: move_gmail_thread_to_trash
+        label: Move to Trash
+        decision: override
+        action: gmail.trash
       - id: draft_reply
         label: Draft a reply
         decision: override
@@ -75,10 +82,15 @@ screens:
       - id: defer
         label: Not today
         decision: defer
-      - id: archive_all
+      - id: archive_gmail_thread_all
         label: Archive all of these
         decision: override
         action: gmail.archive
+        scope: group
+      - id: move_gmail_thread_to_trash_all
+        label: Move all of these to Trash
+        decision: override
+        action: gmail.trash
         scope: group
     footer: >-
       {pending} of {total} still need you. Answer with the row number and what
@@ -88,6 +100,7 @@ screens:
   - id: tax-review-v1
     kind: table
     title: Financial/Taxes — today's review
+    rows: unresolved
     columns: *review_columns
     sort:
       - source: received
@@ -118,6 +131,7 @@ screens:
   - id: advisor-review-v1
     kind: table
     title: Advisory & expert calls — today's review
+    rows: unresolved
     columns: *review_columns
     sort:
       - source: received
@@ -126,6 +140,14 @@ screens:
       - id: approve
         label: Do what is recommended
         decision: approve
+      - id: archive_gmail_thread
+        label: Archive
+        decision: override
+        action: gmail.archive
+      - id: move_gmail_thread_to_trash
+        label: Move to Trash
+        decision: override
+        action: gmail.trash
       - id: draft_reply
         label: Draft a reply
         decision: override
@@ -140,6 +162,16 @@ screens:
       - id: defer
         label: Not today
         decision: defer
+      - id: archive_gmail_thread_all
+        label: Archive all of these
+        decision: override
+        action: gmail.archive
+        scope: group
+      - id: move_gmail_thread_to_trash_all
+        label: Move all of these to Trash
+        decision: override
+        action: gmail.trash
+        scope: group
     footer: >-
       {pending} of {total} still need you. A reply is drafted for approval here,
       never sent by agreeing to it.
@@ -152,7 +184,9 @@ capabilities:
     position: 10
     description: >-
       Administrative mail: notifications, receipts, and digests. Mostly
-      disposable, which is why archiving is permitted here and trashing is not.
+      disposable, which is why both dispositions are permitted here: archiving
+      keeps the thread, and Trash keeps it recoverable. Neither is ever
+      recommended on its own — the rules below only ever suggest archiving.
     gmail:
       labels:
         - Admin
@@ -207,9 +241,13 @@ capabilities:
     allowed_actions:
       - gmail.label
       - gmail.archive
+      - gmail.trash
       - gmail.draft_reply
       - monday.create_task
     approval:
+      # Empty on purpose: archiving and Trash are approved item by item, or by
+      # a rule that has been separately confirmed and promoted. Nothing leaves
+      # the inbox unattended by default.
       auto_approve: []
       min_confidence_for_auto: 1.0
       allow_bulk_decisions: true
@@ -217,6 +255,7 @@ capabilities:
       permitted_actions:
         - gmail.label
         - gmail.archive
+        - gmail.trash
         - gmail.draft_reply
       require_verification: true
     completion:
@@ -332,6 +371,7 @@ capabilities:
     allowed_actions:
       - gmail.label
       - gmail.archive
+      - gmail.trash
       - gmail.draft_reply
       - gmail.send_draft
       - monday.create_task
@@ -342,6 +382,8 @@ capabilities:
     execution:
       permitted_actions:
         - gmail.label
+        - gmail.archive
+        - gmail.trash
         - gmail.draft_reply
         - gmail.send_draft
       require_verification: true

@@ -38,6 +38,18 @@ class ColumnSource(StrEnum):
     STATE = "state"
 
 
+class RowScope(StrEnum):
+    """Which of a group's items a screen puts on the table.
+
+    `unresolved` leaves out the threads that are finished with — archived,
+    trashed, dismissed, deferred — so the table is what still needs Brian. They
+    remain in the group's counts and in the action history.
+    """
+
+    ALL = "all"
+    UNRESOLVED = "unresolved"
+
+
 class ValueType(StrEnum):
     """What kind of value a source produces, which decides how it may be formatted."""
 
@@ -181,6 +193,7 @@ class ScreenConfig(ScreenModel):
     kind: Literal["table"] = "table"
     title: str
     columns: list[ScreenColumn] = Field(min_length=1)
+    rows: RowScope = RowScope.ALL
     sort: list[ScreenSort] = []
     actions: list[ScreenAction] = Field(min_length=1)
     action_labels: dict[str, str] = {}

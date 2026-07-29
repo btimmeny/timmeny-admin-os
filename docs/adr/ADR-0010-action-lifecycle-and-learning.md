@@ -37,7 +37,7 @@ Each state is durable, so at any moment there is an answer to what was intended,
 
 **Sending requires approval of the exact draft.** Creating a draft never sends it — they are separate actions with separate permissions. Approving a send names both the draft id and the message id the draft carried when it was read back, and approving still does not send: it creates a `gmail.send_draft` action that must be executed like any other, and that refuses if the draft has changed since it was approved. Editing a draft therefore invalidates its approval, which is the intended behaviour.
 
-**Permanent deletion is not implemented.** `gmail.trash` exists in the vocabulary; no capability is granted it and no code performs it. Archiving is reversible and sufficient.
+**Permanent deletion is not implemented.** `gmail.trash` exists in the vocabulary; no capability is granted it and no code performs it. Archiving is reversible and sufficient. *(Superseded in part by [ADR-0012](./ADR-0012-gmail-dispositions.md): `gmail.trash` is now implemented and granted to two capabilities. Permanent deletion remains unimplemented and unreachable.)*
 
 **A correction is evidence.** Every decision that answers a recommendation writes a learning event: what was recommended, what was chosen, the retained metadata the decision turned on, the actor, the policy or rule version, and the provenance. Never message content — ADR-0003 is not relaxed for learning. An event changes nothing about what the review recommends.
 

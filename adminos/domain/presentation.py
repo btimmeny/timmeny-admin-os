@@ -19,13 +19,19 @@ from adminos.capabilities.config import (
 from adminos.capabilities.screens import (
     ColumnFormat,
     ColumnSource,
+    RowScope,
     ScreenAction,
     ScreenColumn,
     ScreenConfig,
 )
 from adminos.db.models import ReviewItem, ReviewRun
 from adminos.domain.decisions import ItemState
-from adminos.domain.review import DecisionRefused, GroupView, check_decision
+from adminos.domain.review import (
+    OPEN_ITEM_STATES,
+    DecisionRefused,
+    GroupView,
+    check_decision,
+)
 
 
 ELLIPSIS = "…"
@@ -109,7 +115,7 @@ def render_group(
 ) -> ScreenView:
     """Build the screen for one capability group."""
     moment = now or datetime.now(UTC)
-    items = sort_items(screen, view.items)
+    items = sort_items(screen, shown_items(screen, view.items))
     labels = {**DEFAULT_ACTION_LABELS, **screen.action_labels}
 
     rows = [
@@ -147,6 +153,18 @@ def render_group(
         footer=render_footer(screen, view, run),
         empty_text=screen.empty_text,
     )
+
+
+def shown_items(screen: ScreenConfig, items: list[ReviewItem]) -> list[ReviewItem]:
+    """The items this contract puts on the table.
+
+    A thread that has been archived, trashed, dismissed, or put off is done
+    with for today: leaving it in the table would invite deciding it twice.
+    The footer still counts it, and its action history is untouched.
+    """
+    if screen.rows is RowScope.ALL:
+        return list(items)
+    return [item for item in items if item.state in OPEN_ITEM_STATES]
 
 
 def sort_items(screen: ScreenConfig, items: list[ReviewItem]) -> list[ReviewItem]:

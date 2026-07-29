@@ -68,6 +68,38 @@ A decision records intent. Nothing has been written to Gmail yet.
 
 ---
 
+## 2a. Archiving and Trash
+
+Both dispositions can be named as they are spoken. `archive_gmail_thread` and `move_gmail_thread_to_trash` are accepted wherever `gmail.archive` and `gmail.trash` are, and record the same thing.
+
+```bash
+# one row
+os -X POST "$ADMIN_OS/review/runs/$RUN/items/$ITEM/decision" \
+   -d '{"decision":"override","action":"move_gmail_thread_to_trash"}'
+
+# "delete all 11" — the whole group, one decision each, one audit record each
+os -X POST "$ADMIN_OS/review/runs/$RUN/groups/admin/decisions" \
+   -d '{"decision":"override","action":"move_gmail_thread_to_trash"}'
+
+# "trash 2, 4 and 7"
+os -X POST "$ADMIN_OS/review/runs/$RUN/groups/admin/decisions" \
+   -d '{"decision":"override","action":"move_gmail_thread_to_trash",
+        "item_ids":["<row 2>","<row 4>","<row 7>"]}'
+```
+
+If any named row refuses, the whole request is refused and nothing is recorded:
+
+```json
+{"detail": {
+  "message": "1 of the selected items do not permit that decision, so none was recorded: itm-4.",
+  "ineligible": [{"item_id":"itm-4","thread_id":"18f…","subject":"Q3 filing",
+                  "reason":"'financial_taxes' is not allowed to 'gmail.trash'."}]}}
+```
+
+Financial/Taxes is not granted Trash, deliberately. Archive removes `INBOX` and leaves every other label; Trash calls `threads.trash` and is recoverable in Gmail for thirty days. Permanent deletion is not implemented anywhere — there is no request that reaches it.
+
+---
+
 ## 3. Prepare, read, execute
 
 **Prepare** resolves every approval into the exact parameters that would be sent, and writes nothing:

@@ -257,6 +257,98 @@ def test_a_row_only_offers_what_that_row_would_accept() -> None:
     assert offered["done"] == []
 
 
+DISPOSAL_ACTIONS = [
+    {
+        "id": "archive_gmail_thread",
+        "label": "Archive",
+        "decision": "override",
+        "action": "gmail.archive",
+    },
+    {
+        "id": "move_gmail_thread_to_trash",
+        "label": "Move to Trash",
+        "decision": "override",
+        "action": "gmail.trash",
+    },
+]
+
+
+def test_an_eligible_gmail_row_offers_both_dispositions_by_their_canonical_names() -> None:
+    """The row says what may be done to it, so nothing downstream has to guess."""
+    view = build_view(
+        build_item(),
+        allowed_actions=["gmail.archive", "gmail.trash"],
+        execution={"permitted_actions": ["gmail.archive", "gmail.trash"]},
+    )
+
+    rendered = render_group(build_screen(actions=DISPOSAL_ACTIONS), view, build_run(), now=NOW)
+
+    assert rendered.rows[0].actions == ["archive_gmail_thread", "move_gmail_thread_to_trash"]
+
+
+def test_a_capability_that_may_not_trash_never_offers_it() -> None:
+    """Absence is the permission answer: tax mail simply has no Trash button."""
+    view = build_view(
+        build_item(),
+        allowed_actions=["gmail.archive"],
+        execution={"permitted_actions": ["gmail.archive"]},
+    )
+
+    rendered = render_group(build_screen(actions=DISPOSAL_ACTIONS), view, build_run(), now=NOW)
+
+    assert rendered.rows[0].actions == ["archive_gmail_thread"]
+    assert [action.id for action in rendered.actions] == ["archive_gmail_thread"]
+
+
+def test_a_settled_row_offers_nothing() -> None:
+    view = build_view(
+        build_item("done", state="executed"),
+        allowed_actions=["gmail.archive", "gmail.trash"],
+        execution={"permitted_actions": ["gmail.archive", "gmail.trash"]},
+    )
+
+    rendered = render_group(build_screen(actions=DISPOSAL_ACTIONS), view, build_run(), now=NOW)
+
+    assert rendered.rows[0].actions == []
+
+
+def test_a_screen_may_leave_out_the_threads_that_are_finished_with() -> None:
+    """An archived thread is done: showing it again invites deciding it twice."""
+    view = build_view(
+        build_item("waiting"),
+        build_item("archived", state="executed"),
+        build_item("dropped", state="dismissed"),
+    )
+
+    rendered = render_group(
+        build_screen(rows="unresolved", footer="{pending} of {total} still need you."),
+        view,
+        build_run(),
+        now=NOW,
+    )
+
+    assert [row.item_id for row in rendered.rows] == ["waiting"]
+    assert rendered.footer == "1 of 3 still need you."
+
+
+def test_the_shipped_screens_show_only_what_is_still_open() -> None:
+    loaded = load_capabilities(SHIPPED_CONFIG)
+
+    for capability in loaded.enabled():
+        assert loaded.screen_for(capability).rows == "unresolved"
+
+
+def test_the_shipped_admin_screen_offers_both_dispositions() -> None:
+    loaded = load_capabilities(SHIPPED_CONFIG)
+    screen = loaded.screen_for(loaded.get("admin"))
+
+    offered = {action.id: action.action for action in screen.actions}
+
+    assert offered["archive_gmail_thread"] == "gmail.archive"
+    assert offered["move_gmail_thread_to_trash"] == "gmail.trash"
+    assert offered["move_gmail_thread_to_trash_all"] == "gmail.trash"
+
+
 def test_the_footer_is_filled_in_by_the_service() -> None:
     view = build_view(build_item("a"), build_item("b", state="dismissed"))
     screen = build_screen(footer="{pending} of {total} in {capability} still need you.")
@@ -378,24 +470,9 @@ def test_a_screen_may_not_offer_an_action_the_capability_is_not_allowed() -> Non
 
 def test_a_screen_may_not_offer_bulk_decisions_where_they_are_not_taken() -> None:
     document = SHIPPED_CONFIG.read_text().replace(
-        """    approval:
-      auto_approve: []
-      min_confidence_for_auto: 1.0
-      allow_bulk_decisions: true
-    execution:
-      permitted_actions:
-        - gmail.label
-        - gmail.archive
-        - gmail.draft_reply""",
-        """    approval:
-      auto_approve: []
-      min_confidence_for_auto: 1.0
-      allow_bulk_decisions: false
-    execution:
-      permitted_actions:
-        - gmail.label
-        - gmail.archive
-        - gmail.draft_reply""",
+        "allow_bulk_decisions: true",
+        "allow_bulk_decisions: false",
+        1,
     )
 
     with pytest.raises(CapabilityConfigError, match="does not take bulk decisions"):

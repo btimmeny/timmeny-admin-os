@@ -77,10 +77,19 @@ def test_the_shipped_admin_rules_only_ever_archive() -> None:
     assert admin.recommendation_policy.default == "needs_review"
 
 
-def test_no_shipped_capability_may_delete_mail() -> None:
+def test_tax_mail_may_not_be_archived_or_trashed() -> None:
+    """The one capability whose mail has deadlines keeps both dispositions off."""
+    taxes = load_capabilities(SHIPPED_CONFIG).get("financial_taxes")
+
+    assert taxes.execution.permits(ActionKind.GMAIL_ARCHIVE) is False
+    assert taxes.permits(ActionKind.GMAIL_TRASH) is False
+
+
+def test_no_shipped_capability_disposes_of_mail_unattended() -> None:
+    """Trash is reversible, but it still waits for Brian rather than a score."""
     for capability in load_capabilities(SHIPPED_CONFIG).enabled():
-        assert ActionKind.GMAIL_TRASH not in capability.allowed_actions
-        assert ActionKind.GMAIL_TRASH not in capability.execution.permitted_actions
+        assert ActionKind.GMAIL_ARCHIVE not in capability.approval.auto_approve
+        assert ActionKind.GMAIL_TRASH not in capability.approval.auto_approve
 
 
 def test_being_allowed_to_approve_an_action_is_not_permission_to_run_it() -> None:

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.9.3
+  version: 0.9.4
   description: API for the Timmeny Admin OS daily review workflow.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
@@ -229,6 +229,11 @@ paths:
                   enum: [approve, override, dismiss, defer]
                 action:
                   type: string
+                  description: >-
+                    The action to take, named as the row offers it. Gmail
+                    dispositions are archive_gmail_thread and
+                    move_gmail_thread_to_trash; "delete", "remove", and
+                    "trash" all mean move to Trash, which is recoverable.
                 action_params:
                   type: object
                   properties:
@@ -292,6 +297,11 @@ paths:
                     type: string
                 action:
                   type: string
+                  description: >-
+                    The action to take on every selected row, named as the
+                    rows offer it. If any selected row does not permit it the
+                    whole request is refused with 409 and nothing is recorded;
+                    the response names each ineligible item and why.
                 note:
                   type: string
       responses:
@@ -317,10 +327,41 @@ paths:
                           title:
                             type: string
                 additionalProperties: true
+        "409":
+          description: >-
+            No decision was recorded, because at least one selected row does
+            not permit it. Every offending row is named with its reason.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detail:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      ineligible:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            item_id:
+                              type: string
+                            thread_id:
+                              type: string
+                            subject:
+                              type: string
+                            reason:
+                              type: string
   /review/runs/{run_id}/actions/prepare:
     post:
       operationId: prepareReviewActions
       summary: Prepare approved actions
+      description: >-
+        Resolves each approval into the exact parameters that would be sent.
+        Nothing is written to Gmail here; preparing twice yields the same
+        action rather than a second one.
       parameters:
         - name: run_id
           in: path
@@ -379,7 +420,13 @@ paths:
     post:
       operationId: executeReviewActions
       summary: Execute and verify prepared actions
-      description: Executes only after confirm is true and server permissions allow it.
+      description: >-
+        The only operation that changes the mailbox, and it requires
+        confirm: true given for the execution itself, not inherited from the
+        decision. Every action is read back from Gmail: an archive is complete
+        only once INBOX is absent, and a move to Trash only once the thread is
+        in TRASH. A thread already in the requested state completes without a
+        write. A failure stays visible and retryable; nothing retries itself.
       parameters:
         - name: run_id
           in: path

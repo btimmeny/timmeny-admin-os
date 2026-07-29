@@ -490,8 +490,10 @@ Groups are worked one at a time in configured order, but a group waiting only on
 Records one decision: `approve` (take the recommended action), `override` (take a different one), `dismiss` (settled, and it does not come back), or `defer` (not today — it returns in tomorrow's review).
 
 ```json
-{"decision": "override", "action": "gmail.archive", "note": "Superseded"}
+{"decision": "override", "action": "move_gmail_thread_to_trash", "note": "Circular"}
 ```
+
+An action may be named as it is spoken (`archive_gmail_thread`, `move_gmail_thread_to_trash`) or as it is stored (`gmail.archive`, `gmail.trash`); both record the same thing, so the audit history keeps one vocabulary while the API answers in the other.
 
 Approval is the only route to an action, and configuration decides which actions exist for a capability at all: an action it is not granted is refused with `409` however the request is phrased. An approved item is recorded as approved and **not executed**: approval creates an action in `approved`, and reaching the mailbox takes the separate steps below. A run holding unexecuted actions reports `awaiting_actions` rather than claiming completion.
 
@@ -499,7 +501,20 @@ Approval is the only route to an action, and configuration decides which actions
 
 ### `POST /review/runs/{run_id}/groups/{capability_key}/decisions`
 
-Applies one decision across a group — "archive all of these". Refused with `409` where the capability sets `allow_bulk_decisions: false`. All or nothing: if the decision is not permitted for one item, none of them is decided.
+Applies one decision across a group — "archive all of these" — or across named rows, with `item_ids`, which is what "trash 2, 4 and 7" becomes. Refused with `409` where the capability sets `allow_bulk_decisions: false`.
+
+All or nothing, and the refusal names every offending row rather than the first, because "trash 2, 4 and 7" is answered usefully only by saying which of them cannot be trashed:
+
+```json
+{
+  "message": "1 of the selected items do not permit that decision, so none was recorded: itm-2.",
+  "ineligible": [
+    {"item_id": "itm-2", "thread_id": "18f…", "subject": "Q3 filing", "reason": "'financial_taxes' is not allowed to 'gmail.trash'."}
+  ]
+}
+```
+
+Nothing is recorded when a bulk request is refused, and every row that is applied keeps its own decision and audit record — a bulk request is a shorthand for many decisions, not a decision of its own.
 
 ### `POST /review/runs/{run_id}/items/{item_id}/assessment`
 
@@ -548,7 +563,7 @@ Every review response carries the screen that renders it. Admin OS decides the c
           "Archive it", "A digest has nothing to act on once it has been seen.",
           "95%", "Pending"
         ],
-        "actions": ["approve", "archive", "dismiss", "defer"]
+        "actions": ["approve", "archive_gmail_thread", "move_gmail_thread_to_trash", "dismiss"]
       }
     ],
     "actions": [
@@ -586,11 +601,14 @@ screens:
       - {source: received, direction: desc}
     actions:
       - {id: approve, label: Do what is recommended, decision: approve}
-      - {id: archive, label: Archive it, decision: override, action: gmail.archive}
+      - {id: archive_gmail_thread, label: Archive, decision: override, action: gmail.archive}
+      - {id: move_gmail_thread_to_trash, label: Move to Trash, decision: override, action: gmail.trash}
     footer: "{pending} of {total} still need you."
 ```
 
 A column names a `source` from a closed set, and a format its value type allows: a percentage of a subject line is a configuration error, not a blank cell. So is ordering by a value with no order, an unknown footer substitution, an override that names no action, a capability pointing at a screen that does not exist, a screen offering an action the capability is not allowed, or a whole-group decision offered where `allow_bulk_decisions` is false.
+
+A screen also decides which rows exist: `rows: unresolved`, which all three shipped screens set, leaves out the threads that have been settled or already acted on, so a thread that has just been trashed does not come back to be trashed again. The footer still counts the whole group, so what dropped out is visible rather than silently gone.
 
 Three screens ship — `admin-review-v1`, `tax-review-v1`, `advisor-review-v1` — one per capability. They share a column set today; giving one its own is an edit to that screen. A compatible change edits a screen in place; an incompatible one is a new `-v2` with the capability pointed at it.
 
@@ -607,7 +625,18 @@ completed -> done; re-running is a no-op
 failed    -> durable, with the error, and retryable
 ```
 
-Three Gmail actions ship: `gmail.label`, `gmail.archive`, and `gmail.draft_reply`. `gmail.send_draft` exists but sends only a specific draft that has been approved by id. **There is no permanent deletion**: `gmail.trash` has no executor and no capability is granted it.
+Five Gmail actions ship: `gmail.label`, `gmail.archive`, `gmail.trash`, and `gmail.draft_reply`, plus `gmail.send_draft`, which sends only a specific draft that has been approved by id.
+
+The two dispositions are what a review mostly does, and the API names them as they are spoken:
+
+| Said | Sent as | Gmail call | Reversible |
+|---|---|---|---|
+| "archive" | `archive_gmail_thread` | `threads.modify`, removing `INBOX` | yes, the thread and its other labels are untouched |
+| "delete", "remove", "trash" | `move_gmail_thread_to_trash` | `threads.trash` | yes, Gmail restores from Trash for 30 days |
+
+Both act on the whole thread the row stands for, and both are verified by reading Gmail back: archive requires `INBOX` to be absent, Trash requires `TRASH` to be present. A thread that is already in the requested state is completed without a write.
+
+**There is no permanent deletion.** `messages.delete` and `threads.delete` are not implemented, not gated: no capability, rule, or request can reach them, and a test asserts the client has no method that could.
 
 ### `POST /review/runs/{run_id}/actions/prepare`
 
@@ -710,7 +739,7 @@ The file is validated on load and rejected outright — with `503` rather than a
 - A capability may not auto-approve an action it is not allowed to take.
 - A capability may not execute an action it may not approve.
 - `allow_automatable_rules` without `allow_rule_learning` is refused: a rule cannot be promoted where none may be learned.
-- No capability is granted `gmail.trash`, and there is no code to perform it.
+- No capability auto-approves a disposition: archiving and Trash are decided item by item, or by a rule that has been separately confirmed *and* promoted.
 - `learning.record_message_content: true` is refused: message content is never retained ([ADR-0003](docs/adr/ADR-0003-gmail-access-and-retention.md)).
 - Two capabilities may not share a position, since position is what orders the review.
 - A capability may not name a screen that is not defined, and a screen may not offer more than the capability permits ([Presentation](#presentation)).

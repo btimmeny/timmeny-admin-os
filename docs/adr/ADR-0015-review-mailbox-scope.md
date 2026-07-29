@@ -25,6 +25,8 @@ Two states also escaped the query as it stood. Snoozing keeps the `INBOX` label 
 
 **Snoozing is excluded by search, and we are honest that it is.** `in:snoozed` is a documented Gmail search operator; there is no corresponding label in the API and no field on a message that reveals a snooze. So `-in:snoozed` is the strongest available exclusion, and unlike the other exclusions it cannot be re-checked against the thread. It is recorded as `include_snoozed: false` and as part of `gmail_query`, so what is guaranteed and how is visible rather than implied.
 
+**What a search proved about a snooze is recorded on the evidence.** Because no label carries it, a snooze can only be learned from the search that found the thread: `in:snoozed` proves one, `-in:snoozed` disproves it, and a search that asked neither proves nothing. That observation is stored as `evidence.snoozed`, and it is what a review of snoozed mail admits threads on. Unknown is not a snooze: a thread no snoozed search has ever returned does not appear in a snoozed review, and the next search of either kind corrects what is recorded. Without this, admission could only be judged from labels, and every archived thread — also lacking `INBOX`, also carrying no label about it — was indistinguishable from a sleeping one.
+
 **Every review response states its scope.** `name`, `mailbox`, an inclusion flag for each of snoozed, archived, Trash, Spam, sent and drafts, whether it was `requested`, the `gmail_query` used, and a sentence a person can be shown. It appears on the run and on each group, and the run's scope is persisted, so a run read back a week later reports the scope it was built with rather than today's default.
 
 **Another scope only happens when it is named.** `scope: "archived" | "snoozed" | "everything"` on `POST /review/start`. An unrecognised name is `422`; there is no partial or fuzzy match. Nothing infers a scope from phrasing at the server, and the GPT is instructed to send one only when Brian asks for one.
@@ -57,7 +59,9 @@ Two states also escaped the query as it stood. Snoozing keeps the `INBOX` label 
 
 The GPT can answer "what did you look at?" from the response, with the exact Gmail search if pressed. It never has to guess, and it has nothing to propose about scope.
 
-Snoozed mail is excluded on Gmail's word rather than on evidence we hold. If `in:snoozed` were to change meaning, the exclusion would weaken silently — the mitigation is that it is stated in every response, not that it is guaranteed twice.
+Snoozed mail is excluded on Gmail's word rather than on evidence of our own: `evidence.snoozed` records what a search said, so it is Gmail's answer kept, not an independent check. If `in:snoozed` were to change meaning, the exclusion would weaken silently — the mitigation is that it is stated in every response, not that it is guaranteed twice.
+
+A snoozed review is only ever as complete as the last snoozed search. Snoozes expire on Gmail's clock and nothing tells us when, so a thread recorded asleep stays recorded asleep until a search returns it awake. The default review is unaffected — it excludes snoozed mail in the query, and admitting a thread wrongly kept out is the harmless direction — and a woken thread reappears the next time the inbox is scanned.
 
 Re-reading threads that left the inbox costs one Gmail read each, bounded by the scan limit, and only for threads not already known to be out of scope. In the steady state that is nearly none; the day after a mass archive it is one per archived thread.
 

@@ -100,6 +100,25 @@ def test_the_gpt_instructions_fit_the_field_they_are_pasted_into() -> None:
     )
 
 
+def test_the_contract_and_the_instructions_open_with_the_playbook() -> None:
+    """An orientation the GPT composes is one nobody agreed to and none can test."""
+    document = yaml.safe_load(CONTRACT_PATH.read_text())
+    schemas = document["components"]["schemas"]
+    instructions = INSTRUCTIONS_PATH.read_text()
+
+    assert "ReviewOpening" in schemas
+    opening = schemas["ReviewOpening"]
+    assert set(opening["properties"]) == {"mode", "text"}
+    assert opening["properties"]["mode"]["enum"] == ["new", "resumed"]
+    assert (
+        schemas["ReviewPlan"]["properties"]["opening"]["$ref"]
+        == "#/components/schemas/ReviewOpening"
+    )
+    assert "plan.opening.text" in instructions
+    assert "our admin playbook" in instructions
+    assert "How can I help?" in instructions
+
+
 def test_the_gpt_instructions_name_the_lifecycle_operations() -> None:
     """An operation the GPT is never told about is an operation it never calls."""
     instructions = INSTRUCTIONS_PATH.read_text()

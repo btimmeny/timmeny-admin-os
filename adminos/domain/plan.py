@@ -21,6 +21,17 @@ class PlanStatus(StrEnum):
     ACTIVE = "active"
 
 
+class OpeningMode(StrEnum):
+    """Whether a review is being entered for the first time or picked up.
+
+    The two are told apart because they are promised different things: one
+    morning is being laid out, the other carried on with.
+    """
+
+    NEW = "new"
+    RESUMED = "resumed"
+
+
 class PlanRefused(RuntimeError):
     """Raised when a plan cannot be worked in the way it was asked for."""
 

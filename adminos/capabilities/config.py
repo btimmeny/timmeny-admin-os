@@ -393,9 +393,43 @@ class CapabilityConfig(StrictModel):
         )
 
 
+OPENING_NEW = (
+    "**Here's what we'll work through together.**\n\n"
+    "We'll follow our admin playbook to review your administrative items, work "
+    "through your inbox, review your current priorities and to-dos, handle "
+    "follow-ups or decisions, and make sure nothing important is being missed."
+    "\n\n"
+    "I'll guide you through each step. As we learn what works best, we can "
+    "evolve the playbook together."
+)
+
+OPENING_RESUMED = (
+    "**Here's what we'll do next.**\n\n"
+    "We'll continue from where we left off, work through the remaining admin "
+    "items, review priorities and follow-ups, and finish the current playbook."
+    "\n\n"
+    "I'll guide you through each step, and we can continue improving the "
+    "playbook as we learn."
+)
+
+
+class ReviewOpening(StrictModel):
+    """What Brian is told a review is, before any of it is shown.
+
+    The words are configuration rather than something the GPT composes: an
+    opening it writes each morning is an opening nobody agreed to, cannot be
+    versioned with the workflow it describes, and drifts. Changing it is an
+    edit here, recorded against every review by the configuration version.
+    """
+
+    new: str = OPENING_NEW
+    resumed: str = OPENING_RESUMED
+
+
 class CapabilitySet(StrictModel):
     version: str
     channel: str = "email"
+    opening: ReviewOpening = ReviewOpening()
     screens: list[ScreenConfig] = Field(min_length=1)
     capabilities: list[CapabilityConfig] = Field(min_length=1)
 
@@ -483,6 +517,8 @@ class LoadedCapabilities:
     channel: str
     capabilities: tuple[CapabilityConfig, ...]
     screens: tuple[ScreenConfig, ...] = ()
+    opening: ReviewOpening = ReviewOpening()
+    """What a review says it is, before it shows anything."""
 
     def enabled(self) -> tuple[CapabilityConfig, ...]:
         return tuple(
@@ -593,6 +629,7 @@ def parse_capabilities(raw: bytes) -> LoadedCapabilities:
         channel=parsed.channel,
         capabilities=tuple(parsed.capabilities),
         screens=tuple(parsed.screens),
+        opening=parsed.opening,
     )
 
 

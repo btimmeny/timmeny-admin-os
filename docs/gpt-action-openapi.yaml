@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.15.0
+  version: 0.16.0
   description: >-
     API for the Timmeny Admin OS daily review workflow.
 
@@ -22,9 +22,12 @@ paths:
       operationId: startDailyReview
       summary: Start or resume the daily review
       description: >-
-        Returns the review's plan and no group: what the morning consists of
-        is stated before any of it is presented. Show plan.message and
-        plan.groups, then call beginReviewPlan when Brian says to begin.
+        Call this for anything that starts an admin session — "good morning",
+        "let's begin", "check my inbox", "what do I need to do?". Returns the
+        review's plan and no group: what the morning consists of is stated
+        before any of it is presented. Print plan.opening.text first, then
+        plan.message and plan.groups, then call beginReviewPlan when Brian says
+        to begin.
       requestBody:
         required: false
         content:
@@ -190,7 +193,8 @@ paths:
       operationId: continueDailyReview
       summary: Resume the review already under way
       description: >-
-        For "where was I?" and "carry on". It never opens a review: if there is
+        For "where was I?", "continue" and "pick up where we left off". Print
+        plan.opening.text first here too. It never opens a review: if there is
         none today it answers 404, and if today's is finished it answers 409
         rather than reopening it. Say what it says; do not fall back to
         startDailyReview to make an answer appear.
@@ -1235,6 +1239,30 @@ components:
           type: object
           description: The exact request body to send, already scoped to these rows.
           additionalProperties: true
+    ReviewOpening:
+      type: object
+      nullable: true
+      description: >-
+        How an admin session opens: what will be worked through, that it
+        follows the playbook Brian and the agent hold together, and that the
+        playbook evolves by agreement. Print text exactly as written, as the
+        first thing in the reply, before the returned screen and before any
+        greeting; do not summarise it, replace it with "how can I help?", or
+        ask what he would like to do. Present only on startDailyReview,
+        continueDailyReview and restartDailyReview, and null everywhere else:
+        it is said once on entering a review, never between groups or rows.
+      properties:
+        mode:
+          type: string
+          enum: [new, resumed]
+          description: >-
+            new where the review is being laid out, resumed where it is being
+            picked up. The wording differs; the choice is Admin OS's.
+        text:
+          type: string
+          description: Markdown, safe and required to show as written.
+      required: [mode, text]
+
     ReviewPlan:
       type: object
       description: >-
@@ -1254,6 +1282,8 @@ components:
             if asked which plan is being worked.
         title:
           type: string
+        opening:
+          $ref: '#/components/schemas/ReviewOpening'
         message:
           type: string
           description: One paragraph, safe to show as written.

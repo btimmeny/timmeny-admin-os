@@ -41,6 +41,7 @@ from adminos.domain.mailboxes import (
 )
 from adminos.domain.plan import (
     NOTHING_OWED,
+    OpeningMode,
     PlanRefused,
     PlanStatus,
     ReviewStanding,
@@ -351,6 +352,18 @@ class PlannedGroupResponse(BaseModel):
     standing: ReviewStandingResponse
 
 
+class ReviewOpeningResponse(BaseModel):
+    """What a review says it is, before it shows anything.
+
+    Present only where a review is entered — started, resumed or restarted —
+    so it is said once a session rather than before every group. Print it
+    first, as it is written.
+    """
+
+    mode: str
+    text: str
+
+
 class ReviewPlanResponse(BaseModel):
     """What this review consists of, stated before any of it is presented.
 
@@ -364,6 +377,9 @@ class ReviewPlanResponse(BaseModel):
     status: str
     version: int
     title: str
+    opening: ReviewOpeningResponse | None
+    """The playbook's own words for what this review is, on entry only."""
+
     message: str
     steps: list[str]
     resumed: bool
@@ -562,7 +578,9 @@ async def start_review(
                 )
             except ReviewClosed as exc:
                 return build_closed_response(session, loaded, exc.run, request, refresh.warnings)
-            return build_run_response(view, refresh.warnings, loaded)
+            return build_run_response(
+                view, refresh.warnings, loaded, opening=entry_mode(view.run)
+            )
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -604,7 +622,9 @@ async def continue_daily_review(
                         "message": str(exc),
                     },
                 ) from exc
-            return build_run_response(view, refresh.warnings, loaded)
+            return build_run_response(
+                view, refresh.warnings, loaded, opening=entry_mode(view.run)
+            )
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -634,9 +654,22 @@ async def restart_daily_review(
                 scope=scope,
                 evidence_refresh_at=refresh.read_at,
             )
-            return build_run_response(view, refresh.warnings, loaded)
+            return build_run_response(
+                view, refresh.warnings, loaded, opening=OpeningMode.NEW
+            )
     except DatabaseNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def entry_mode(run: ReviewRun) -> OpeningMode:
+    """Whether this is a morning being laid out or one being carried on with.
+
+    A review that exists but has settled nothing is still new: what makes a
+    review resumable is work in it, not a row in a table.
+    """
+    if RunState(run.state) is RunState.NOT_STARTED:
+        return OpeningMode.NEW
+    return OpeningMode.RESUMED
 
 
 def requested_scope(name: str | None) -> ReviewScope:
@@ -1002,6 +1035,7 @@ def build_run_response(
     warnings: list[str],
     loaded: LoadedCapabilities,
     prompt: ReviewPromptResponse | None = None,
+    opening: OpeningMode | None = None,
 ) -> RunResponse:
     scope = read_stored_scope(view.run.scope)
     current = view.current_group()
@@ -1022,7 +1056,7 @@ def build_run_response(
         config_version=view.run.config_version,
         config_digest=view.run.config_digest,
         screen_id=rendered.screen_id if rendered else None,
-        plan=build_plan_response(view, loaded, scope),
+        plan=build_plan_response(view, loaded, scope, opening),
         summary=build_summary_response(view),
         groups=[
             GroupSummaryResponse(
@@ -1051,6 +1085,7 @@ def build_plan_response(
     view: RunView,
     loaded: LoadedCapabilities,
     scope: ReviewScope,
+    opening: OpeningMode | None = None,
 ) -> ReviewPlanResponse:
     """The shape of the morning: which groups, how big, and in what order."""
     plan = view.plan
@@ -1087,6 +1122,7 @@ def build_plan_response(
         status=plan.status if plan else PlanStatus.ACTIVE,
         version=plan.version if plan else 1,
         title="Resuming today's review" if resumed else "Today's review plan",
+        opening=build_opening(loaded, opening),
         message=plan_message(view, planned, scope, resumed, current, number),
         steps=list(PLAN_STEPS),
         resumed=resumed,
@@ -1124,6 +1160,24 @@ def build_plan_response(
         excluded=excluded_mailboxes(scope),
         standing=build_standing_response(standing),
     )
+
+
+def build_opening(
+    loaded: LoadedCapabilities, mode: OpeningMode | None
+) -> ReviewOpeningResponse | None:
+    """The configured opening, for the one response that enters a review.
+
+    Absent everywhere else on purpose: a caller cannot repeat between groups
+    what it is not given twice.
+    """
+    if mode is None:
+        return None
+    text = (
+        loaded.opening.new
+        if mode is OpeningMode.NEW
+        else loaded.opening.resumed
+    )
+    return ReviewOpeningResponse(mode=mode.value, text=text)
 
 
 def planned_position(planned: list[GroupView], group: GroupView) -> int:

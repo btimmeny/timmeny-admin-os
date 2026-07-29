@@ -569,7 +569,7 @@ A suggestion is adopted as the item's recommendation only when it clears the cap
 
 ## Presentation
 
-Every review response carries the screen that renders it. Admin OS decides the columns, their order, the wording, the formatting, and which decisions are on offer; a client prints what it is given. See [ADR-0011](docs/adr/ADR-0011-presentation-contracts.md) for why, and [Daily Review GPT Instructions](docs/gpt-instructions/daily-review-gpt-instructions.md) for what that asks of the GPT.
+Every review response carries the screen that renders it. Admin OS decides the columns, their order, the wording, the formatting, and which decisions are on offer; a client prints what it is given. See [ADR-0011](docs/adr/ADR-0011-presentation-contracts.md) for why, and [Daily Review GPT Instructions](docs/gpt-daily-review-instructions.md) for what that asks of the GPT. That file is the whole of what is pasted into the Daily GPT, and it is kept under the 8,000 characters that field accepts — there is one of it, because two files saying the same thing in different words is two files that disagree by next month.
 
 ```json
 {

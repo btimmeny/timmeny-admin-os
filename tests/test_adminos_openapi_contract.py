@@ -14,10 +14,14 @@ import main
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 CONTRACT_PATH = REPOSITORY_ROOT / "docs/gpt-action-openapi.yaml"
+INSTRUCTIONS_PATH = REPOSITORY_ROOT / "docs/gpt-daily-review-instructions.md"
+INSTRUCTION_LIMIT = 8000
 METHODS = {"get", "post", "patch", "put", "delete"}
 
 REQUIRED_OPERATIONS = {
     ("/review/start", "post"),
+    ("/review/continue", "post"),
+    ("/review/restart", "post"),
     ("/review/runs/{run_id}", "get"),
     ("/review/runs/{run_id}/groups/{capability_key}", "get"),
     ("/review/runs/{run_id}/items/{item_id}/decision", "post"),
@@ -83,3 +87,22 @@ def test_the_contract_says_a_move_names_its_folder() -> None:
 
     assert "move_gmail_thread_to_label" in contract
     assert '{"label": "Later"}' in contract
+
+
+def test_the_gpt_instructions_fit_the_field_they_are_pasted_into() -> None:
+    """ChatGPT truncates at 8,000 characters, and silently: the tail is the Never list."""
+    instructions = INSTRUCTIONS_PATH.read_text()
+
+    assert len(instructions) <= INSTRUCTION_LIMIT, (
+        f"{len(instructions)} characters, {len(instructions) - INSTRUCTION_LIMIT} over. "
+        "Cut prose rather than a safeguard."
+    )
+
+
+def test_the_gpt_instructions_name_the_lifecycle_operations() -> None:
+    """An operation the GPT is never told about is an operation it never calls."""
+    instructions = INSTRUCTIONS_PATH.read_text()
+
+    for operation in ("startDailyReview", "continueDailyReview", "restartDailyReview"):
+        assert operation in instructions
+    assert "review_id" in instructions

@@ -27,6 +27,7 @@ REQUEST_SHAPES: dict[str, str] = {
     "0.11.0": "6276e313ba076bf05bd2c7c7df633a6099bfe1ef8011ca9c0728067c054812f5",
     "0.12.0": "0e8d7f37f4a88e9e3086e99968d06253f4670c258ff0bb5ddfd97a9a1c021b05",
     "0.12.1": "0e8d7f37f4a88e9e3086e99968d06253f4670c258ff0bb5ddfd97a9a1c021b05",
+    "0.13.0": "bfe017ada84890a3e901660f575f59c7855f55e77e3a30af0ef6958d394a1fed",
 }
 """Every version of the contract, and the request shapes it published.
 
@@ -161,3 +162,39 @@ def test_the_contract_requires_what_the_api_requires() -> None:
     assert set(documented["properties"]) == set(live["properties"])
     assert set(documented["required"]) - {"confirm"} == set(live["required"])
     assert "confirm" not in live["required"]
+
+
+def test_the_lifecycle_operations_are_published_with_the_routes_they_call() -> None:
+    """A review resumed or restarted has to be asked for by name."""
+    paths = contract()["paths"]
+
+    assert paths["/review/continue"]["post"]["operationId"] == "continueDailyReview"
+    assert paths["/review/restart"]["post"]["operationId"] == "restartDailyReview"
+    live = {route.path for route in main.app.routes}
+    assert {"/review/continue", "/review/restart"} <= live
+
+
+def test_the_review_response_names_the_review_it_is_about() -> None:
+    """The GPT reads the lifecycle rather than inferring it from the rows."""
+    returned = contract()["paths"]["/review/start"]["post"]["responses"]["200"]
+    properties = returned["content"]["application/json"]["schema"]["properties"]
+
+    for field in (
+        "review_id",
+        "review_date",
+        "revision",
+        "status",
+        "started_at",
+        "completed_at",
+        "abandoned_at",
+        "evidence_refresh_at",
+        "prompt",
+    ):
+        assert field in properties, field
+    assert set(properties["status"]["enum"]) == {
+        "not_started",
+        "in_progress",
+        "awaiting_actions",
+        "completed",
+        "abandoned",
+    }

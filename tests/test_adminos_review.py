@@ -132,7 +132,7 @@ def test_a_review_creates_one_group_per_enabled_capability(session: Session) -> 
 
     assert [group.group.capability_key for group in view.groups] == ["financial_taxes", "admin"]
     assert view.run.review_date == TODAY
-    assert view.run.state == RunState.IN_PROGRESS
+    assert view.run.state == RunState.NOT_STARTED
 
 
 def test_groups_are_presented_in_configured_order(session: Session) -> None:

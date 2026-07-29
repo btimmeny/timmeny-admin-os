@@ -31,6 +31,8 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0013 — A Recommendation to File Mail Names the Folder](./ADR-0013-filing-mail-in-a-named-folder.md)
 - [ADR-0014 — An Execution Runs the Rows That Were Selected, and No Others](./ADR-0014-execution-scope-integrity.md)
 - [ADR-0015 — The Review Is of the Inbox, and Says So](./ADR-0015-review-mailbox-scope.md)
+- [ADR-0016 — The Contract the GPT Holds Is the One This Service Serves](./ADR-0016-a-contract-that-cannot-go-stale.md)
+- [ADR-0017 — A Review Is an Object With a Life, and Ending One Is a Decision](./ADR-0017-a-review-is-an-object-with-a-life.md)
 
 ## Candidate Decisions
 

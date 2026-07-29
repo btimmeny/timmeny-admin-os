@@ -19,7 +19,7 @@ screens:
     sort:
       - source: received
         direction: desc
-    footer: "{pending} of {total} still need you."
+    footer: "{remaining_items} still need you."
     actions:
       - id: approve
         label: Do what is recommended

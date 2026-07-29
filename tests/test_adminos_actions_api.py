@@ -1,3 +1,4 @@
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -668,7 +669,7 @@ def test_a_trashed_thread_leaves_the_table_but_not_the_record(
     history = client.get(f"/review/runs/{run_id}/actions", headers=AUTH).json()
 
     group = body["groups"][0]
-    assert group["counts"] == {"total": 1, "executed": 1}
+    assert group["counts"] == {"total": 1, "executed": 1, "remaining": 0}
     assert [action["item_id"] for action in history["actions"]] == [item_id]
 
 
@@ -861,6 +862,104 @@ def approve_trash(
     return item_ids
 
 
+def group_of(client: TestClient, run_id: str) -> dict[str, Any]:
+    response = client.get(f"/review/runs/{run_id}/groups/admin", headers=AUTH)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def decide(client: TestClient, run_id: str, item_id: str, decision: str) -> None:
+    response = client.post(
+        f"/review/runs/{run_id}/items/{item_id}/decision",
+        headers=AUTH,
+        json={"decision": decision},
+    )
+    assert response.status_code == 200, response.text
+
+
+def settle_all_but(
+    client: TestClient, gmail: FakeGmail, count: int, keep: int
+) -> tuple[str, list[dict[str, Any]]]:
+    """A group that loaded `count` threads and has `keep` rows left to answer."""
+    run_id, rows = start_with_threads(client, gmail, count)
+    settled = rows[keep:]
+    approve_trash(client, run_id, settled)
+    prepared = prepare(client, run_id, [row["item_id"] for row in settled])
+    executed = execute(client, run_id, prepared)
+    assert executed.status_code == 200, executed.text
+    return run_id, rows
+
+
+def test_progress_counts_the_rows_still_open_not_the_ones_loaded_this_morning(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """The bug: four rows on the table, described as "4 of 28 still need you"."""
+    run_id, _ = settle_all_but(client, gmail, 28, keep=4)
+
+    group = group_of(client, run_id)
+    screen = group["screen"]
+
+    assert len(screen["rows"]) == 4
+    assert screen["footer"] == "4 items still need you."
+    assert "28" not in screen["footer"]
+    assert group["counts"]["remaining"] == 4
+    assert group["counts"]["total"] == 28
+
+
+def test_one_more_decision_leaves_three_rows_and_says_three(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    run_id, rows = settle_all_but(client, gmail, 28, keep=4)
+
+    decide(client, run_id, rows[0]["item_id"], "dismiss")
+
+    group = group_of(client, run_id)
+
+    assert len(group["screen"]["rows"]) == 3
+    assert group["screen"]["footer"] == "3 items still need you."
+    assert group["counts"]["remaining"] == 3
+
+
+def test_the_rows_the_footer_and_the_progress_count_are_the_same_set(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    """They are read from one list, so they cannot describe different ones."""
+    run_id, rows = settle_all_but(client, gmail, 28, keep=4)
+    decide(client, run_id, rows[0]["item_id"], "defer")
+
+    group = group_of(client, run_id)
+    shown = len(group["screen"]["rows"])
+
+    assert group["counts"]["remaining"] == shown
+    assert group["screen"]["footer"].startswith(f"{shown} items")
+    assert {row["item_id"] for row in group["screen"]["rows"]} == {
+        item["item_id"] for item in group["items"] if item["state"] in {"pending", "approved"}
+    }
+
+
+def test_answering_the_last_row_moves_on_and_keeps_no_older_count(
+    client: TestClient, gmail: FakeGmail
+) -> None:
+    run_id, rows = settle_all_but(client, gmail, 28, keep=4)
+
+    for row in rows[:4]:
+        decided = client.post(
+            f"/review/runs/{run_id}/items/{row['item_id']}/decision",
+            headers=AUTH,
+            json={"decision": "dismiss"},
+        )
+        assert decided.status_code == 200, decided.text
+
+    run = decided.json()["run"]
+    group = group_of(client, run_id)
+
+    assert group["state"] == "completed"
+    assert group["counts"]["remaining"] == 0
+    assert run["current_group"] is None or run["current_group"]["capability_key"] != "admin"
+    assert "28" not in json.dumps(run["current_group"])
+    assert "28" not in group["screen"]["footer"]
+
+
 def test_deleting_nineteen_of_twenty_two_rows_leaves_the_other_three_alone(
     client: TestClient, gmail: FakeGmail
 ) -> None:
@@ -898,7 +997,7 @@ def test_deleting_nineteen_of_twenty_two_rows_leaves_the_other_three_alone(
         assert gmail.thread_labels[row["thread_id"]] == ["INBOX", ADMIN_LABEL_ID]
 
     counts = client.get(f"/review/runs/{run_id}", headers=AUTH).json()["groups"][0]["counts"]
-    assert counts == {"total": 22, "executed": 19, "approved": 3}
+    assert counts == {"total": 22, "executed": 19, "approved": 3, "remaining": 3}
 
 
 def test_a_preparation_superseded_by_a_later_one_executes_nothing(

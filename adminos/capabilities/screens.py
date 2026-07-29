@@ -110,13 +110,18 @@ SORTABLE_SOURCES = {
 FOOTER_FIELDS = {
     "capability",
     "screen_id",
-    "total",
+    "remaining",
+    "remaining_items",
     "pending",
-    "decided",
     "approved",
     "review_date",
 }
-"""The only substitutions a footer may use. An unknown one fails at load."""
+"""The only substitutions a footer may use. An unknown one fails at load.
+
+Every count here is of the rows the screen is showing. There is deliberately
+no substitution for how many items the capability once held: a footer reading
+"4 of 28" describes a set nobody is looking at.
+"""
 
 
 class ScreenModel(BaseModel):

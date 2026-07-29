@@ -514,7 +514,7 @@ def test_every_review_response_carries_its_presentation_contract(
         "Decision",
     ]
     assert len(screen["rows"][0]["cells"]) == len(screen["columns"])
-    assert screen["footer"] == "1 of 1 still need you."
+    assert screen["footer"] == "1 item still need you."
 
 
 def test_a_row_says_which_decisions_it_would_accept(

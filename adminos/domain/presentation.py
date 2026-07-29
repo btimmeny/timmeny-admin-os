@@ -167,7 +167,7 @@ def render_group(
             if offers_anything(offered, view.capability)
         ],
         rows=rows,
-        footer=render_footer(screen, view, run),
+        footer=render_footer(screen, view, run, items),
         empty_text=screen.empty_text,
     )
 
@@ -177,7 +177,9 @@ def shown_items(screen: ScreenConfig, items: list[ReviewItem]) -> list[ReviewIte
 
     A thread that has been archived, trashed, dismissed, or put off is done
     with for today: leaving it in the table would invite deciding it twice.
-    The footer still counts it, and its action history is untouched.
+    Its action history is untouched, and the group's counts still report it by
+    state; what it no longer does is inflate the number of rows still wanting
+    an answer.
     """
     if screen.rows is RowScope.ALL:
         return list(items)
@@ -445,19 +447,31 @@ def action_params(offered: ScreenAction, capability: CapabilityConfig) -> list[R
     ]
 
 
-def render_footer(screen: ScreenConfig, view: GroupView, run: ReviewRun) -> str:
+def render_footer(
+    screen: ScreenConfig,
+    view: GroupView,
+    run: ReviewRun,
+    shown: list[ReviewItem],
+) -> str:
+    """Describe the rows on the table, and only those.
+
+    `shown` is the very list the rows were rendered from, so the footer cannot
+    describe a different set from the one above it. Counting the whole group
+    here is what produced "4 of 28 still need you" for a screen holding four
+    rows: a number about this morning, read as a number about now.
+    """
     if not screen.footer:
         return ""
-    total = len(view.items)
-    pending = sum(1 for item in view.items if item.state == ItemState.PENDING)
-    approved = sum(1 for item in view.items if item.state == ItemState.APPROVED)
+    remaining = len(shown)
+    pending = sum(1 for item in shown if item.state == ItemState.PENDING)
+    approved = sum(1 for item in shown if item.state == ItemState.APPROVED)
     return screen.footer.format_map(
         {
             "capability": view.capability.name,
             "screen_id": screen.id,
-            "total": total,
+            "remaining": remaining,
+            "remaining_items": f"{remaining} item{'' if remaining == 1 else 's'}",
             "pending": pending,
-            "decided": total - pending,
             "approved": approved,
             "review_date": run.review_date.isoformat(),
         }

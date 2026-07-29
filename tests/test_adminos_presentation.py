@@ -387,14 +387,14 @@ def test_a_screen_may_leave_out_the_threads_that_are_finished_with() -> None:
     )
 
     rendered = render_group(
-        build_screen(rows="unresolved", footer="{pending} of {total} still need you."),
+        build_screen(rows="unresolved", footer="{remaining_items} still need you."),
         view,
         build_run(),
         now=NOW,
     )
 
     assert [row.item_id for row in rendered.rows] == ["waiting"]
-    assert rendered.footer == "1 of 3 still need you."
+    assert rendered.footer == "1 item still need you."
 
 
 def test_the_shipped_screens_show_only_what_is_still_open() -> None:
@@ -417,11 +417,37 @@ def test_the_shipped_admin_screen_offers_both_dispositions() -> None:
 
 def test_the_footer_is_filled_in_by_the_service() -> None:
     view = build_view(build_item("a"), build_item("b", state="dismissed"))
-    screen = build_screen(footer="{pending} of {total} in {capability} still need you.")
+    screen = build_screen(rows="unresolved", footer="{remaining} in {capability} still need you.")
 
     rendered = render_group(screen, view, build_run(), now=NOW)
 
-    assert rendered.footer == "1 of 2 in admin still need you."
+    assert rendered.footer == "1 in admin still need you."
+
+
+def test_the_footer_counts_the_rows_it_is_under() -> None:
+    """The bug: four rows described as "4 of 28", which is this morning's number."""
+    settled = [build_item(f"done-{index}", state="executed") for index in range(24)]
+    view = build_view(*settled, *[build_item(f"open-{index}") for index in range(4)])
+    screen = build_screen(rows="unresolved", footer="{remaining_items} still need you.")
+
+    rendered = render_group(screen, view, build_run(), now=NOW)
+
+    assert len(rendered.rows) == 4
+    assert rendered.footer == "4 items still need you."
+    assert "28" not in rendered.footer
+
+
+def test_one_row_left_is_one_item_not_one_items() -> None:
+    view = build_view(build_item("open"), build_item("done", state="executed"))
+    screen = build_screen(rows="unresolved", footer="{remaining_items} still need you.")
+
+    assert render_group(screen, view, build_run(), now=NOW).footer == "1 item still need you."
+
+
+def test_a_footer_cannot_count_the_items_that_are_no_longer_shown() -> None:
+    """There is no substitution for the group's original size, deliberately."""
+    with pytest.raises(ValidationError, match="not a known value"):
+        build_screen(footer="{pending} of {total} still need you.")
 
 
 def test_an_unknown_footer_value_is_refused() -> None:
@@ -507,7 +533,7 @@ def test_a_capability_may_not_reference_a_screen_that_does_not_exist() -> None:
 
 def test_a_screen_may_not_offer_an_action_the_capability_is_not_allowed() -> None:
     """Financial/Taxes may not send a draft, so its screen may not offer sending."""
-    tax_footer = "    footer: >-\n      {pending} of {total} still need you. Nothing here is archived"
+    tax_footer = "    footer: >-\n      {remaining_items} still need you. Nothing here is archived"
     send_action = (
         "      - id: send\n"
         "        label: Send it\n"

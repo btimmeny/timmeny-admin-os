@@ -482,7 +482,7 @@ Starts or resumes today's review. Requires `TIMMENY_OS_API_KEY` and `DATABASE_UR
     "description": "Mail in the inbox now: archived, snoozed, trashed, spam, sent-only and draft-only threads were excluded."
   },
   "groups": [
-    {"capability_key": "financial_taxes", "state": "pending", "counts": {"total": 3, "pending": 3}}
+    {"capability_key": "financial_taxes", "state": "pending", "counts": {"total": 3, "pending": 3, "remaining": 3}}
   ],
   "current_group": { "…": "the first group still needing a decision, with its screen and items" },
   "warnings": []
@@ -613,7 +613,7 @@ Every review response carries the screen that renders it. Admin OS decides the c
         "body": {"decision": "approve"}
       }
     ],
-    "footer": "1 of 1 still need you. Answer with the row number and what to do with it.",
+    "footer": "1 item still need you. Answer with the row number and what to do with it.",
     "empty_text": "Nothing in Admin needs you today."
   }
 }
@@ -639,7 +639,7 @@ screens:
       - {id: archive_gmail_thread, label: Archive, decision: override, action: gmail.archive}
       - {id: move_gmail_thread_to_label, label: File it in a folder, decision: override, action: gmail.move}
       - {id: move_gmail_thread_to_trash, label: Move to Trash, decision: override, action: gmail.trash}
-    footer: "{pending} of {total} still need you."
+    footer: "{remaining_items} still need you."
 ```
 
 An action that needs something said carries what, and the only answers it takes. Filing carries the capability's folders, so a renderer offers a choice rather than inviting a folder name to be typed:
@@ -659,7 +659,7 @@ A recommended move names its folder in the cell that recommends it — "File it 
 
 A column names a `source` from a closed set, and a format its value type allows: a percentage of a subject line is a configuration error, not a blank cell. So is ordering by a value with no order, an unknown footer substitution, an override that names no action, a capability pointing at a screen that does not exist, a screen offering an action the capability is not allowed, or a whole-group decision offered where `allow_bulk_decisions` is false.
 
-A screen also decides which rows exist: `rows: unresolved`, which all three shipped screens set, leaves out the threads that have been settled or already acted on, so a thread that has just been trashed does not come back to be trashed again. The footer still counts the whole group, so what dropped out is visible rather than silently gone.
+A screen also decides which rows exist: `rows: unresolved`, which all three shipped screens set, leaves out the threads that have been settled or already acted on, so a thread that has just been trashed does not come back to be trashed again. The rows, the footer, and the group's `counts.remaining` are read from that one list, so a table of four rows cannot be captioned "4 of 28": what dropped out is in the group's counts by state and in its action history, not in what is described as still waiting.
 
 Three screens ship — `admin-review-v1`, `tax-review-v1`, `advisor-review-v1` — one per capability. They share a column set today; giving one its own is an edit to that screen. A compatible change edits a screen in place; an incompatible one is a new `-v2` with the capability pointed at it.
 

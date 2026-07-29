@@ -103,7 +103,7 @@ screens:
         action: gmail.trash
         scope: group
     footer: >-
-      {pending} of {total} still need you. Answer with the row number and what
+      {remaining_items} still need you. Answer with the row number and what
       to do with it.
     empty_text: Nothing administrative is waiting.
 
@@ -143,7 +143,7 @@ screens:
         action: gmail.move
         scope: group
     footer: >-
-      {pending} of {total} still need you. Nothing here is archived or answered
+      {remaining_items} still need you. Nothing here is archived or answered
       unless you say so; filing keeps the thread and only clears the inbox.
     empty_text: No tax or financial mail is waiting.
 
@@ -201,7 +201,7 @@ screens:
         action: gmail.trash
         scope: group
     footer: >-
-      {pending} of {total} still need you. A reply is drafted for approval here,
+      {remaining_items} still need you. A reply is drafted for approval here,
       never sent by agreeing to it.
     empty_text: No call requests are waiting.
 

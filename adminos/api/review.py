@@ -18,6 +18,7 @@ from adminos.capabilities.config import (
     UnknownCapability,
     read_action_kind,
 )
+from adminos.capabilities.screens import ScreenConfig
 from adminos.config import get_gmail_credentials
 from adminos.db.engine import DatabaseNotConfigured, session_scope
 from adminos.db.models import JsonObject, ReviewGroup, ReviewItem, ReviewRun
@@ -36,7 +37,7 @@ from adminos.domain.mailboxes import (
     read_scope,
     read_stored_scope,
 )
-from adminos.domain.presentation import ScreenView, render_group
+from adminos.domain.presentation import ScreenView, render_group, shown_items
 from adminos.domain.review import (
     Assessment,
     BulkDecisionRefused,
@@ -609,7 +610,7 @@ def build_run_response(
                 capability_name=group.group.capability_name,
                 position=group.group.position,
                 state=group.group.state,
-                counts=count_states(group.items),
+                counts=group_counts(group, loaded),
             )
             for group in view.groups
         ],
@@ -634,7 +635,7 @@ def build_group_response(
         screen_id=screen.screen_id,
         allowed_actions=[action.value for action in view.capability.allowed_actions],
         allow_bulk_decisions=view.capability.approval.allow_bulk_decisions,
-        counts=count_states(view.items),
+        counts=count_states(view.items) | {"remaining": len(screen.rows)},
         scope=build_scope_response(scope),
         screen=screen,
         items=[build_item_response(item, view.capability) for item in view.items],
@@ -673,11 +674,7 @@ def build_screen_response(
     run: ReviewRun,
 ) -> ScreenResponse:
     """Render the capability's presentation contract for this group."""
-    try:
-        screen = loaded.screen_for(view.capability)
-    except UnknownCapability as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return as_screen_response(render_group(screen, view, run))
+    return as_screen_response(render_group(lookup_screen(view, loaded), view, run))
 
 
 def as_screen_response(rendered: ScreenView) -> ScreenResponse:
@@ -756,3 +753,21 @@ def count_states(items: list[ReviewItem]) -> dict[str, int]:
     for item in items:
         counts[item.state] = counts.get(item.state, 0) + 1
     return counts
+
+
+def group_counts(view: GroupView, loaded: LoadedCapabilities) -> dict[str, int]:
+    """How this group stands: every item by state, and how many still want one.
+
+    `remaining` is the progress number. `total` is history — how many threads
+    the capability has held today, including the ones already dealt with — and
+    saying "4 of 28" reads the second as the first.
+    """
+    screen = lookup_screen(view, loaded)
+    return count_states(view.items) | {"remaining": len(shown_items(screen, view.items))}
+
+
+def lookup_screen(view: GroupView, loaded: LoadedCapabilities) -> ScreenConfig:
+    try:
+        return loaded.screen_for(view.capability)
+    except UnknownCapability as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

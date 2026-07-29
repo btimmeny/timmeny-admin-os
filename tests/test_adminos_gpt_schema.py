@@ -26,6 +26,7 @@ CONTRACT_PATH = REPOSITORY_ROOT / "docs/gpt-action-openapi.yaml"
 REQUEST_SHAPES: dict[str, str] = {
     "0.11.0": "6276e313ba076bf05bd2c7c7df633a6099bfe1ef8011ca9c0728067c054812f5",
     "0.12.0": "0e8d7f37f4a88e9e3086e99968d06253f4670c258ff0bb5ddfd97a9a1c021b05",
+    "0.12.1": "0e8d7f37f4a88e9e3086e99968d06253f4670c258ff0bb5ddfd97a9a1c021b05",
 }
 """Every version of the contract, and the request shapes it published.
 
@@ -33,6 +34,10 @@ A GPT sending a body the API no longer accepts is a refused execution, and the
 only way an already-imported copy can be told apart from a current one is its
 version. So a change to any request body has to arrive with a new version:
 editing the shape under an existing one is what this record makes visible.
+
+Two versions may share a shape — 0.12.1 shortened descriptions for ChatGPT's
+importer and asked for nothing new — but one shape must never be published
+under two versions with different content, which is what the mapping checks.
 """
 
 EXECUTE_PATH = "/review/runs/{run_id}/actions/execute"
@@ -112,8 +117,6 @@ def test_a_changed_request_shape_takes_a_new_version() -> None:
         f"fingerprint {fingerprint} against it, so an imported copy can be "
         "told apart from this one."
     )
-    published = list(REQUEST_SHAPES.values())
-    assert published.count(fingerprint) == 1
 
 
 def test_preparation_promises_the_scope_execution_demands() -> None:

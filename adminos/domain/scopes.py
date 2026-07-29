@@ -151,15 +151,13 @@ def check_scope_current(scope: ActionScope) -> None:
         )
 
 
-def check_scope_matches(scope: ActionScope, item_ids: Sequence[str] | None) -> None:
+def check_scope_matches(scope: ActionScope, item_ids: Sequence[str]) -> None:
     """Refuse when the caller's latest selection is not what was prepared.
 
-    The caller may restate what it believes it is confirming. If that differs
+    The caller restates what it believes it is confirming. If that differs
     from the prepared scope in either direction, the disagreement is the whole
     point: it is surfaced instead of resolved.
     """
-    if item_ids is None:
-        return
     prepared = set(scope.prepared_item_ids)
     requested = set(item_ids)
     if prepared == requested:

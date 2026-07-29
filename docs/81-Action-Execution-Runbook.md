@@ -15,12 +15,28 @@ Every route below takes `X-API-Key`; a bearer token works too. Omitting it is `4
 
 ---
 
+## 0. Is the GPT holding the current contract?
+
+The Custom GPT's Action schema is a copy, so check it against what is deployed before believing a refusal is a bug:
+
+```bash
+curl -sS "$ADMIN_OS/gpt/action-schema/version"
+```
+```json
+{"version":"0.12.0","request_shape":"0e8d7f37…","document_sha256":"…","commit":"…"}
+```
+
+If the version in ChatGPT's imported schema differs, re-import it from `$ADMIN_OS/gpt/action-schema.yaml` — the served document is the one this deployment implements. The version moves whenever a request body changes, which is the only kind of drift that turns into a refused call. See [ADR-0016](./adr/ADR-0016-a-contract-that-cannot-go-stale.md).
+
+---
+
 ## 1. Before the first execution
 
 **Gmail writes stay off until each action class has been watched on real mail.** Until then every execution answers `409`, which is the correct answer rather than a fault:
 
 ```bash
-os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" -d '{"confirm":true}'
+os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" \
+   -d '{"scope_id":"3f0c…","item_ids":["item-1"],"action_ids":["act-1"],"confirm":true}'
 ```
 ```json
 {"detail":"Gmail writes are disabled. Set GMAIL_WRITE_ENABLED=true to allow them."}
@@ -181,14 +197,17 @@ os "$ADMIN_OS/review/runs/$RUN/actions?state=prepared"
 os "$ADMIN_OS/review/runs/$RUN/scopes/$SCOPE"     # what this scope covers, and whether it still stands
 ```
 
-**Execute.** The `scope_id` is required, and so is `confirm`; omitting either is a refusal rather than a default:
+**Execute.** All four fields are required — the `scope_id`, the `item_ids` and `action_ids` the same preparation returned, and `confirm`. Omitting any is a refusal rather than a default:
 
 ```bash
-os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" -d '{"scope_id":"3f0c…"}'
+os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" \
+   -d '{"scope_id":"3f0c…","item_ids":["item-1"],"action_ids":["act-1"]}'
 ```
 ```json
 {"detail":"Executing changes the mailbox. Send confirm=true to proceed."}
 ```
+
+A request missing `item_ids` or `action_ids` is `422`, and writes nothing: restating the scope is how a caller shows it read the preparation rather than remembering it.
 
 ```bash
 os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" \
@@ -248,7 +267,8 @@ os -X POST "$ADMIN_OS/review/runs/$RUN/items/$ITEM/decision" \
 os -X POST "$ADMIN_OS/review/runs/$RUN/actions/prepare" \
    -d '{"capability_key":"admin","item_ids":["'$ITEM'"]}'
 os -X POST "$ADMIN_OS/review/runs/$RUN/actions/execute" \
-   -d '{"scope_id":"<from the preparation>","confirm":true,"item_ids":["'$ITEM'"]}'
+   -d '{"scope_id":"<from the preparation>","confirm":true,
+        "item_ids":["'$ITEM'"],"action_ids":["<from the preparation>"]}'
 ```
 
 The restore is `gmail.untrash`: it removes `TRASH` from the whole thread and verifies that Gmail agrees. A thread already out of Trash completes without a write. It is granted to the capabilities that may Trash — Admin and Career — and to no others.

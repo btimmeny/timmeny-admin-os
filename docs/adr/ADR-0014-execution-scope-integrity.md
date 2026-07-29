@@ -23,7 +23,7 @@ Trash is recoverable, so the cost this time was three threads and Brian's confid
 
 **Preparation returns the scope in full.** `scope_id`, `requested_item_ids`, `prepared_item_ids`, `action_ids`, `prepared_items`, `excluded_items` with a reason each, and `scope_matches_request`. Nothing about what would run is left to be inferred, because inference is what this ADR exists to remove. A row selected but not prepared is named and explained rather than silently dropped.
 
-**Execution names a scope, and can reach nothing else.** `execute` takes a `scope_id` and runs that scope's `action_ids`. `capability_key` is not a parameter of execution any more; there is no request that means "everything approved". The caller may restate `item_ids` and `action_ids`, and a restatement that disagrees with the prepared scope stops the request rather than being reconciled with it.
+**Execution names a scope, and can reach nothing else.** `execute` takes a `scope_id` and runs that scope's `action_ids`. `capability_key` is not a parameter of execution any more; there is no request that means "everything approved". The caller restates `item_ids` and `action_ids`, and a restatement that disagrees with the prepared scope stops the request rather than being reconciled with it. ([ADR-0016](./ADR-0016-a-contract-that-cannot-go-stale.md) made that restatement required rather than offered.)
 
 **Preparing again supersedes the earlier scope.** Changing one's mind is preparing a different selection, so the previous `scope_id` stops being executable at that moment. A confirmation given for an older list can never run a newer one, or the reverse.
 

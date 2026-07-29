@@ -1,0 +1,160 @@
+"""The schema ChatGPT imports has to be the schema this service implements.
+
+The Custom GPT holds a copy of the Action contract. A copy is silent about its
+age: nothing in ChatGPT says which version it took, and a request body that was
+right last month fails in front of Brian rather than in CI. So the deployment
+serves the contract itself, and states its version, and these tests hold that
+promise: the served document is the repository's, the version moves whenever a
+request shape does, and the execution request the contract describes is the one
+the API actually requires.
+"""
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+from fastapi.testclient import TestClient
+
+import main
+from adminos.api.schema import request_shape_fingerprint
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+CONTRACT_PATH = REPOSITORY_ROOT / "docs/gpt-action-openapi.yaml"
+
+REQUEST_SHAPES: dict[str, str] = {
+    "0.11.0": "6276e313ba076bf05bd2c7c7df633a6099bfe1ef8011ca9c0728067c054812f5",
+    "0.12.0": "0e8d7f37f4a88e9e3086e99968d06253f4670c258ff0bb5ddfd97a9a1c021b05",
+}
+"""Every version of the contract, and the request shapes it published.
+
+A GPT sending a body the API no longer accepts is a refused execution, and the
+only way an already-imported copy can be told apart from a current one is its
+version. So a change to any request body has to arrive with a new version:
+editing the shape under an existing one is what this record makes visible.
+"""
+
+EXECUTE_PATH = "/review/runs/{run_id}/actions/execute"
+PREPARE_PATH = "/review/runs/{run_id}/actions/prepare"
+
+
+@pytest.fixture()
+def client() -> TestClient:
+    """The schema routes read a file and an environment variable, nothing else."""
+    return TestClient(main.app)
+
+
+def contract() -> dict[str, Any]:
+    document = yaml.safe_load(CONTRACT_PATH.read_text())
+    assert isinstance(document, dict)
+    return document
+
+
+def request_body(document: dict[str, Any], path: str) -> dict[str, Any]:
+    body = document["paths"][path]["post"]["requestBody"]
+    schema = body["content"]["application/json"]["schema"]
+    assert isinstance(schema, dict)
+    return schema
+
+
+def test_the_deployment_serves_the_contract_it_implements(client: TestClient) -> None:
+    """Importing from the running service is the only way to import the truth."""
+    response = client.get("/gpt/action-schema.yaml")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/yaml")
+    assert response.text == CONTRACT_PATH.read_text()
+
+
+def test_the_schema_can_be_read_without_the_api_key(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ChatGPT's import sends no headers, and the contract is not a secret."""
+    monkeypatch.setenv("TIMMENY_OS_API_KEY", "a-key-this-request-does-not-send")
+
+    assert client.get("/gpt/action-schema.yaml").status_code == 200
+    assert client.get("/gpt/action-schema/version").status_code == 200
+    assert client.post("/review/start", json={}).status_code == 401
+
+
+def test_the_version_endpoint_says_what_was_deployed(client: TestClient) -> None:
+    """What an import must match, in the three ways it can be checked."""
+    body = client.get("/gpt/action-schema/version").json()
+
+    assert body["version"] == contract()["info"]["version"]
+    assert body["request_shape"] == request_shape_fingerprint(contract())
+    assert len(body["document_sha256"]) == 64
+
+
+def test_the_version_endpoint_names_the_deployed_commit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The API and the schema are one deployment, so one commit answers for both."""
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abc123")
+
+    assert client.get("/gpt/action-schema/version").json()["commit"] == "abc123"
+
+
+def test_a_changed_request_shape_takes_a_new_version() -> None:
+    """Change what the GPT must send, and the version has to say so."""
+    document = contract()
+    version = document["info"]["version"]
+    fingerprint = request_shape_fingerprint(document)
+
+    assert version in REQUEST_SHAPES, (
+        f"Version {version} is not recorded in REQUEST_SHAPES. Add it with its "
+        "fingerprint rather than reusing a published version."
+    )
+    assert REQUEST_SHAPES[version] == fingerprint, (
+        f"The request shapes changed under version {version}. Increment "
+        "info.version in docs/gpt-action-openapi.yaml and record the new "
+        f"fingerprint {fingerprint} against it, so an imported copy can be "
+        "told apart from this one."
+    )
+    published = list(REQUEST_SHAPES.values())
+    assert published.count(fingerprint) == 1
+
+
+def test_preparation_promises_the_scope_execution_demands() -> None:
+    """The three fields the GPT carries from one call to the next."""
+    prepared = request_body(contract(), PREPARE_PATH)
+    returned = contract()["paths"][PREPARE_PATH]["post"]["responses"]["200"]
+    properties = returned["content"]["application/json"]["schema"]["properties"]
+
+    assert set(prepared["properties"]) == {
+        "capability_key",
+        "item_ids",
+        "entire_capability",
+    }
+    for field in ("scope_id", "prepared_item_ids", "action_ids"):
+        assert field in properties
+
+
+def test_execution_requires_the_exact_prepared_scope() -> None:
+    """Named, restated, and confirmed: all four, or the request is not valid."""
+    schema = request_body(contract(), EXECUTE_PATH)
+
+    assert set(schema["required"]) == {"scope_id", "item_ids", "action_ids", "confirm"}
+    assert set(schema["properties"]) == {
+        "scope_id",
+        "item_ids",
+        "action_ids",
+        "confirm",
+    }
+
+
+def test_the_contract_requires_what_the_api_requires() -> None:
+    """A documented field the API ignores, or demands, is a lie either way.
+
+    `confirm` is the one deliberate difference: the model takes it as false by
+    default so that an unconfirmed execution can answer "send confirm=true"
+    rather than a validation error that says nothing about why. The contract
+    still requires it, because a GPT that leaves it out is wrong.
+    """
+    documented = request_body(contract(), EXECUTE_PATH)
+    live = main.app.openapi()["components"]["schemas"]["ExecuteRequest"]
+
+    assert set(documented["properties"]) == set(live["properties"])
+    assert set(documented["required"]) - {"confirm"} == set(live["required"])
+    assert "confirm" not in live["required"]

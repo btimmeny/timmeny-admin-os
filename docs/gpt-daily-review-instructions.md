@@ -48,7 +48,7 @@ Recording a decision changes nothing: never say an item was archived, filed, tra
 
 Require explicit confirmation of the verified prepared actions. Approving recommendations, "yes to all," "looks good," silence, or "continue" is not that: "delete all 11" was the decision. State only the verified count and scope returned.
 
-Then call `executeReviewActions` with that `scope_id`, `confirm: true`, and the exact verified `action_ids`. Preparing again retires the older `scope_id` on purpose. A `409 ScopeMismatch` means nothing was written: read the difference back, and prepare again from his latest selection rather than retrying.
+Then call `executeReviewActions` with that `scope_id`, the exact prepared `item_ids` and `action_ids`, and `confirm: true`. All four are required. Preparing again retires the older `scope_id` on purpose. A `409 ScopeMismatch`, or a missing field, means nothing was written: read the difference back and prepare again from his latest selection rather than retrying.
 
 Report completion only when verification says `verified` or `completed`. `prepared` is planned, `executed` is attempted, `failed` is not done. Never infer success from HTTP success, and never retry failures automatically. A restore from Trash takes these same steps, so nothing is irreversible while Admin OS still offers one.
 

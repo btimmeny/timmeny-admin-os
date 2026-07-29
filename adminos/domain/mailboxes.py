@@ -62,19 +62,42 @@ class ReviewScope:
             terms.append("in:anywhere")
         return " ".join(terms)
 
-    def admits(self, label_ids: Sequence[str] | None) -> bool:
-        """Whether a thread with these labels belongs in this review.
+    def observed_snoozed(self) -> bool | None:
+        """What a scan of this scope proves about a thread it returned.
+
+        Snoozing has no label, so a thread's snooze can only be learned from
+        the search that found it: `in:snoozed` returns snoozed threads,
+        `-in:snoozed` returns threads that are not, and a scan that asked
+        neither proves nothing either way.
+        """
+        if self.mailbox is Mailbox.SNOOZED:
+            return True
+        if not self.include_snoozed:
+            return False
+        return None
+
+    def admits(self, label_ids: Sequence[str] | None, snoozed: bool | None = None) -> bool:
+        """Whether a thread last seen like this belongs in this review.
 
         The check Gmail's search cannot be trusted to have made, run against
         the labels the thread actually carries. A thread whose labels are
         unknown is not admitted: never having been seen in scope is not the
         same as being in it.
 
+        `snoozed` is the one fact no label carries, so it is recorded when a
+        scan observes it and read back here. A review of snoozed mail admits
+        only threads a snoozed scan has seen — an unknown snooze is not a
+        snooze — and every other review excludes threads known to be asleep.
+
         Carrying SENT or DRAFT is not disqualifying on its own — a conversation
         Brian has replied to, or started a reply to, is still in his inbox. It
         disqualifies a thread that is *only* sent mail or an unsent draft.
         """
         if label_ids is None:
+            return False
+        if self.mailbox is Mailbox.SNOOZED and snoozed is not True:
+            return False
+        if not self.include_snoozed and snoozed is True:
             return False
 
         labels = set(label_ids)

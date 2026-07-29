@@ -102,6 +102,14 @@ class Evidence(Base):
     next review without anything having to remember that it used to be there.
     Null means never seen in any scope, which is not the same as being in one.
     """
+    snoozed: Mapped[bool | None] = mapped_column(Boolean)
+    """Whether Gmail was holding the thread back when it was last searched for.
+
+    The one fact about a thread's whereabouts that carries no label: it can be
+    learned only from a search that asked, so it is recorded when one does.
+    Null means no search has said either way, which a review of snoozed mail
+    treats as not snoozed rather than as a maybe.
+    """
     created_at: Mapped[datetime] = created_at_column()
 
 

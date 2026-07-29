@@ -403,6 +403,53 @@ def test_snoozed_mail_is_reviewed_only_when_it_is_asked_for(
     assert review["scope"]["include_snoozed"] is True
 
 
+def test_a_snoozed_review_does_not_show_archived_mail(
+    client: TestClient, gmail: FakeMailbox
+) -> None:
+    """The bug this guards: everything out of the inbox looked snoozed.
+
+    Snoozing publishes no label, so a check made against a thread's labels
+    cannot tell a sleeping thread from one that was merely archived. Reviewing
+    the archive first records that mail, and a snoozed review then had to be
+    able to tell the two apart from evidence it already held.
+    """
+    gmail.add("archived", "Settled last year", label_ids=[TAXES_LABEL_ID])
+    gmail.add("asleep", "Chase this in a fortnight", snoozed=True)
+
+    start(client, scope="archived")
+    review = start(client, scope="snoozed")
+
+    assert threads_in(client, review["run_id"]) == {"asleep"}
+
+
+def test_a_snoozed_review_of_nothing_snoozed_is_empty(
+    client: TestClient, gmail: FakeMailbox
+) -> None:
+    """Mail nobody has ever seen asleep is not shown as asleep."""
+    gmail.add("inbox-thread", "Q3 estimate")
+    gmail.add("archived", "Settled last year", label_ids=[TAXES_LABEL_ID])
+    start(client)
+    start(client, scope="archived")
+
+    review = start(client, scope="snoozed")
+
+    assert threads_in(client, review["run_id"]) == set()
+
+
+def test_a_thread_that_wakes_up_returns_to_the_inbox_review(
+    client: TestClient, gmail: FakeMailbox
+) -> None:
+    """What was recorded of a snooze is corrected by the next search."""
+    gmail.add("asleep", "Chase this in a fortnight", snoozed=True)
+    snoozed = start(client, scope="snoozed")
+    assert threads_in(client, snoozed["run_id"]) == {"asleep"}
+
+    gmail.snoozed.discard("asleep")
+    awake = start(client)
+
+    assert threads_in(client, awake["run_id"]) == {"asleep"}
+
+
 def test_reviewing_everything_says_that_is_what_it_did(
     client: TestClient, gmail: FakeMailbox
 ) -> None:

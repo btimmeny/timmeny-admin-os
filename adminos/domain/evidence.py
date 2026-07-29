@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Iterable, Sequence
 
 from sqlalchemy import and_, delete, select
 from sqlalchemy.orm import Session
@@ -76,6 +76,7 @@ def record_gmail_thread(
     session: Session,
     thread: GmailThread,
     capability_keys: Sequence[str],
+    snoozed: bool | None = None,
 ) -> str:
     """Store a thread as evidence. Returns 'created', 'updated', or 'unchanged'.
 
@@ -85,7 +86,8 @@ def record_gmail_thread(
     carries are recorded on it: that attribution, not a branch in code, is what
     puts a thread in one review group rather than another. The thread's Gmail
     labels are recorded with it, because they are what a review scope is
-    checked against.
+    checked against, and so is whether the search that found it proved the
+    thread snoozed — the one whereabouts no label reports.
     """
     existing = session.execute(
         select(Evidence).where(
@@ -110,12 +112,15 @@ def record_gmail_thread(
                 content_hash=content_hash,
                 capability_keys=keys,
                 label_ids=list(thread.label_ids),
+                snoozed=snoozed,
             )
         )
         return "created"
 
     unchanged = existing.content_hash == content_hash and existing.capability_keys == keys
     existing.label_ids = list(thread.label_ids)
+    if snoozed is not None:
+        existing.snoozed = snoozed
     if unchanged:
         return "unchanged"
 
@@ -208,14 +213,20 @@ async def sync_gmail_evidence(
 
     for thread_id, capability_keys in attribution.items():
         thread = await client.fetch_thread(thread_id)
+        observed = observed_snooze(watched_by_capability[key] for key in capability_keys)
         in_scope = [
-            key for key in capability_keys if watched_by_capability[key].admits(thread.label_ids)
+            key
+            for key in capability_keys
+            if watched_by_capability[key].admits(
+                thread.label_ids,
+                watched_by_capability[key].observed_snoozed(),
+            )
         ]
         if not in_scope:
             out_of_scope += 1
-            note_thread_labels(session, thread)
+            note_thread_labels(session, thread, observed)
             continue
-        counts[record_gmail_thread(session, thread, in_scope)] += 1
+        counts[record_gmail_thread(session, thread, in_scope, observed)] += 1
         recorded.append(thread_id)
 
     if out_of_scope:
@@ -278,6 +289,18 @@ async def sync_gmail_evidence(
     )
 
 
+def observed_snooze(scopes: Iterable[ReviewScope]) -> bool | None:
+    """What the searches that found a thread agree its snooze was.
+
+    A thread can be returned by more than one capability's search, and only
+    searches that asked about snoozing can answer. Disagreement is recorded as
+    nothing learned rather than as one search overruling another.
+    """
+    answers = {scope.observed_snoozed() for scope in scopes}
+    answers.discard(None)
+    return answers.pop() if len(answers) == 1 else None
+
+
 def check_prune_is_safe(prune: bool, incomplete: Sequence[str]) -> None:
     """Refuse a prune whose scan missed mail, before anything is deleted."""
     if prune and incomplete:
@@ -316,14 +339,18 @@ def read_stale_gmail_threads(
         if not watched:
             continue
         if row.label_ids is not None and not any(
-            scope.admits(row.label_ids) for scope in watched
+            scope.admits(row.label_ids, row.snoozed) for scope in watched
         ):
             continue
         stale.append(row)
     return stale
 
 
-def note_thread_labels(session: Session, thread: GmailThread) -> None:
+def note_thread_labels(
+    session: Session,
+    thread: GmailThread,
+    snoozed: bool | None = None,
+) -> None:
     """Record where a thread is now, without admitting it to any review."""
     existing = session.execute(
         select(Evidence).where(
@@ -333,6 +360,8 @@ def note_thread_labels(session: Session, thread: GmailThread) -> None:
     ).scalar_one_or_none()
     if existing is not None:
         existing.label_ids = list(thread.label_ids)
+        if snoozed is not None:
+            existing.snoozed = snoozed
 
 
 async def recheck_thread(
@@ -351,6 +380,9 @@ async def recheck_thread(
 
     A thread Gmail no longer has is recorded as being nowhere, which no scope
     admits.
+
+    Reading one thread says nothing about its snooze, which is a property of a
+    search rather than of a thread, so what was recorded of that stands.
     """
     try:
         thread = await client.fetch_thread(evidence.source_thread_id)
@@ -364,7 +396,11 @@ async def recheck_thread(
         if label_id in thread.label_ids
         for key in keys
     ]
-    in_scope = [key for key in owners if watched_by_capability[key].admits(thread.label_ids)]
+    in_scope = [
+        key
+        for key in owners
+        if watched_by_capability[key].admits(thread.label_ids, evidence.snoozed)
+    ]
     if not in_scope:
         evidence.label_ids = list(thread.label_ids)
         return None

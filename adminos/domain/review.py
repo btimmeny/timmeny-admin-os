@@ -292,7 +292,7 @@ def populate_group(
     for evidence in read_capability_evidence(session, capability.key):
         if evidence.id in present:
             continue
-        if not scope.admits(evidence.label_ids):
+        if not scope.admits(evidence.label_ids, evidence.snoozed):
             continue
         if evidence.content_hash is not None and settled.get(evidence.id) == evidence.content_hash:
             continue
@@ -353,8 +353,8 @@ def withdraw_out_of_scope(
     never been read says nothing about where the thread is, and guessing there
     would empty a review on the strength of missing information.
     """
-    labels = {
-        evidence.id: evidence.label_ids
+    seen = {
+        evidence.id: (evidence.label_ids, evidence.snoozed)
         for evidence in read_capability_evidence(session, capability.key)
         if evidence.label_ids is not None
     }
@@ -363,9 +363,9 @@ def withdraw_out_of_scope(
     for item in read_group_items(session, group):
         if item.state != ItemState.PENDING:
             continue
-        if item.evidence_id not in labels:
+        if item.evidence_id not in seen:
             continue
-        if scope.admits(labels[item.evidence_id]):
+        if scope.admits(*seen[item.evidence_id]):
             continue
 
         item.state = ItemState.DEFERRED

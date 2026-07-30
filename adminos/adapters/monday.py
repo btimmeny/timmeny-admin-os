@@ -1,9 +1,9 @@
 import json
 
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Mapping, Sequence
 
 import httpx
 
@@ -52,18 +52,96 @@ class MondayItem:
     admin_os_id: str | None
     action_date: str | None
     board_id: str | None = None
+    values: Mapping[str, str | None] = field(default_factory=dict)
+    """Every column Monday returned, by its id.
+
+    Named columns above are the ones this service writes and verifies. A board
+    scoped by configuration filters on columns nobody hard-coded, and checking
+    that a returned item really matches needs the text Monday holds for them.
+    """
 
     @property
     def is_done(self) -> bool:
         return (self.status or "").casefold() == DONE_STATUS.casefold()
 
 
-ITEM_FIELDS = f"""
+@dataclass(frozen=True)
+class MondayColumn:
+    """One column of a board, as Monday describes it.
+
+    Read rather than assumed. A filter on a column that does not exist, or on
+    a label the board has never had, matches nothing and returns an unfiltered
+    board, so the shape of the board is checked before it is queried.
+    """
+
+    column_id: str
+    title: str
+    kind: str
+    settings: str | None
+
+    def labels(self) -> tuple[str, ...]:
+        """The label texts this column offers, in no particular order."""
+        return tuple(text for text, _ in self.label_indexes())
+
+    def index_of(self, label: str) -> int | None:
+        """The index Monday filters this label by, matched on exact text.
+
+        Filter rules compare against a label's index, never its text. A near
+        match is not a match: "Daily" and "daily " are different labels to a
+        board owner, and guessing between them is how a filter comes to mean
+        something nobody agreed to.
+        """
+        for text, index in self.label_indexes():
+            if text == label:
+                return index
+        return None
+
+    def label_indexes(self) -> tuple[tuple[str, int], ...]:
+        """The column's labels with their indexes, for status and dropdown alike."""
+        if not isinstance(self.settings, str):
+            return ()
+        try:
+            parsed = json.loads(self.settings)
+        except ValueError:
+            return ()
+        if not isinstance(parsed, dict):
+            return ()
+
+        labels = parsed.get("labels")
+        if isinstance(labels, dict):
+            found = []
+            for index, text in labels.items():
+                if not isinstance(text, str) or not text:
+                    continue
+                try:
+                    found.append((text, int(index)))
+                except ValueError:
+                    continue
+            return tuple(found)
+        if isinstance(labels, list):
+            return tuple(
+                (entry["name"], int(entry["id"]))
+                for entry in labels
+                if isinstance(entry, dict)
+                and isinstance(entry.get("name"), str)
+                and entry["name"]
+                and isinstance(entry.get("id"), int)
+            )
+        return ()
+
+
+def item_fields(column_ids: Sequence[str] = READ_COLUMN_IDS) -> str:
+    """The item selection, asking for the columns the caller needs read."""
+    wanted = list(dict.fromkeys([*READ_COLUMN_IDS, *column_ids]))
+    return f"""
   id
   name
   group {{ title }}
-  column_values(ids: {json.dumps(list(READ_COLUMN_IDS))}) {{ id text }}
+  column_values(ids: {json.dumps(wanted)}) {{ id text }}
 """
+
+
+ITEM_FIELDS = item_fields()
 VERIFY_FIELDS = f"{ITEM_FIELDS}  board {{ id }}\n"
 
 
@@ -220,6 +298,101 @@ class MondayClient:
 
         return items[:limit]
 
+    async def read_board(self, board_id: str) -> tuple[str, list[MondayColumn]]:
+        """The board's name and every column on it, as Monday holds them."""
+        data = await self.execute(
+            """
+            query BoardShape($board_id: ID!) {
+              boards(ids: [$board_id]) {
+                name
+                columns { id title type settings_str }
+              }
+            }
+            """,
+            {"board_id": board_id},
+        )
+        boards = data.get("boards")
+        if not isinstance(boards, list) or not boards or not isinstance(boards[0], dict):
+            raise MondayError(f"Monday has no board {board_id}.")
+
+        board = boards[0]
+        name = board.get("name")
+        columns = [
+            MondayColumn(
+                column_id=str(column.get("id") or ""),
+                title=str(column.get("title") or ""),
+                kind=str(column.get("type") or ""),
+                settings=column.get("settings_str")
+                if isinstance(column.get("settings_str"), str)
+                else None,
+            )
+            for column in board.get("columns") or []
+            if isinstance(column, dict)
+        ]
+        return str(name or board_id), columns
+
+    async def list_items_matching(
+        self,
+        board_id: str,
+        rules: Sequence[dict[str, Any]],
+        column_ids: Sequence[str],
+        operator: str = "or",
+        limit: int = 500,
+    ) -> list[MondayItem]:
+        """Items matching rules Monday applies, with the columns asked for.
+
+        The rules are not optional: a call with none would be a read of the
+        whole board, which is the one thing a scoped read must never quietly
+        become.
+        """
+        if not rules:
+            raise MondayError("A scoped read needs at least one rule.")
+
+        fields = item_fields(column_ids)
+        query = f"""
+        query ScopedItems(
+          $board_id: ID!
+          $limit: Int!
+          $rules: [ItemsQueryRule!]
+          $operator: ItemsQueryOperator
+        ) {{
+          boards(ids: [$board_id]) {{
+            items_page(
+              limit: $limit
+              query_params: {{rules: $rules, operator: $operator}}
+            ) {{
+              cursor
+              items {{{fields}}}
+            }}
+          }}
+        }}
+        """
+        data = await self.execute(
+            query,
+            {
+                "board_id": board_id,
+                "limit": min(limit, PAGE_SIZE),
+                "rules": list(rules),
+                "operator": operator,
+            },
+        )
+        boards = data.get("boards")
+        if not isinstance(boards, list) or not boards:
+            raise MondayError(f"Monday has no board {board_id}.")
+        page = boards[0].get("items_page") if isinstance(boards[0], dict) else None
+        if not isinstance(page, dict):
+            raise MondayError("Monday returned no items page.")
+
+        items = build_items(page.get("items"))
+        cursor = page.get("cursor")
+        while isinstance(cursor, str) and cursor and len(items) < limit:
+            page = await self.read_next_page(
+                cursor, min(limit - len(items), PAGE_SIZE), fields
+            )
+            items.extend(build_items(page.get("items")))
+            cursor = page.get("cursor")
+        return items[:limit]
+
     async def read_item(self, item_id: str) -> MondayItem | None:
         """Read one item back from Monday, including the board it landed on."""
         data = await self.execute(
@@ -264,12 +437,14 @@ class MondayClient:
             raise MondayError(f"Admin OS ID {admin_os_id} is on more than one Monday item.")
         return items[0] if items else None
 
-    async def read_next_page(self, cursor: str, limit: int) -> dict[str, Any]:
+    async def read_next_page(
+        self, cursor: str, limit: int, fields: str = ITEM_FIELDS
+    ) -> dict[str, Any]:
         query = f"""
         query NextItems($cursor: String!, $limit: Int!) {{
           next_items_page(cursor: $cursor, limit: $limit) {{
             cursor
-            items {{{ITEM_FIELDS}}}
+            items {{{fields}}}
           }}
         }}
         """
@@ -421,6 +596,11 @@ def build_item(raw: dict[str, Any]) -> MondayItem:
         admin_os_id=read_text(columns.get(ADMIN_OS_ID_COLUMN_ID)),
         action_date=read_text(columns.get(ACTION_DATE_COLUMN_ID)),
         board_id=str(board.get("id")) if isinstance(board, dict) and board.get("id") else None,
+        values={
+            str(column_id): read_text(text)
+            for column_id, text in columns.items()
+            if isinstance(column_id, str)
+        },
     )
 
 

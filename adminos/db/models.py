@@ -23,6 +23,13 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
 JsonValue = str | int | float | bool | None | list[str] | list[int]
 JsonObject = dict[str, JsonValue]
+JsonDocument = dict[str, object]
+"""A nested document stored whole: a playbook, a validation report.
+
+Kept apart from `JsonObject`, which is a flat record of scalars. A playbook is
+read back through the model that wrote it, so its shape is enforced there
+rather than by the column.
+"""
 ID_LENGTH = 36
 SHORT_TEXT_LENGTH = 255
 DIGEST_LENGTH = 64
@@ -608,3 +615,124 @@ class Decision(Base):
     status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     created_at: Mapped[datetime] = created_at_column()
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PlaybookRevision(Base):
+    """One version of the playbook, and how it came to be that version.
+
+    The playbook is Brian's operating process, so changing it is a decision
+    rather than an edit: a revision is written as `proposed`, read back to him
+    as the exact effect, and becomes `active` only when he says so. The one it
+    replaces becomes `superseded` and stays readable, because "why did we start
+    doing it this way?" is a question with an answer.
+
+    A revision that no longer validates — a capability removed from under it —
+    is marked `invalid` rather than run. Only one revision of a playbook is
+    active at a time.
+    """
+
+    __tablename__ = "playbook_revisions"
+    __table_args__ = (
+        UniqueConstraint("playbook_id", "number", name="uq_playbook_revision_number"),
+        Index("ix_playbook_revisions_status", "playbook_id", "status"),
+    )
+
+    id: Mapped[str] = id_column()
+    playbook_id: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    """Which revision of this playbook it is, counting from one.
+
+    The id is what everything refers to; this is what a person says out loud.
+    """
+    status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    document: Mapped[JsonDocument] = mapped_column(JSON_TYPE, nullable=False)
+    """The whole playbook as it stood, not a diff against another revision.
+
+    Stored whole so that reading an old revision never depends on replaying
+    every change since, and so a revision cannot be changed by something it
+    was written before.
+    """
+    validation: Mapped[JsonDocument | None] = mapped_column(JSON_TYPE)
+    change_summary: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    """What this revision does, in the sentences it was confirmed by."""
+    rationale: Mapped[str | None] = mapped_column(Text)
+    based_on_revision_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("playbook_revisions.id", ondelete="SET NULL")
+    )
+    created_by: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    created_at: Mapped[datetime] = created_at_column()
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = updated_at_column()
+
+
+class AssistantSession(Base):
+    """One working session: a run of the playbook against the state of the day.
+
+    The playbook says what is worked through; the session is the working. It
+    holds the revision it opened with for its whole life, so a playbook changed
+    at half past nine does not rearrange a session already under way.
+
+    Overrides are how "skip Legal today" stays about today: they are recorded
+    here, on the session, and never reach the playbook.
+    """
+
+    __tablename__ = "assistant_sessions"
+    __table_args__ = (Index("ix_assistant_sessions_status", "status", "opened_at"),)
+
+    id: Mapped[str] = id_column()
+    playbook_id: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    playbook_revision_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("playbook_revisions.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    sequence: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    """Every activity this session covers, in the order it will work them."""
+    skipped: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    """Those set aside for this session alone."""
+    overrides: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    """What was asked for that differs from the playbook, said in sentences."""
+    current_activity_key: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    opened_at: Mapped[datetime] = created_at_column()
+    begun_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    supersedes_session_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("assistant_sessions.id", ondelete="SET NULL")
+    )
+    """The session this one replaced, where waking up replaced one."""
+    updated_at: Mapped[datetime] = updated_at_column()
+
+
+class SessionActivity(Base):
+    """One activity within a session, and where it has got to.
+
+    `run_id` is the join to real work: the email review is a review run, and
+    the activity is the session's record that it was the thing being worked.
+    An activity the playbook names and this service cannot yet perform is
+    `unavailable` — said out loud, never quietly dropped.
+    """
+
+    __tablename__ = "session_activities"
+    __table_args__ = (
+        UniqueConstraint("session_id", "activity_key", name="uq_session_activity_key"),
+    )
+
+    id: Mapped[str] = id_column()
+    session_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("assistant_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    activity_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    intro: Mapped[str | None] = mapped_column(Text)
+    steps: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    """The step keys this activity will work, in order, as agreed at the open."""
+    run_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("review_runs.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()

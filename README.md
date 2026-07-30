@@ -441,9 +441,55 @@ Response:
 
 If one update fails, the service keeps processing the rest and reports the per-item error in `results`.
 
+## The session and the playbook
+
+A session is the whole of an admin interaction; the playbook is the order it runs in. "Good morning" opens a session, which loads the playbook in force, holds that exact revision for its whole life, reads the mailbox afresh, and states what will be worked through before working any of it. The email review is one activity of several. See [ADR-0023](docs/adr/ADR-0023-a-session-runs-a-playbook.md).
+
+```text
+playbook (configuration, one revision at a time in force)
+ └── activity (email, objectives, to-dos, calendar, follow-ups, closeout)
+      └── step (a capability within that activity, in configured order)
+
+session (one run of one revision, against data read now)
+ └── session activity (pending, in_progress, completed, skipped, unavailable)
+      └── the email activity's review, worked by the review routes
+```
+
+### The session routes
+
+| Request | What it does |
+| --- | --- |
+| `POST /session/start` | Loads the active playbook, syncs Gmail, opens a session in `proposed` and states its plan. A session already open is set aside, not resumed. `order`, `only` and `skip` name activity keys and apply to this session alone. |
+| `POST /session/continue` | Resumes the session under way, and only that. `404` where there is none. |
+| `GET /session/{session_id}` | Where a session stands, changing nothing. |
+| `POST /session/{session_id}/begin` | Starts working the plan, from its first workable activity. |
+| `POST /session/{session_id}/activities/{activity_key}/begin` | Starts one activity by name. |
+| `POST /session/{session_id}/advance` | Moves on, once the activity in hand is finished. An email review holding decisions the mailbox has not seen is not finished, and the session stays where it is. |
+
+`opening` carries Admin OS's own words and is returned by starting and continuing alone, so the orientation cannot be repeated between activities: it is not there to repeat. `plan.activities` gives the order, each activity's steps, and its state; an activity the playbook names and this service has not built reads `unavailable` with the source it will come from, rather than being hidden or counted as done.
+
+`closeout` counts what the session did and what it still owes separately: activities completed, skipped and unavailable, items reviewed, actions verified by kind, deferred, dismissed, and `awaiting_execution` — rows decided whose action Gmail never saw. A session can have worked every activity and still owe the mailbox every write, and that is said rather than implied.
+
+### The playbook routes
+
+| Request | What it does |
+| --- | --- |
+| `GET /playbook` | The playbook a session would run right now, with its validation against the capabilities configured now. |
+| `GET /playbook/revisions` | Every version it has had, newest first. |
+| `GET /playbook/revisions/{revision_id}` | One version, exactly as it stood. |
+| `POST /playbook/propose` | Writes down what the playbook would become, and changes nothing. Returns the effect in sentences, the order before and after, and the exact request that would confirm it. |
+| `POST /playbook/revisions/{revision_id}/confirm` | Makes a proposed revision the playbook, on `confirm: true` and nothing else. |
+| `POST /playbook/revisions/{revision_id}/activate` | The same operation under the name for undoing: puts an earlier revision back in force. |
+
+The seed is `config/assistant-playbook.yaml`; after the first read the database is the playbook, because Brian changes it by asking rather than by editing YAML. A revision is `proposed`, `active`, `superseded` or `invalid`, and a proposal the playbook has moved on from is refused rather than confirmed: it was written against a revision no longer in force, so confirming it would quietly undo whatever was agreed to in between.
+
+Validation is recomputed on every read rather than trusted from when a revision was written, because a playbook is valid against a set of capabilities and capabilities change underneath it. A revision naming a capability that has since been removed is marked `invalid` and the last revision that still works is put back, with the session saying which playbook it is actually running. Unknown activity, capability or step keys are errors naming the exact path; activities that are known and unbuilt are warnings, which is how a session can be honest about them.
+
+A session keeps the revision it opened with. Confirming a change halfway through a morning changes the next session, not this one: rearranging a morning around a change made in the middle of it would be answering a question with a different question.
+
 ## Daily review
 
-The daily review is what "good morning" calls. One request refreshes the mailbox, opens a review of what Gmail says now, and hands back a single capability group to work through — not an undifferentiated inbox. See [ADR-0007](docs/adr/ADR-0007-daily-review-engine.md).
+The daily review is what a session's email activity runs, and what "good morning" called before there were sessions. One request refreshes the mailbox, opens a review of what Gmail says now, and hands back a single capability group to work through — not an undifferentiated inbox. See [ADR-0007](docs/adr/ADR-0007-daily-review-engine.md).
 
 ```text
 review (one per date, mailbox scope and revision)
@@ -937,6 +983,7 @@ Set these environment variables:
 - `DATABASE_URL`: optional PostgreSQL connection string for Admin OS operational state. Leave it unset to run the service exactly as before, without persistence.
 - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`: optional Gmail OAuth credentials. All three must be present; a partially configured environment counts as unconfigured. See `docs/77-First-Slice-Setup.md`.
 - `CAPABILITIES_PATH`: optional path to the capability configuration. Defaults to `config/capabilities.yaml`, which is what defines the Gmail labels in scope. See [Capabilities](#capabilities).
+- `ASSISTANT_PLAYBOOK_PATH`: optional path to the playbook a fresh database is seeded from. Defaults to `config/assistant-playbook.yaml`. Once seeded, the database is the playbook and this is not read again.
 - `GMAIL_WRITE_ENABLED`: whether Gmail writes are permitted. Defaults to `false`.
 - `LOG_LEVEL`: optional log level for `adminos` loggers. Defaults to `INFO`.
 
@@ -1086,6 +1133,7 @@ The URL can be renamed later in Railway after the service/domain rename is compl
 - `adminos/domain/` contains domain logic: evidence recording, the review state machine, the action lifecycle, and rule learning.
 - `adminos/capabilities/` loads and validates the capability configuration.
 - `config/capabilities.yaml` defines the capabilities the daily review presents.
+- `config/assistant-playbook.yaml` seeds the playbook a session runs, after which the database holds it.
 - `adminos/db/migrations/` contains the Alembic migration history.
 - `scripts/migrate.sh` applies migrations, and is Railway's pre-deploy command.
 - `requirements.txt` defines the Python dependencies.

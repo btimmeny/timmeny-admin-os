@@ -35,6 +35,7 @@ REQUEST_SHAPES: dict[str, str] = {
     "0.18.0": "002e9d7750d783f20fd319aa79e31cd256553ae27c7a90d3171f77a6b6059dbc",
     "0.19.0": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
     "0.19.1": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
+    "0.19.2": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
 }
 """Every version of the contract, and the request shapes it published.
 
@@ -75,6 +76,36 @@ def request_body(document: dict[str, Any], path: str) -> dict[str, Any]:
     schema = body["content"]["application/json"]["schema"]
     assert isinstance(schema, dict)
     return schema
+
+
+def resolve(document: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
+    """The schema itself, or the component it names."""
+    reference = schema.get("$ref")
+    if not isinstance(reference, str):
+        return schema
+    resolved = document["components"]["schemas"][reference.rsplit("/", 1)[1]]
+    assert isinstance(resolved, dict)
+    return resolved
+
+
+def bodies(document: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Every request and response body the contract publishes, with its route."""
+    found: list[tuple[str, dict[str, Any]]] = []
+    for path, item in document["paths"].items():
+        for method, operation in item.items():
+            body = operation.get("requestBody")
+            if body is not None:
+                schema = body["content"]["application/json"]["schema"]
+                found.append((f"{method.upper()} {path} request", schema))
+            for status, response in operation.get("responses", {}).items():
+                content = response.get("content")
+                if content is None:
+                    continue
+                for media, described in content.items():
+                    schema = described.get("schema")
+                    if schema is not None:
+                        found.append((f"{method.upper()} {path} {status} {media}", schema))
+    return found
 
 
 def test_the_deployment_serves_the_contract_it_implements(client: TestClient) -> None:
@@ -169,6 +200,33 @@ def test_no_description_is_longer_than_the_importer_accepts() -> None:
     )
 
 
+def test_every_published_body_says_what_is_in_it() -> None:
+    """`type: object` and nothing else is a body ChatGPT will not import.
+
+    "object schema missing properties" is refused the same way an over-long
+    description is: the document does not import, so five responses left as
+    bare objects cost every operation in it. Naming the fields is also the
+    only way the GPT knows what it was handed.
+
+    It is the body itself the importer reads, not every object inside it: the
+    same document it refused carried maps like `counts` and request `body`
+    fields that name no properties because their keys are not fixed, and said
+    nothing about them. So this looks where the importer looks.
+    """
+    document = contract()
+    published = [(where, resolve(document, schema)) for where, schema in bodies(document)]
+    shapeless = [
+        where
+        for where, schema in published
+        if schema.get("type") == "object" and "properties" not in schema
+    ]
+
+    assert not shapeless, (
+        "ChatGPT refuses a document with an object body that names no "
+        f"properties: {shapeless}. Give it a shape, or a $ref to one."
+    )
+
+
 def test_preparation_promises_the_scope_execution_demands() -> None:
     """The three fields the GPT carries from one call to the next."""
     prepared = request_body(contract(), PREPARE_PATH)
@@ -225,8 +283,10 @@ def test_the_lifecycle_operations_are_published_with_the_routes_they_call() -> N
 
 def test_the_review_response_names_the_review_it_is_about() -> None:
     """The GPT reads the lifecycle rather than inferring it from the rows."""
-    returned = contract()["paths"]["/review/start"]["post"]["responses"]["200"]
-    properties = returned["content"]["application/json"]["schema"]["properties"]
+    document = contract()
+    returned = document["paths"]["/review/start"]["post"]["responses"]["200"]
+    schema = returned["content"]["application/json"]["schema"]
+    properties = resolve(document, schema)["properties"]
 
     for field in (
         "review_id",

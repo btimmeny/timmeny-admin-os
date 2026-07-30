@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.19.1
+  version: 0.19.2
   description: >-
     Admin OS: the session, the playbook it runs, and the mailbox review.
     Served by the deployment that implements it, at /gpt/action-schema.yaml,
@@ -51,159 +51,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  review_id:
-                    type: string
-                    description: >-
-                      The review this response is about. Every decision,
-                      preparation and execution belongs to one review, so carry
-                      this id from here rather than one remembered from
-                      earlier in the conversation.
-                  run_id:
-                    type: string
-                    description: The same id, under the name the routes use.
-                  review_date:
-                    type: string
-                    format: date
-                  revision:
-                    type: integer
-                    description: >-
-                      Which review of that date this is. A second revision
-                      exists only where a finished review was deliberately
-                      restarted.
-                  status:
-                    type: string
-                    enum:
-                      [
-                        not_started,
-                        in_progress,
-                        awaiting_actions,
-                        completed,
-                        abandoned,
-                      ]
-                  state:
-                    type: string
-                    description: The same value, under its older name.
-                  started_at:
-                    type: string
-                    format: date-time
-                  completed_at:
-                    type: string
-                    format: date-time
-                  abandoned_at:
-                    type: string
-                    format: date-time
-                  evidence_refresh_at:
-                    type: string
-                    format: date-time
-                    description: >-
-                      When Gmail was last read for this review. Answer "how
-                      fresh is this?" from here, never from the clock.
-                  snapshot_at:
-                    type: string
-                    format: date-time
-                    description: >-
-                      The mailbox this review is of: when its evidence was
-                      first read. Show it with a fresh review.
-                  supersedes_review_id:
-                    type: string
-                    nullable: true
-                    description: >-
-                      The review this one replaced, where it replaced one.
-                  superseded:
-                    $ref: "#/components/schemas/Superseded"
-                  prompt:
-                    $ref: "#/components/schemas/ReviewPrompt"
-                  restart_available:
-                    type: boolean
-                    description: >-
-                      True where the review returned is finished, so the way
-                      to see the mail that has arrived since is a fresh
-                      review. False where it is under way: continue that
-                      instead of starting over on a morning half worked.
-                  restart_action:
-                    $ref: "#/components/schemas/RestartAction"
-                  plan:
-                    $ref: "#/components/schemas/ReviewPlan"
-                  summary:
-                    $ref: "#/components/schemas/ReviewSummary"
-                  scope:
-                    $ref: "#/components/schemas/ReviewScope"
-                  outstanding_execution:
-                    type: array
-                    description: >-
-                      Groups holding decisions the mailbox has not seen. Not
-                      empty means nothing has happened yet in those groups,
-                      whatever the table shows: say so, and offer to prepare
-                      them. A review with anything here is not finished.
-                    items:
-                      $ref: "#/components/schemas/OutstandingExecution"
-                  current_group:
-                    type: object
-                    properties:
-                      capability_key:
-                        type: string
-                        description: >-
-                          The only name a group is addressed by. policy_version
-                          and screen_id are versions of what it recommends and
-                          how it is drawn; sending either as a key is refused.
-                      state:
-                        type: string
-                        enum:
-                          [pending, in_progress, awaiting_actions, completed]
-                        description: >-
-                          awaiting_actions means every row is decided and none
-                          of it has been carried out.
-                      outstanding_execution:
-                        $ref: "#/components/schemas/OutstandingExecution"
-                      screen:
-                        type: object
-                        properties:
-                          title:
-                            type: string
-                          columns:
-                            type: array
-                            items:
-                              type: object
-                              properties:
-                                label:
-                                  type: string
-                          rows:
-                            type: array
-                            items:
-                              type: object
-                              properties:
-                                item_id:
-                                  type: string
-                                cells:
-                                  type: array
-                                  items:
-                                    type: string
-                                actions:
-                                  type: array
-                                  items:
-                                    type: string
-                          footer:
-                            type: string
-                          empty_text:
-                            type: string
-                          notice:
-                            type: string
-                            description: >-
-                              Show it above the table, as written, whenever it
-                              is present. It is where the review says that
-                              decisions taken have not reached Gmail.
-                  screen:
-                    type: object
-                    properties:
-                      title:
-                        type: string
-                  warnings:
-                    type: array
-                    items:
-                      type: string
-                additionalProperties: true
+                $ref: "#/components/schemas/Review"
   /review/continue:
     post:
       operationId: continueDailyReview
@@ -240,8 +88,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/Review"
         "404":
           description: There is no review of today to continue.
         "409":
@@ -280,8 +127,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/Review"
   /review/runs/{run_id}/plan:
     post:
       operationId: beginReviewPlan
@@ -328,8 +174,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/Review"
         "404":
           description: No such review.
         "422":
@@ -352,150 +197,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  review_id:
-                    type: string
-                    description: >-
-                      The review this response is about. Every decision,
-                      preparation and execution belongs to one review, so carry
-                      this id from here rather than one remembered from
-                      earlier in the conversation.
-                  run_id:
-                    type: string
-                    description: The same id, under the name the routes use.
-                  review_date:
-                    type: string
-                    format: date
-                  revision:
-                    type: integer
-                    description: >-
-                      Which review of that date this is. A second revision
-                      exists only where a finished review was deliberately
-                      restarted.
-                  status:
-                    type: string
-                    enum:
-                      [
-                        not_started,
-                        in_progress,
-                        awaiting_actions,
-                        completed,
-                        abandoned,
-                      ]
-                  state:
-                    type: string
-                    description: The same value, under its older name.
-                  started_at:
-                    type: string
-                    format: date-time
-                  completed_at:
-                    type: string
-                    format: date-time
-                  abandoned_at:
-                    type: string
-                    format: date-time
-                  evidence_refresh_at:
-                    type: string
-                    format: date-time
-                    description: >-
-                      When Gmail was last read for this review. Answer "how
-                      fresh is this?" from here, never from the clock.
-                  snapshot_at:
-                    type: string
-                    format: date-time
-                    description: >-
-                      The mailbox this review is of: when its evidence was
-                      first read. Show it with a fresh review.
-                  supersedes_review_id:
-                    type: string
-                    nullable: true
-                    description: >-
-                      The review this one replaced, where it replaced one.
-                  superseded:
-                    $ref: "#/components/schemas/Superseded"
-                  prompt:
-                    $ref: "#/components/schemas/ReviewPrompt"
-                  restart_available:
-                    type: boolean
-                    description: >-
-                      True where the review returned is finished, so the way
-                      to see the mail that has arrived since is a fresh
-                      review. False where it is under way: continue that
-                      instead of starting over on a morning half worked.
-                  restart_action:
-                    $ref: "#/components/schemas/RestartAction"
-                  plan:
-                    $ref: "#/components/schemas/ReviewPlan"
-                  summary:
-                    $ref: "#/components/schemas/ReviewSummary"
-                  scope:
-                    $ref: "#/components/schemas/ReviewScope"
-                  outstanding_execution:
-                    type: array
-                    description: >-
-                      Groups holding decisions the mailbox has not seen. Not
-                      empty means nothing has happened yet in those groups,
-                      whatever the table shows: say so, and offer to prepare
-                      them. A review with anything here is not finished.
-                    items:
-                      $ref: "#/components/schemas/OutstandingExecution"
-                  current_group:
-                    type: object
-                    properties:
-                      capability_key:
-                        type: string
-                        description: >-
-                          The only name a group is addressed by. policy_version
-                          and screen_id are versions of what it recommends and
-                          how it is drawn; sending either as a key is refused.
-                      state:
-                        type: string
-                        enum:
-                          [pending, in_progress, awaiting_actions, completed]
-                        description: >-
-                          awaiting_actions means every row is decided and none
-                          of it has been carried out.
-                      outstanding_execution:
-                        $ref: "#/components/schemas/OutstandingExecution"
-                      screen:
-                        type: object
-                        properties:
-                          title:
-                            type: string
-                          columns:
-                            type: array
-                            items:
-                              type: object
-                              properties:
-                                label:
-                                  type: string
-                          rows:
-                            type: array
-                            items:
-                              type: object
-                              properties:
-                                item_id:
-                                  type: string
-                                cells:
-                                  type: array
-                                  items:
-                                    type: string
-                                actions:
-                                  type: array
-                                  items:
-                                    type: string
-                          footer:
-                            type: string
-                          empty_text:
-                            type: string
-                          notice:
-                            type: string
-                            description: >-
-                              Show it above the table, as written, whenever it
-                              is present. It is where the review says that
-                              decisions taken have not reached Gmail.
-                additionalProperties: true
+                $ref: "#/components/schemas/Review"
   /review/runs/{run_id}/groups/{capability_key}:
     get:
       operationId: readReviewGroup
@@ -1439,8 +1141,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/PlaybookRevisions"
   /playbook/revisions/{revision_id}:
     get:
       operationId: getPlaybookRevision
@@ -1457,8 +1158,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/PlaybookRevisionDetail"
   /playbook/propose:
     post:
       operationId: proposePlaybookChange
@@ -1498,8 +1198,7 @@ paths:
                 type: object
                 properties:
                   revision:
-                    type: object
-                    additionalProperties: true
+                    $ref: "#/components/schemas/PlaybookRevision"
                   effect:
                     type: array
                     items:
@@ -1525,7 +1224,13 @@ paths:
                     description: >-
                       The exact request that makes this the playbook. Send it
                       only after Brian confirms.
-                    additionalProperties: true
+                    properties:
+                      operation:
+                        type: string
+                      method:
+                        type: string
+                      path:
+                        type: string
                 additionalProperties: true
         "400":
           description: >-
@@ -1632,36 +1337,59 @@ components:
           type: string
           nullable: true
         playbook:
-          type: object
-          description: >-
-            The playbook revision this session runs, which may not be the one
-            in force if it changed since. validation.warnings say what the
-            playbook names and Admin OS cannot do yet.
-          additionalProperties: true
+          $ref: "#/components/schemas/SessionPlaybook"
         opening:
           $ref: "#/components/schemas/ReviewOpening"
         plan:
           $ref: "#/components/schemas/SessionPlan"
         prompt:
-          type: object
-          nullable: true
-          description: >-
-            What Brian is being asked, with the exact requests that answer it.
-            Present the choices and wait.
-          additionalProperties: true
+          $ref: "#/components/schemas/SessionPrompt"
         review:
-          type: object
-          nullable: true
-          description: >-
-            The email activity's review, in the shape startDailyReview
-            returns. Work it with the review operations, on review_id.
-          additionalProperties: true
+          $ref: "#/components/schemas/Review"
         closeout:
           $ref: "#/components/schemas/SessionCloseout"
         warnings:
           type: array
           items:
             type: string
+    SessionPlaybook:
+      type: object
+      description: >-
+        The playbook revision this session runs, which may not be the one in
+        force if it changed since: a session keeps what it opened with.
+        validation.warnings say what the playbook names and Admin OS cannot
+        do yet.
+      properties:
+        playbook_id:
+          type: string
+        name:
+          type: string
+        revision:
+          $ref: "#/components/schemas/PlaybookRevision"
+        validation:
+          $ref: "#/components/schemas/PlaybookValidation"
+    SessionPrompt:
+      type: object
+      nullable: true
+      description: >-
+        What Brian is being asked, and the operations that answer it. Offer
+        the choices as written and wait; do not call one for him.
+      properties:
+        message:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              operation:
+                type: string
+              label:
+                type: string
+              method:
+                type: string
+              path:
+                type: string
     SessionPlan:
       type: object
       description: >-
@@ -1806,24 +1534,134 @@ components:
       description: >-
         The playbook and the revision it is on. Read the activities and steps
         as configured; the labels are Brian's words for his own work.
+        fell_back_from, where it is there, is a revision that stopped being
+        runnable: say the playbook fell back rather than pretending it did not.
       properties:
         revision:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/PlaybookRevision"
         playbook:
-          type: object
-          additionalProperties: true
+          $ref: "#/components/schemas/PlaybookDocument"
         validation:
           $ref: "#/components/schemas/PlaybookValidation"
         message:
           type: string
         fell_back_from:
-          type: object
+          $ref: "#/components/schemas/PlaybookRevision"
+    PlaybookRevisions:
+      type: object
+      description: Every revision of one playbook, newest first.
+      properties:
+        playbook_id:
+          type: string
+        revisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaybookRevision"
+    PlaybookRevisionDetail:
+      type: object
+      description: >-
+        One revision as it stood, whether or not it is the one in force.
+        Validation is against the capabilities configured now.
+      properties:
+        revision:
+          $ref: "#/components/schemas/PlaybookRevision"
+        playbook:
+          $ref: "#/components/schemas/PlaybookDocument"
+        validation:
+          $ref: "#/components/schemas/PlaybookValidation"
+    PlaybookRevision:
+      type: object
+      description: >-
+        One version of the playbook. proposed is written down and in force
+        nowhere; active is what a session starting now would run.
+      properties:
+        revision_id:
+          type: string
+        playbook_id:
+          type: string
+        number:
+          type: integer
+        status:
+          type: string
+          enum: [proposed, active, superseded, invalid]
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        activated_at:
+          type: string
+          format: date-time
+          nullable: true
+        superseded_at:
+          type: string
+          format: date-time
+          nullable: true
+        based_on_revision_id:
+          type: string
           nullable: true
           description: >-
-            The revision that stopped being runnable, where one did. Say that
-            the playbook fell back rather than pretending it did not.
-          additionalProperties: true
+            The revision this was written against. A proposal is refused where
+            the playbook has moved on since, rather than confirming something
+            other than what was read back.
+        change_summary:
+          type: array
+          items:
+            type: string
+        rationale:
+          type: string
+          nullable: true
+    PlaybookDocument:
+      type: object
+      description: The activities and steps themselves, in configured order.
+      properties:
+        schema_version:
+          type: integer
+        playbook_id:
+          type: string
+        name:
+          type: string
+        auto_start_first_activity:
+          type: boolean
+        finish_with_summary:
+          type: boolean
+        activities:
+          type: array
+          items:
+            type: object
+            properties:
+              activity_key:
+                type: string
+              label:
+                type: string
+              enabled:
+                type: boolean
+              order:
+                type: integer
+              availability:
+                type: string
+                enum: [built, planned]
+                description: >-
+                  planned means the playbook names it and Admin OS cannot do
+                  it yet. Say so; never present it as work done.
+              data_source:
+                type: string
+                enum: [gmail, monday, calendar, none]
+              intro:
+                type: string
+              steps:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    capability_key:
+                      type: string
+                    label:
+                      type: string
+                    enabled:
+                      type: boolean
+                    order:
+                      type: integer
     PlaybookValidation:
       type: object
       description: >-
@@ -2090,6 +1928,160 @@ components:
         message:
           type: string
           description: The end-of-review summary, safe to show as written.
+    Review:
+      type: object
+      description: >-
+        One review of one mailbox snapshot: what it is of, where it has got
+        to, and what it still owes. Returned by starting, resuming, restarting
+        and reading a review, by beginning its plan, and as a session's email
+        activity. Work it with the review operations, on review_id.
+      properties:
+        review_id:
+          type: string
+          description: >-
+            The review this response is about. Every decision,
+            preparation and execution belongs to one review, so carry
+            this id from here rather than one remembered from
+            earlier in the conversation.
+        run_id:
+          type: string
+          description: The same id, under the name the routes use.
+        review_date:
+          type: string
+          format: date
+        revision:
+          type: integer
+          description: >-
+            Which review of that date this is. A second revision
+            exists only where a finished review was deliberately
+            restarted.
+        status:
+          type: string
+          enum:
+            [
+              not_started,
+              in_progress,
+              awaiting_actions,
+              completed,
+              abandoned,
+            ]
+        state:
+          type: string
+          description: The same value, under its older name.
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        abandoned_at:
+          type: string
+          format: date-time
+        evidence_refresh_at:
+          type: string
+          format: date-time
+          description: >-
+            When Gmail was last read for this review. Answer "how
+            fresh is this?" from here, never from the clock.
+        snapshot_at:
+          type: string
+          format: date-time
+          description: >-
+            The mailbox this review is of: when its evidence was
+            first read. Show it with a fresh review.
+        supersedes_review_id:
+          type: string
+          nullable: true
+          description: >-
+            The review this one replaced, where it replaced one.
+        superseded:
+          $ref: "#/components/schemas/Superseded"
+        prompt:
+          $ref: "#/components/schemas/ReviewPrompt"
+        restart_available:
+          type: boolean
+          description: >-
+            True where the review returned is finished, so the way
+            to see the mail that has arrived since is a fresh
+            review. False where it is under way: continue that
+            instead of starting over on a morning half worked.
+        restart_action:
+          $ref: "#/components/schemas/RestartAction"
+        plan:
+          $ref: "#/components/schemas/ReviewPlan"
+        summary:
+          $ref: "#/components/schemas/ReviewSummary"
+        scope:
+          $ref: "#/components/schemas/ReviewScope"
+        outstanding_execution:
+          type: array
+          description: >-
+            Groups holding decisions the mailbox has not seen. Not
+            empty means nothing has happened yet in those groups,
+            whatever the table shows: say so, and offer to prepare
+            them. A review with anything here is not finished.
+          items:
+            $ref: "#/components/schemas/OutstandingExecution"
+        current_group:
+          type: object
+          properties:
+            capability_key:
+              type: string
+              description: >-
+                The only name a group is addressed by. policy_version
+                and screen_id are versions of what it recommends and
+                how it is drawn; sending either as a key is refused.
+            state:
+              type: string
+              enum:
+                [pending, in_progress, awaiting_actions, completed]
+              description: >-
+                awaiting_actions means every row is decided and none
+                of it has been carried out.
+            outstanding_execution:
+              $ref: "#/components/schemas/OutstandingExecution"
+            screen:
+              type: object
+              properties:
+                title:
+                  type: string
+                columns:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      label:
+                        type: string
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      item_id:
+                        type: string
+                      cells:
+                        type: array
+                        items:
+                          type: string
+                      actions:
+                        type: array
+                        items:
+                          type: string
+                footer:
+                  type: string
+                empty_text:
+                  type: string
+                notice:
+                  type: string
+                  description: >-
+                    Show it above the table, as written, whenever it
+                    is present. It is where the review says that
+                    decisions taken have not reached Gmail.
+        warnings:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
     Superseded:
       type: object
       nullable: true

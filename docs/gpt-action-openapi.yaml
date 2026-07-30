@@ -1,17 +1,13 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.19.0
+  version: 0.19.1
   description: >-
-    API for the Timmeny Admin OS daily review workflow.
-
-
-    This document is served by the deployment that implements it, at
-    /gpt/action-schema.yaml, so an import from that URL is the same commit as
-    the running API. /gpt/action-schema/version returns the version and a
-    fingerprint of every request shape here; if it disagrees with this
-    document, the import is stale and must be replaced. The version changes
-    whenever a request shape does.
+    Admin OS: the session, the playbook it runs, and the mailbox review.
+    Served by the deployment that implements it, at /gpt/action-schema.yaml,
+    so an import from that URL is the running commit.
+    /gpt/action-schema/version says what is deployed; an import that
+    disagrees is stale.
 servers:
   - url: https://timmeny-admin-os-production.up.railway.app
 security:
@@ -22,20 +18,11 @@ paths:
       operationId: startDailyReview
       summary: Review the mailbox as it is now
       description: >-
-        Call this for anything that starts an admin session — "hello", "good
-        morning", "good evening", "let's begin", "check my inbox", "what do I
-        need to do?", "review my inbox", "start over", "refresh", "pull my
-        inbox again". Every call reads Gmail and reviews what it says now: a
-        review is a snapshot, and a finished or half-worked one from earlier
-        is set aside with its decisions intact rather than handed back. A new
-        review_id and snapshot_at come back every time; supersedes_review_id
-        names the review replaced, and superseded says what that one was left
-        holding, if anything. Returns the plan and no group: what the morning
-        consists of is stated before any of it is presented. Print
-        plan.opening.text first, then plan.message and plan.groups, then call
-        beginReviewPlan when Brian says to begin. Resuming an unfinished
-        review is continueDailyReview, and only when he asks for it in so many
-        words.
+        Starts admin outside a session: "hello", "check my inbox",
+        "refresh". Every call reads Gmail and reviews what it says now, under
+        a new review_id; the review replaced keeps its decisions, named in
+        supersedes_review_id. Returns the plan, no group: print
+        plan.opening.text, then beginReviewPlan on "go".
       requestBody:
         required: false
         content:
@@ -54,11 +41,10 @@ paths:
                   enum: [inbox, archived, snoozed, everything]
                   description: >-
                     Which mail to review. Omit it: the review is of the inbox,
-                    and that is not a preference to confirm. Send one only when
-                    Brian asks for other mail in so many words - "show me my
-                    archive", "review my snoozed mail", "review everything".
-                    Another scope opens its own review of the day rather than
-                    adding to the one already under way.
+                    and that is not a preference to confirm. Send one only
+                    where Brian asks for other mail in so many words — "my
+                    archive", "my snoozed mail", "everything". Another scope
+                    opens its own review of the day.
       responses:
         "200":
           description: Review started or resumed.
@@ -223,14 +209,11 @@ paths:
       operationId: continueDailyReview
       summary: Resume the review already under way
       description: >-
-        The only operation that resumes: for "where was I?", "continue" and
-        "pick up where we left off", and only where Brian says something like
-        one of them. Returns the same review_id with its progress. Print
-        plan.opening.text first here too. It never opens a review: if there is
-        none today it answers 404, and if today's is finished it answers 409
-        rather than reopening it. Say what it says; do not fall back to
-        startDailyReview, which would replace the review rather than resume
-        it.
+        The only operation that resumes, and only where Brian asks in so many
+        words: "where was I?", "continue", "pick up where we left off".
+        Returns the same review_id with its progress; print plan.opening.text
+        first here too. It never opens one — 404 where there is none, 409
+        where today's is finished.
       requestBody:
         required: false
         content:
@@ -268,17 +251,11 @@ paths:
       operationId: restartDailyReview
       summary: Replace the review in hand with one of the mailbox now
       description: >-
-        What startDailyReview does, under the name for asking: "refresh mail",
-        "check again", "review again", "rerun today's review", "look for new
-        mail", "anything new?", "start over with refreshed mail". Refreshes
-        the mailbox, sets the existing review aside and opens the next
-        revision of the same date with a new review_id and snapshot_at; the
-        review replaced keeps its decisions and its actions, is named in
-        supersedes_review_id, and loses any preparation still open in it,
-        which stops being executable at once. Nothing in Gmail changes, so
-        nothing here needs confirming. Never call it to clear a confusing
-        state, and say the mail was refreshed only if this or
-        startDailyReview ran.
+        startDailyReview under the name for asking: "refresh mail", "check
+        again", "anything new?". Refreshes the mailbox and opens the next
+        revision of the date; the review replaced keeps its decisions, is
+        named in supersedes_review_id, and loses any open preparation. Gmail
+        is not changed.
       requestBody:
         required: false
         content:
@@ -310,14 +287,11 @@ paths:
       operationId: beginReviewPlan
       summary: Agree the plan for this review, and get the first group
       description: >-
-        startDailyReview returns the plan and no group: what the morning
-        consists of is Brian's to agree before the first table appears. Show
+        The plan is Brian's to agree before the first table: show
         plan.message and plan.groups, then call this when he says to begin.
-        Send order, only or skip only where he named groups - "do Financial
-        first" is order, "only Admin" is only, "skip Legal today" is skip - and
-        name capability keys, never screen titles or policy versions. All three
-        are about today; none of them changes what a review normally consists
-        of.
+        Send order, only or skip only where he named groups — "Financial
+        first", "only Admin", "skip Legal today" — by capability key, and for
+        today alone.
       parameters:
         - name: run_id
           in: path
@@ -651,13 +625,10 @@ paths:
                   description: >-
                     The action to take, named as the row offers it. Gmail
                     dispositions are archive_gmail_thread,
-                    move_gmail_thread_to_label, and
-                    move_gmail_thread_to_trash; "delete", "remove", and
-                    "trash" all mean move to Trash, which is recoverable.
-                    restore_gmail_thread_from_trash undoes a Trash: it is
-                    offered on the group's restorable list, and it runs
-                    through preparation and confirmation like any other
-                    action.
+                    move_gmail_thread_to_label and
+                    move_gmail_thread_to_trash; "delete", "remove" and
+                    "trash" all mean Trash, which is recoverable.
+                    restore_gmail_thread_from_trash undoes one.
                 action_params:
                   type: object
                   description: >-
@@ -1267,20 +1238,11 @@ paths:
       operationId: startSession
       summary: "Wake up: load the playbook and state the session's plan"
       description: >-
-        The first call of any admin interaction - "hello", "good morning",
-        "good evening", "let's begin", "start my admin", "check my inbox",
-        "what do I need to do?". Loads the playbook in force, holds that exact
-        revision for the whole session, reads Gmail afresh, and states what
-        will be worked through and in what order. It presents no work: print
-        opening.text exactly, then plan.message exactly, then wait. Begin only
-        when Brian says to. A session already open is set aside, keeping
-        everything it recorded; resuming one is continueSession.
-
-
-        Session-only wishes are arguments here: order brings activities to the
-        front for today, skip sets them aside for today, only works those
-        alone. None of them changes the playbook - that is
-        proposePlaybookChange, and it takes a confirmation.
+        The first call of an admin interaction: "hello", "good morning",
+        "what do I need to do?". Loads the playbook, holds that revision,
+        reads Gmail, states the plan. It presents no work: print
+        opening.text, then plan.message, and wait. order, skip and only are
+        for today. To resume, continueSession.
       requestBody:
         required: false
         content:
@@ -1425,9 +1387,8 @@ paths:
       description: >-
         Only once the activity in hand is finished with, which Admin OS asks
         of the work rather than takes on trust: an email review holding
-        decisions the mailbox has not seen is not finished, and the session
-        stays on it. Where the closeout is reached, closeout reports what the
-        session did and what it still owes.
+        decisions the mailbox has not seen is not finished. At the end,
+        closeout says what the session did and what it still owes.
       parameters:
         - name: session_id
           in: path
@@ -1503,16 +1464,11 @@ paths:
       operationId: proposePlaybookChange
       summary: Write down a change to the playbook, and change nothing yet
       description: >-
-        For "from now on, always do objectives before email", "make blocked
-        to-dos part of every review", "remove Legal from the sequence",
-        "always end with a calendar review" - anything meant to hold beyond
-        today. Changes nothing: it records what the playbook would become.
-        Read effect back sentence by sentence, with order_now and order_after,
-        and confirm only when Brian says so.
-
-
-        A wish about today is not this. "Skip objectives today" is the skip
-        argument to startSession.
+        For "from now on, always do objectives before email" — anything meant
+        to hold beyond today. It changes nothing: it records what the playbook
+        would become. Read effect, order_now and order_after back, and confirm
+        on an explicit yes alone. "Skip objectives today" is startSession's
+        skip.
       requestBody:
         required: true
         content:
@@ -1648,10 +1604,9 @@ components:
       type: object
       description: >-
         One run of the playbook against the state of the day. plan is what
-        will be worked and in what order; review is the email activity's
-        review, in the same shape startDailyReview returns, and every review
-        operation takes its review_id. Activity progress and execution are
-        separate claims: an activity completed never means the mailbox
+        will be worked and in what order; review is the email activity's own,
+        in the shape startDailyReview returns, and every review operation
+        takes its review_id. An activity completed never means the mailbox
         changed.
       properties:
         session_id:
@@ -1978,14 +1933,11 @@ components:
       type: object
       nullable: true
       description: >-
-        How an admin session opens: what will be worked through, that it
-        follows the playbook Brian and the agent hold together, and that the
-        playbook evolves by agreement. Print text exactly as written, as the
-        first thing in the reply, before the returned screen and before any
-        greeting; do not summarise it, replace it with "how can I help?", or
-        ask what he would like to do. Present only on startDailyReview,
-        continueDailyReview and restartDailyReview, and null everywhere else:
-        it is said once on entering a review, never between groups or rows.
+        How an admin session opens: what will be worked through, and that the
+        playbook evolves by agreement. Print text exactly, first in the reply,
+        before the screen and any greeting; never "how can I help?". Present
+        on starting, continuing and restarting alone — said on entering, never
+        between groups.
       properties:
         mode:
           type: string
@@ -2002,10 +1954,9 @@ components:
       type: object
       description: >-
         What this review consists of, said before any of it is presented.
-        While status is proposed, current_group is absent and nothing has been
+        While status is proposed, current_group is absent and nothing is
         decided: show message, the groups with their counts, and the steps,
-        then call beginReviewPlan when Brian says to begin. Never present rows
-        or ask for a decision while a plan is proposed.
+        then beginReviewPlan on "go". Never present rows while it is proposed.
       properties:
         status:
           type: string

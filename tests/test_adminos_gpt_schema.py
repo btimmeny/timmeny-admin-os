@@ -34,6 +34,7 @@ REQUEST_SHAPES: dict[str, str] = {
     "0.17.0": "002e9d7750d783f20fd319aa79e31cd256553ae27c7a90d3171f77a6b6059dbc",
     "0.18.0": "002e9d7750d783f20fd319aa79e31cd256553ae27c7a90d3171f77a6b6059dbc",
     "0.19.0": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
+    "0.19.1": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
 }
 """Every version of the contract, and the request shapes it published.
 
@@ -45,6 +46,12 @@ editing the shape under an existing one is what this record makes visible.
 Two versions may share a shape — 0.12.1 shortened descriptions for ChatGPT's
 importer and asked for nothing new — but one shape must never be published
 under two versions with different content, which is what the mapping checks.
+"""
+
+IMPORTER_PROSE_LIMIT = 300
+"""What ChatGPT allows a description or summary, in characters.
+
+Not ours to choose, and not negotiable: over it, the import fails outright.
 """
 
 EXECUTE_PATH = "/review/runs/{run_id}/actions/execute"
@@ -123,6 +130,42 @@ def test_a_changed_request_shape_takes_a_new_version() -> None:
         "info.version in docs/gpt-action-openapi.yaml and record the new "
         f"fingerprint {fingerprint} against it, so an imported copy can be "
         "told apart from this one."
+    )
+
+
+def prose(node: object, path: str) -> list[tuple[str, str]]:
+    """Every description and summary in the document, with where it is."""
+    found: list[tuple[str, str]] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in {"description", "summary"} and isinstance(value, str):
+                found.append((f"{path}.{key}", value))
+            else:
+                found.extend(prose(value, f"{path}.{key}"))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            found.extend(prose(value, f"{path}[{index}]"))
+    return found
+
+
+def test_no_description_is_longer_than_the_importer_accepts() -> None:
+    """ChatGPT refuses the whole import over one long description.
+
+    "description has length 894 exceeding limit of 300" is not a warning: the
+    schema does not import, so every operation is unavailable until the prose
+    is cut. It has happened twice, and prose grows every increment, so the
+    limit belongs in the suite rather than in whoever is editing the file.
+    """
+    too_long = [
+        (where, len(text))
+        for where, text in prose(contract(), "")
+        if len(text) > IMPORTER_PROSE_LIMIT
+    ]
+
+    assert not too_long, (
+        "ChatGPT's importer rejects a schema whose descriptions run over "
+        f"{IMPORTER_PROSE_LIMIT} characters, and rejects the document, not "
+        f"the sentence: {too_long}"
     )
 
 

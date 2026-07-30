@@ -30,6 +30,28 @@ session:
   show_subprocess_before_activity: true
   finish_with_summary: true
 
+# The systems a session reads besides Gmail.
+#
+# Nothing is assumed here. Monday is reviewed only when this names the board,
+# the columns by their Monday ids, and the labels by their exact text — and
+# then only after Admin OS has found every one of them on the live board. A
+# column that has been renamed or a label that was never created makes the
+# review stop and say so, because a Monday rule that matches nothing does not
+# fail: it hands back the whole board looking like a filtered result.
+#
+# Left out on purpose until the board carries the labels the process means.
+# The shape it takes:
+#
+# sources:
+#   monday:
+#     board_id: "8962223984"
+#     match: any            # an item qualifies on either column
+#     filters:
+#       - column_id: status
+#         labels: ["Working on it today"]
+#       - column_id: color_mkq6wnv7
+#         labels: ["Daily"]
+
 activities:
   - activity_key: email_review
     label: Email

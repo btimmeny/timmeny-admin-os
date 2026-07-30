@@ -29,6 +29,12 @@ from adminos.config import (
 )
 from adminos.db import engine
 from adminos.db.engine import DatabaseNotConfigured, session_scope
+from adminos.domain.boards import (
+    DEFAULT_ITEM_LIMIT,
+    BoardScopeUnresolved,
+    read_scoped_items,
+    resolve_board_scope,
+)
 from adminos.domain.classification import classify_evidence, read_review_queue
 from adminos.domain.duplicates import (
     CANDIDATE_SCORE,
@@ -43,6 +49,7 @@ from adminos.domain.evidence import (
     PruneScanTruncated,
     sync_gmail_evidence,
 )
+from adminos.domain.playbook_store import read_active_playbook
 from adminos.domain.tasks import (
     EvidenceNotFound,
     TaskCreationRefused,
@@ -603,6 +610,95 @@ def build_report_response(report: DuplicateReport) -> DuplicateReportResponse:
             )
             for match in report.matches
         ],
+    )
+
+
+class ScopeFilterResponse(BaseModel):
+    column_id: str
+    column_title: str
+    labels: list[str]
+    indexes: list[int]
+
+
+class BoardScopeResponse(BaseModel):
+    """What the playbook's Monday scope resolves to on the live board."""
+
+    configured: bool
+    resolved: bool
+    board_id: str | None = None
+    board_name: str | None = None
+    describes: str | None = None
+    filters: list[ScopeFilterResponse] = Field(default_factory=list)
+    items: int | None = None
+    detail: str | None = None
+
+
+@router.get("/monday/scope", response_model=BoardScopeResponse)
+async def read_monday_scope(
+    _: None = Depends(require_api_key),
+    limit: int = Query(default=DEFAULT_ITEM_LIMIT, ge=1, le=MAX_BOARD_LIMIT),
+) -> BoardScopeResponse:
+    """Check the playbook's Monday scope against the board, and count what it takes.
+
+    Read-only, and the honest answer to "is this configured correctly?". A
+    scope that names a column or a label the board does not have is reported
+    here with what the board has instead, rather than discovered halfway
+    through a review by returning the wrong work.
+    """
+    token = get_monday_token()
+    if token is None:
+        raise HTTPException(status_code=503, detail="MONDAY_API_TOKEN is not configured.")
+
+    loaded = read_capability_config()
+    try:
+        with session_scope() as session:
+            config = read_active_playbook(session, loaded).document.sources.monday
+    except DatabaseNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    if config is None:
+        return BoardScopeResponse(
+            configured=False,
+            resolved=False,
+            detail=(
+                "The playbook names no Monday board, so no Monday work is in "
+                "scope. Name the board, the columns and the exact labels."
+            ),
+        )
+
+    try:
+        async with open_monday_client(token) as client:
+            scope = await resolve_board_scope(client, config)
+            items = await read_scoped_items(client, scope, limit=limit)
+    except BoardScopeUnresolved as exc:
+        return BoardScopeResponse(
+            configured=True,
+            resolved=False,
+            board_id=config.board_id,
+            detail=str(exc),
+        )
+    except MondayAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except MondayError as exc:
+        logger.error("monday scope read failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return BoardScopeResponse(
+        configured=True,
+        resolved=True,
+        board_id=scope.board_id,
+        board_name=scope.board_name,
+        describes=scope.describes(),
+        filters=[
+            ScopeFilterResponse(
+                column_id=filter.column_id,
+                column_title=filter.column_title,
+                labels=list(filter.labels),
+                indexes=list(filter.indexes),
+            )
+            for filter in scope.filters
+        ],
+        items=len(items),
     )
 
 

@@ -487,6 +487,26 @@ Validation is recomputed on every read rather than trusted from when a revision 
 
 A session keeps the revision it opened with. Confirming a change halfway through a morning changes the next session, not this one: rearranging a morning around a change made in the middle of it would be answering a question with a different question.
 
+### The Monday scope
+
+Which Monday items count as the day's work is `sources.monday` in the playbook: a board id, column ids, and the exact label texts that qualify an item. An item qualifies on any one of the filters. Nothing here has a default, and the section is absent until the board carries the labels the process means — an unconfigured scope reviews no Monday work and says so, rather than reviewing a guess. See [ADR-0024](docs/adr/ADR-0024-a-monday-scope-is-exact-or-it-does-not-look.md).
+
+```yaml
+sources:
+  monday:
+    board_id: "8962223984"
+    match: any            # an item qualifies on either column
+    filters:
+      - column_id: status
+        labels: ["Working on it today"]
+      - column_id: color_mkq6wnv7
+        labels: ["Daily"]
+```
+
+The board is read before it is queried: every column id and every label is found on the live board first, and each label is resolved to the index Monday filters by. A missing column or label stops with what was looked for and what the board has instead. This is not defensiveness for its own sake — a Monday rule naming a column that is not there matches nothing, and a filter that matches nothing returns the whole board looking exactly like an answer. For the same reason, what comes back is checked against the labels that were asked for, and a read containing an item matching neither filter is refused rather than trimmed. Nothing widens: the outcomes are the exact items or a stop with the reason.
+
+`GET /admin/monday/scope` resolves the configured scope against the live board and counts what it takes, writing nothing — the way to find a renamed column before a morning does.
+
 ## Daily review
 
 The daily review is what a session's email activity runs, and what "good morning" called before there were sessions. One request refreshes the mailbox, opens a review of what Gmail says now, and hands back a single capability group to work through — not an undifferentiated inbox. See [ADR-0007](docs/adr/ADR-0007-daily-review-engine.md).

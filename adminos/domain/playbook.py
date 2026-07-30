@@ -108,11 +108,56 @@ class SessionRules(StrictModel):
     finish_with_summary: bool = True
 
 
+class ColumnFilterConfig(StrictModel):
+    """One column of a board, and the labels on it that qualify an item.
+
+    The column is named by its Monday id rather than its title, because a
+    title is renamed by whoever owns the board and an id is not. The labels
+    are matched on exact text: a filter that falls back to something near
+    enough is a filter that reviews work Brian never put in front of himself.
+    """
+
+    column_id: str = Field(pattern=r"^[A-Za-z0-9_]+$")
+    labels: list[str] = Field(min_length=1)
+
+
+class MondayScopeConfig(StrictModel):
+    """Which Monday items a review is of, in ids and labels, or not at all.
+
+    Every part of this is named here or the review does not look. There is no
+    default board, no default column and no default label, because the failure
+    mode of a wrong guess is reviewing the wrong work — or, worse, a filter
+    that matches nothing and returns a thousand-item board as if it were the
+    day's list.
+    """
+
+    board_id: str = Field(pattern=r"^\d+$")
+    match: Literal["any"] = "any"
+    """How the filters combine. Only "any" today: qualifying on either column."""
+
+    filters: list[ColumnFilterConfig] = Field(min_length=1)
+
+    def column_ids(self) -> list[str]:
+        return [column.column_id for column in self.filters]
+
+
+class SourcesConfig(StrictModel):
+    """The systems a session reads besides Gmail.
+
+    Absent means unconfigured, and unconfigured is reported as unavailable
+    rather than filled in: a Monday review of a board nobody named is a review
+    of somebody's guess.
+    """
+
+    monday: MondayScopeConfig | None = None
+
+
 class PlaybookDocument(StrictModel):
     schema_version: int = SCHEMA_VERSION
     playbook_id: str = DEFAULT_PLAYBOOK_ID
     name: str
     session: SessionRules = SessionRules()
+    sources: SourcesConfig = SourcesConfig()
     activities: list[ActivityConfig] = Field(min_length=1)
 
     def ordered(self) -> list[ActivityConfig]:

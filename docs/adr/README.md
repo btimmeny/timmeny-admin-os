@@ -39,6 +39,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0021 — Refreshing the Mail Is a Restart, and Says So in Data](./ADR-0021-refreshing-mail-is-a-restart.md)
 - [ADR-0022 — Every Entry Reads the Mailbox, and Reviews What It Says Now](./ADR-0022-every-entry-reads-the-mailbox.md)
 - [ADR-0023 — A Session Runs a Playbook, and the Playbook Is Configuration](./ADR-0023-a-session-runs-a-playbook.md)
+- [ADR-0024 — A Monday Scope Is Exact, or the Review Does Not Look](./ADR-0024-a-monday-scope-is-exact-or-it-does-not-look.md)
 
 ## Candidate Decisions
 

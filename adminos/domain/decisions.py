@@ -2,6 +2,13 @@ from enum import StrEnum
 
 
 HUMAN_ACTOR = "human"
+SYSTEM_ACTOR = "system"
+"""What signs a step nobody was asked to take.
+
+Reserved for what needs no agreement, such as settling the plan of a review
+with no work in it. A decision about mail is never signed with it.
+"""
+
 RULE_ACTOR_PREFIX = "rule:"
 """Prefix that marks an approval nobody was asked for.
 

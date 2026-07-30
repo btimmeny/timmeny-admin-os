@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 import main
+from adminos.api.review import RestartActionResponse
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -140,6 +141,47 @@ def test_every_operation_the_instructions_name_is_one_the_contract_publishes() -
     )
     for lifecycle in ("startDailyReview", "continueDailyReview", "restartDailyReview"):
         assert lifecycle in named
+
+
+def test_every_operation_a_response_offers_is_one_the_gpt_was_given() -> None:
+    """An offer the GPT cannot take is worse than no offer at all.
+
+    Admin OS answers with the operation to call next — `beginReviewPlan`,
+    `prepareReviewActions`, the choices on a session prompt — so a response
+    can name a tool the schema never published, and the GPT is left with a
+    next step it cannot reach and a conversation that stalls in front of
+    Brian. Every name the code hands out is checked against what is published.
+    """
+    published = published_operations()
+    offered = {
+        (source.relative_to(REPOSITORY_ROOT).as_posix(), name)
+        for source in (REPOSITORY_ROOT / "adminos").rglob("*.py")
+        for name in re.findall(r"""["']?operation["']?\s*[:=]\s*["'](\w+)["']""", source.read_text())
+    }
+    restart = RestartActionResponse(body={})
+    offered.add(("adminos/api/review.py", restart.name))
+
+    assert offered, "No operation is offered anywhere, which cannot be right."
+    unpublished = sorted(f"{where}: {name}" for where, name in offered if name not in published)
+    assert not unpublished, (
+        f"These responses offer an operation the schema does not publish: {unpublished}. "
+        "Publish it, or stop offering it."
+    )
+    assert (restart.method, restart.path) in {
+        (method.upper(), path)
+        for path, item in read_contract()["paths"].items()
+        for method in item
+        if method in METHODS
+    }
+
+
+def published_operations() -> set[str]:
+    return {
+        operation["operationId"]
+        for path in read_contract()["paths"].values()
+        for method, operation in path.items()
+        if method in METHODS and "operationId" in operation
+    }
 
 
 def test_the_contract_says_refreshing_mail_is_a_restart() -> None:

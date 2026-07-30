@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from adminos.capabilities.config import ActionKind, LoadedCapabilities
 from adminos.db.models import ReviewAction, ReviewItem, ReviewPlan, ReviewRun
 from adminos.domain.actions import ActionState
-from adminos.domain.decisions import HUMAN_ACTOR, ItemState
+from adminos.domain.decisions import HUMAN_ACTOR, SYSTEM_ACTOR, ItemState
 from adminos.logging import get_logger
 
 
@@ -94,6 +94,30 @@ def activate_plan(
     plan.begun_at = now or datetime.now(UTC)
     plan.begun_by = actor
     session.flush()
+    return plan
+
+
+def settle_plan(
+    session: Session,
+    plan: ReviewPlan | None,
+    now: datetime | None = None,
+) -> ReviewPlan | None:
+    """Settle a plan there is nothing to agree to.
+
+    A review of a mailbox with no reviewable mail in it is finished the moment
+    it is taken, and a finished review still asking "begin this plan?" is the
+    review contradicting itself: completed, proposed, and waiting on Brian for
+    a morning that has no work in it. Nobody began it, so it is signed by the
+    system rather than by him.
+    """
+    if plan is None or plan.status == PlanStatus.ACTIVE:
+        return plan
+
+    plan.status = PlanStatus.ACTIVE
+    plan.begun_at = now or datetime.now(UTC)
+    plan.begun_by = SYSTEM_ACTOR
+    session.flush()
+    logger.info("review %s had nothing to work, so its plan was settled", plan.run_id)
     return plan
 
 

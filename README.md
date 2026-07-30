@@ -937,6 +937,28 @@ Operators are `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`,
 
 An example email produces suggestions rather than a rule: `suggest_subject_conditions` offers the readings of a subject narrowest first — the exact subject, the same wording with any numbers, the opening words, the longest fixed phrase — each saying what it would catch and what it would miss. Which parts of a subject vary is a guess, and it is Brian's to make against a preview. See [ADR-0025](docs/adr/ADR-0025-a-rule-matches-on-fields-that-exist.md).
 
+### The rulebook: a rule is a record with versions
+
+A rule is `rules` — what it is about and where it stands — plus `rule_versions`, written once each and never edited, plus `rule_events`, everything that happened to it. The row points at the version in force; the review records the version it ran under.
+
+```text
+observed -> proposed -> tested -> confirmed -> active -> automatable
+                 ^                               |
+                 └──── amended ───────────┘   paused, and back
+                                              retired, and not back
+```
+
+- **Confirming and activating are two acts.** Agreeing that a rule is right is not the same as putting it to work, so `confirmed` changes nothing; only `active` and `automatable` shape a review.
+- **Confirming needs a test first.** `proposed` can only reach `confirmed` through `tested`: a rule nobody previewed is a rule nobody has seen the consequences of.
+- **An edit is a new version, and it stands the rule down.** Amending an active rule writes version *n+1* and returns it to `proposed`, because what Brian agreed to was a version. The old version stays readable, and the event says what it was stood down from.
+- **Retiring is final.** No path back, so a rule's history never has to be read as "active, unless it was retired in between".
+
+Each rule declares a **type**, the type owns the kinds of **effect** it may carry, and every effect declares what class of thing it is — classification, display, recommendation. A rule carrying two effects of one kind is refused: that is two rules. Fourteen types are declared and four are available; the rest say why not (`todo_reminder_rule`: "Nothing in this service wakes up on a schedule, so a reminder at a time could only be a promise"), and proposing one is refused rather than stored as a promise nothing keeps.
+
+**Constraints are the strictest reading and cannot be relaxed.** `auto_execute` is refused outright; `automation_level` is capped at 1 — classify and recommend — because levels 2 to 4 need grants that do not exist yet; and deciding, preparing, confirming and verifying are the review's safeguards, not a rule's to waive.
+
+Before a rule is stored it is checked against the configuration it will run under: the match must narrow, a group it files into must be a group the review has, an action must be one its capability is allowed to take, and a folder must be one that capability lists. `summary` is generated from the rule at the moment it is written, so the sentences kept in history are the ones the rule actually said. See [ADR-0026](docs/adr/ADR-0026-a-rule-is-a-record-with-versions.md).
+
 ## Capabilities
 
 Capabilities are data, in `config/capabilities.yaml` — not branches in code. Adding one, reordering the review, or changing what an action may do is a configuration change.

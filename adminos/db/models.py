@@ -736,3 +736,94 @@ class SessionActivity(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at_column()
     updated_at: Mapped[datetime] = updated_at_column()
+
+
+class Rule(Base):
+    """A rule's identity and standing, apart from what it currently says.
+
+    Split from its versions because those are two different lifetimes: what a
+    rule is about survives every rewording of it, and the wording has to stay
+    readable long after it was replaced. The row points at the version in
+    force; the versions are written once and kept.
+    """
+
+    __tablename__ = "rules"
+    __table_args__ = (
+        Index("ix_rules_type_status", "rule_type", "status"),
+        Index("ix_rules_capability_status", "capability_key", "status"),
+    )
+
+    id: Mapped[str] = id_column()
+    rule_type: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    capability_key: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    current_version_id: Mapped[str | None] = mapped_column(String(ID_LENGTH))
+    """The version in force. Nullable only for the instant before the first one."""
+    digest: Mapped[str] = mapped_column(String(DIGEST_LENGTH), nullable=False)
+    """What the rule is about and does, hashed, so the same rule is not proposed twice."""
+    created_by: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RuleVersion(Base):
+    """One immutable statement of what a rule matches and does.
+
+    Nothing here is updated after it is written. A review records the version
+    it ran under, so what a morning was worked by stays readable even after
+    the rule has been rewritten twice.
+    """
+
+    __tablename__ = "rule_versions"
+    __table_args__ = (UniqueConstraint("rule_id", "number", name="uq_rule_version_number"),)
+
+    id: Mapped[str] = id_column()
+    rule_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("rules.id", ondelete="CASCADE"), nullable=False
+    )
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    match_conditions: Mapped[JsonDocument] = mapped_column("match", JSON_TYPE, nullable=False)
+    effects: Mapped[list[JsonDocument]] = mapped_column(JSON_TYPE, nullable=False)
+    constraints: Mapped[JsonDocument] = mapped_column(JSON_TYPE, nullable=False)
+    examples: Mapped[JsonDocument | None] = mapped_column(JSON_TYPE)
+    summary: Mapped[list[str]] = mapped_column(JSON_TYPE, nullable=False)
+    """The rule as sentences, generated from it at the moment it was written."""
+    digest: Mapped[str] = mapped_column(String(DIGEST_LENGTH), nullable=False)
+    change_reason: Mapped[str | None] = mapped_column(Text)
+    supersedes_version_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("rule_versions.id", ondelete="SET NULL")
+    )
+    created_by: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    created_at: Mapped[datetime] = created_at_column()
+
+
+class RuleEvent(Base):
+    """Something that happened to a rule, in the order it happened.
+
+    Every move it made and who made it, kept separately from the rule so that
+    a status is never the only account of how it got there.
+    """
+
+    __tablename__ = "rule_events"
+    __table_args__ = (Index("ix_rule_events_rule", "rule_id", "created_at"),)
+
+    id: Mapped[str] = id_column()
+    rule_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("rules.id", ondelete="CASCADE"), nullable=False
+    )
+    version_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("rule_versions.id", ondelete="SET NULL")
+    )
+    kind: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    to_status: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    actor: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    detail: Mapped[JsonDocument | None] = mapped_column(JSON_TYPE)
+    created_at: Mapped[datetime] = created_at_column()

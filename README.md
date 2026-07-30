@@ -913,6 +913,30 @@ A rule that files mail carries the folder it files into, as `action_params: {"la
 
 Even a promoted rule only *approves*: execution permission and the kill switch still stand between it and the mailbox, and the action it approves records `approval_kind: automatable_rule` with the rule that did it.
 
+### What a rule may match on
+
+Conditions are a tree — `all`, `any`, `none` — over a closed list of fields, each of which names the thing that stands behind it:
+
+| Field | Reads | Narrows |
+| --- | --- | --- |
+| `subject` | the thread's subject | yes |
+| `participant` | every address on the thread | yes |
+| `participant_domain` | the domains of those addresses | yes |
+| `snippet` | Gmail's ~200-character preview | yes |
+| `gmail_label` | the labels Gmail had when the thread was last seen | no |
+| `capability` | the group the item was placed in | no |
+| `thread_age_days` | whole days since the newest message | no |
+
+Operators are `equals`, `not_equals`, `contains`, `not_contains`, `starts_with`, `ends_with` and `regex` for text, and `equals`, `at_least`, `at_most` for numbers.
+
+**There is no `body` field.** Message bodies are not stored ([ADR-0003](docs/adr/ADR-0003-gmail-access-and-retention.md)), and `snippet` says so where it is defined: a `body` that searched a preview would fail silently on every email whose point is further down.
+
+**A rule has to narrow.** "All Inbox email", "any email containing 'money'" and "anything older than a day" are all well-formed and all refused: at least one condition must be on a narrowing field, positive, and carry four or more characters of fixed text — and in an `any` branch every alternative must, because one branch matching everything makes the rule match everything.
+
+**Matching explains itself.** Every condition reports what it tested and what it saw — *"the subject matches the pattern Inter Institution Transfer Request [number] Will Occur in [days] Days — matched (…)"* — and named captures come back as extracted values (`{"number": "207960765", "days": "3"}`). `describes()` renders the tree as sentences from the structure, so the summary cannot drift from the rule.
+
+An example email produces suggestions rather than a rule: `suggest_subject_conditions` offers the readings of a subject narrowest first — the exact subject, the same wording with any numbers, the opening words, the longest fixed phrase — each saying what it would catch and what it would miss. Which parts of a subject vary is a guess, and it is Brian's to make against a preview. See [ADR-0025](docs/adr/ADR-0025-a-rule-matches-on-fields-that-exist.md).
+
 ## Capabilities
 
 Capabilities are data, in `config/capabilities.yaml` — not branches in code. Adding one, reordering the review, or changing what an action may do is a configuration change.

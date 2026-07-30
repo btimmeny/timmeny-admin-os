@@ -13,6 +13,7 @@ from adminos.api.admin import router as admin_router
 from adminos.api.learning import router as learning_router
 from adminos.api.playbook import router as playbook_router
 from adminos.api.review import router as review_router
+from adminos.api.rules import router as rules_router
 from adminos.api.schema import router as schema_router
 from adminos.api.session import router as session_router
 from adminos.api.security import extract_bearer_token
@@ -40,6 +41,7 @@ app.include_router(review_router)
 app.include_router(actions_router)
 app.include_router(learning_router)
 app.include_router(playbook_router)
+app.include_router(rules_router)
 app.include_router(session_router)
 app.include_router(schema_router)
 

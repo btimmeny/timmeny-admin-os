@@ -959,6 +959,18 @@ Each rule declares a **type**, the type owns the kinds of **effect** it may carr
 
 Before a rule is stored it is checked against the configuration it will run under: the match must narrow, a group it files into must be a group the review has, an action must be one its capability is allowed to take, and a folder must be one that capability lists. `summary` is generated from the rule at the moment it is written, so the sentences kept in history are the ones the rule actually said. See [ADR-0026](docs/adr/ADR-0026-a-rule-is-a-record-with-versions.md).
 
+### Trying a rule, which changes nothing
+
+`POST /rules/{id}/test` runs a rule against real mail and writes no mail: it reads retained evidence metadata, and the only thing it writes is that the test happened. Four samples — `current_snapshot` (what is in the inbox now), `historical_sample` (90 days, wherever the mail went), `selected_items` (threads you name), `synthetic_examples` (subjects you type, and every such report says it says nothing about your mailbox). `POST /rules/preview` does the same for a rule that has not been written down.
+
+A report gives counts, every match with the conditions that matched, the values captured, and the effect **rendered with those values** — *"Transfer 207960765 lands in 3 days"*, not the template. Each matched row carries `requires_confirmation: true`, and the report carries `executed: false`, because a list of mail a rule would file reads like a list of mail that is about to be filed.
+
+It guesses at both kinds of mistake and says they are guesses. **False positive candidates** are matches on mail reviewed under another group — the commonest sign a pattern is about the sender rather than the notice. **False negative candidates** are items that failed exactly one condition out of two or more; failing the only condition there is, is not a near miss.
+
+Warnings are about the result rather than the rule: matched nothing, matched more than a quarter of the sample, had nothing to try against, or disagreed with the rule's own `positive_examples` / `negative_examples`. None of them blocks anything.
+
+Testing a proposed rule is what makes it `tested`, and `tested` is the only way to `confirmed`. Testing an active rule records nothing — it is a question, not a step. See [ADR-0027](docs/adr/ADR-0027-a-rule-is-tried-before-it-is-agreed-to.md).
+
 ## Capabilities
 
 Capabilities are data, in `config/capabilities.yaml` — not branches in code. Adding one, reordering the review, or changing what an action may do is a configuration change.

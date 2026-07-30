@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.18.0
+  version: 0.19.0
   description: >-
     API for the Timmeny Admin OS daily review workflow.
 
@@ -1262,8 +1262,683 @@ paths:
                   may_execute_without_approval:
                     type: boolean
                 additionalProperties: true
+  /session/start:
+    post:
+      operationId: startSession
+      summary: "Wake up: load the playbook and state the session's plan"
+      description: >-
+        The first call of any admin interaction - "hello", "good morning",
+        "good evening", "let's begin", "start my admin", "check my inbox",
+        "what do I need to do?". Loads the playbook in force, holds that exact
+        revision for the whole session, reads Gmail afresh, and states what
+        will be worked through and in what order. It presents no work: print
+        opening.text exactly, then plan.message exactly, then wait. Begin only
+        when Brian says to. A session already open is set aside, keeping
+        everything it recorded; resuming one is continueSession.
+
+
+        Session-only wishes are arguments here: order brings activities to the
+        front for today, skip sets them aside for today, only works those
+        alone. None of them changes the playbook - that is
+        proposePlaybookChange, and it takes a confirmation.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sync:
+                  type: boolean
+                  default: true
+                limit:
+                  type: integer
+                  default: 50
+                scope:
+                  type: string
+                  enum: [inbox, archived, snoozed, everything]
+                  description: >-
+                    Which mail the email activity reviews. Omit it for the
+                    inbox.
+                order:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Activity keys to work first, in this order, for this
+                    session only - "do the calendar first today".
+                only:
+                  type: array
+                  items:
+                    type: string
+                  description: Work only these activities this session.
+                skip:
+                  type: array
+                  items:
+                    type: string
+                  description: >-
+                    Activities to set aside for this session only - "skip
+                    objectives today".
+      responses:
+        "200":
+          description: A session, with its plan stated and nothing worked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+  /session/continue:
+    post:
+      operationId: continueSession
+      summary: Resume the session already under way
+      description: >-
+        For "continue", "where was I?", "pick up where we left off", and only
+        where Brian says something like one of them. Returns the same session
+        with the revision it opened with, even where the playbook has changed
+        since. It never opens a session: with none under way it answers 404.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playbook_id:
+                  type: string
+      responses:
+        "200":
+          description: The session under way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          description: No session is under way.
+  /session/{session_id}:
+    get:
+      operationId: getSession
+      summary: Report where a session stands
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The session, changing nothing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+  /session/{session_id}/begin:
+    post:
+      operationId: beginSession
+      summary: Start working the plan, from the activity in hand
+      description: >-
+        Call when Brian says to begin, and not before. Starts the activity
+        plan.current names, or the first that can be worked. For the email
+        activity this also begins the review plan in the playbook's step
+        order, so the review comes back with its first group.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The session, with the activity under way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+  /session/{session_id}/activities/{activity_key}/begin:
+    post:
+      operationId: beginSessionActivity
+      summary: Start one activity by name
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: activity_key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The session, with that activity under way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "409":
+          description: >-
+            That activity cannot be worked - it was set aside for this
+            session, or it is in the playbook and not built yet.
+  /session/{session_id}/advance:
+    post:
+      operationId: advanceSession
+      summary: Move on to the next activity
+      description: >-
+        Only once the activity in hand is finished with, which Admin OS asks
+        of the work rather than takes on trust: an email review holding
+        decisions the mailbox has not seen is not finished, and the session
+        stays on it. Where the closeout is reached, closeout reports what the
+        session did and what it still owes.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The session, at the next activity or completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+  /playbook:
+    get:
+      operationId: getActivePlaybook
+      summary: The playbook a session would run right now
+      description: >-
+        For "what do we do in a session?", "what's in the playbook?" and
+        before proposing a change. Read the activities and their steps as
+        written; the order is the order.
+      parameters:
+        - name: playbook_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The playbook in force.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playbook"
+  /playbook/revisions:
+    get:
+      operationId: listPlaybookRevisions
+      summary: Every version this playbook has had
+      parameters:
+        - name: playbook_id
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The revisions, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /playbook/revisions/{revision_id}:
+    get:
+      operationId: getPlaybookRevision
+      summary: One version of the playbook, exactly as it stood
+      parameters:
+        - name: revision_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: That revision.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /playbook/propose:
+    post:
+      operationId: proposePlaybookChange
+      summary: Write down a change to the playbook, and change nothing yet
+      description: >-
+        For "from now on, always do objectives before email", "make blocked
+        to-dos part of every review", "remove Legal from the sequence",
+        "always end with a calendar review" - anything meant to hold beyond
+        today. Changes nothing: it records what the playbook would become.
+        Read effect back sentence by sentence, with order_now and order_after,
+        and confirm only when Brian says so.
+
+
+        A wish about today is not this. "Skip objectives today" is the skip
+        argument to startSession.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [changes]
+              properties:
+                changes:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: "#/components/schemas/PlaybookChange"
+                rationale:
+                  type: string
+                  description: Why Brian asked for it, in his words where he gave one.
+                playbook_id:
+                  type: string
+      responses:
+        "200":
+          description: >-
+            A proposed revision. It is not in force, and validation says
+            whether it could be.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revision:
+                    type: object
+                    additionalProperties: true
+                  effect:
+                    type: array
+                    items:
+                      type: string
+                    description: >-
+                      What the change does, in sentences. Read these back
+                      before confirming.
+                  order_now:
+                    type: array
+                    items:
+                      type: string
+                  order_after:
+                    type: array
+                    items:
+                      type: string
+                  message:
+                    type: string
+                    description: One paragraph, safe to show as written.
+                  validation:
+                    $ref: "#/components/schemas/PlaybookValidation"
+                  confirm_action:
+                    type: object
+                    description: >-
+                      The exact request that makes this the playbook. Send it
+                      only after Brian confirms.
+                    additionalProperties: true
+                additionalProperties: true
+        "400":
+          description: >-
+            The change does not describe anything the playbook contains, and
+            was not recorded.
+  /playbook/revisions/{revision_id}/confirm:
+    post:
+      operationId: confirmPlaybookChange
+      summary: Make a proposed revision the playbook
+      description: >-
+        Send only on an explicit yes to the effect that was read back. From
+        here the next session runs it; a session under way keeps the revision
+        it opened with.
+      parameters:
+        - name: revision_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+      responses:
+        "200":
+          description: The playbook, now on the confirmed revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playbook"
+        "400":
+          description: Not confirmed, so nothing changed.
+        "409":
+          description: >-
+            That revision cannot be run against the capabilities configured
+            now, and did not become the playbook.
+  /playbook/revisions/{revision_id}/activate:
+    post:
+      operationId: activatePlaybookRevision
+      summary: Put an earlier revision back in force
+      description: >-
+        For "go back to how it was last week", naming a revision that already
+        exists. Same confirmation as confirming a change.
+      parameters:
+        - name: revision_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+      responses:
+        "200":
+          description: The playbook, now on that revision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playbook"
 components:
   schemas:
+    Session:
+      type: object
+      description: >-
+        One run of the playbook against the state of the day. plan is what
+        will be worked and in what order; review is the email activity's
+        review, in the same shape startDailyReview returns, and every review
+        operation takes its review_id. Activity progress and execution are
+        separate claims: an activity completed never means the mailbox
+        changed.
+      properties:
+        session_id:
+          type: string
+        status:
+          type: string
+          enum: [proposed, in_progress, completed, abandoned]
+          description: >-
+            proposed means the plan is stated and nothing has begun. Do not
+            present work while a session is proposed.
+        opened_at:
+          type: string
+          format: date-time
+        begun_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        supersedes_session_id:
+          type: string
+          nullable: true
+        playbook:
+          type: object
+          description: >-
+            The playbook revision this session runs, which may not be the one
+            in force if it changed since. validation.warnings say what the
+            playbook names and Admin OS cannot do yet.
+          additionalProperties: true
+        opening:
+          $ref: "#/components/schemas/ReviewOpening"
+        plan:
+          $ref: "#/components/schemas/SessionPlan"
+        prompt:
+          type: object
+          nullable: true
+          description: >-
+            What Brian is being asked, with the exact requests that answer it.
+            Present the choices and wait.
+          additionalProperties: true
+        review:
+          type: object
+          nullable: true
+          description: >-
+            The email activity's review, in the shape startDailyReview
+            returns. Work it with the review operations, on review_id.
+          additionalProperties: true
+        closeout:
+          $ref: "#/components/schemas/SessionCloseout"
+        warnings:
+          type: array
+          items:
+            type: string
+    SessionPlan:
+      type: object
+      description: >-
+        What this session will work through. Render the activities in this
+        order and with these labels: do not add one, drop one, merge two, or
+        rename any. message says it in sentences and is safe to show as
+        written.
+      properties:
+        message:
+          type: string
+          description: The plan in sentences. Show it exactly, before any work.
+        activities:
+          type: array
+          items:
+            type: object
+            properties:
+              activity_key:
+                type: string
+              label:
+                type: string
+              position:
+                type: integer
+              state:
+                type: string
+                enum:
+                  [pending, in_progress, completed, skipped, unavailable]
+                description: >-
+                  unavailable means the playbook names it and Admin OS cannot
+                  do it yet. Say that; never present it as reviewed, and never
+                  quietly leave it out.
+              availability:
+                type: string
+                enum: [built, planned]
+              data_source:
+                type: string
+                enum: [gmail, monday, calendar, none]
+              intro:
+                type: string
+                description: >-
+                  Why the activity is in the session, in the playbook's words.
+                  Show it when the activity starts.
+              steps:
+                type: array
+                description: >-
+                  What the activity covers, in order. Announce these before
+                  working it.
+                items:
+                  type: object
+                  properties:
+                    key:
+                      type: string
+                    label:
+                      type: string
+                    position:
+                      type: integer
+                    count:
+                      type: integer
+                      nullable: true
+                    state:
+                      type: string
+                      nullable: true
+              review_id:
+                type: string
+                nullable: true
+        working:
+          type: array
+          items:
+            type: string
+        skipped:
+          type: array
+          items:
+            type: string
+          description: Set aside for this session only.
+        unavailable:
+          type: array
+          items:
+            type: string
+        current:
+          type: string
+          nullable: true
+        activity_number:
+          type: integer
+          nullable: true
+        activity_count:
+          type: integer
+        overrides:
+          type: array
+          items:
+            type: string
+          description: >-
+            What differs from the playbook for this session alone, in
+            sentences. Say them, so a change to today is never taken for a
+            change to every day.
+    SessionCloseout:
+      type: object
+      nullable: true
+      description: >-
+        The end of the session, counted rather than characterised. Activities
+        completed and actions verified are different claims: report
+        awaiting_execution as work still owed, and never call a session
+        finished while it is above zero without saying so.
+      properties:
+        activities_completed:
+          type: array
+          items:
+            type: string
+        activities_skipped:
+          type: array
+          items:
+            type: string
+        activities_unavailable:
+          type: array
+          items:
+            type: string
+        items_reviewed:
+          type: integer
+        actions_verified:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Counted from verified execution only.
+        deferred:
+          type: integer
+        dismissed:
+          type: integer
+        awaiting_execution:
+          type: integer
+          description: Rows decided whose action the mailbox has not seen.
+        playbook_changes_proposed:
+          type: array
+          items:
+            type: string
+        playbook_changes_activated:
+          type: array
+          items:
+            type: string
+        message:
+          type: string
+          description: One paragraph, safe to show as written.
+    Playbook:
+      type: object
+      description: >-
+        The playbook and the revision it is on. Read the activities and steps
+        as configured; the labels are Brian's words for his own work.
+      properties:
+        revision:
+          type: object
+          additionalProperties: true
+        playbook:
+          type: object
+          additionalProperties: true
+        validation:
+          $ref: "#/components/schemas/PlaybookValidation"
+        message:
+          type: string
+        fell_back_from:
+          type: object
+          nullable: true
+          description: >-
+            The revision that stopped being runnable, where one did. Say that
+            the playbook fell back rather than pretending it did not.
+          additionalProperties: true
+    PlaybookValidation:
+      type: object
+      description: >-
+        Whether a playbook can be run. An error means it never becomes active
+        and names the key at fault; report it as written rather than guessing
+        what was meant. A warning means it runs and is honest about itself.
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              path:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+    PlaybookChange:
+      type: object
+      description: >-
+        One change to the playbook. Send exactly what Brian asked for and
+        nothing more: an operation he did not ask for is a change he never
+        agreed to.
+      required: [operation]
+      properties:
+        operation:
+          type: string
+          enum:
+            [
+              enable_activity,
+              disable_activity,
+              move_activity,
+              enable_step,
+              disable_step,
+              move_step,
+              add_step,
+              remove_step,
+              update_intro,
+            ]
+        activity_key:
+          type: string
+        capability_key:
+          type: string
+          description: The step, for step operations.
+        before_activity_key:
+          type: string
+        after_activity_key:
+          type: string
+        before_capability_key:
+          type: string
+        after_capability_key:
+          type: string
+        label:
+          type: string
+        intro:
+          type: string
     OutstandingExecution:
       type: object
       description: >-

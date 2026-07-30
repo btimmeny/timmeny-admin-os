@@ -1,0 +1,53 @@
+# A playbook over the pair of test capabilities, with one activity that is
+# named and not built, so a session's honesty about it can be tested.
+schema_version: 1
+playbook_id: brian-default
+name: Test session playbook
+
+session:
+  opening_mode: propose_then_start
+  auto_start_first_activity: false
+  show_activity_sequence: true
+  show_subprocess_before_activity: true
+  finish_with_summary: true
+
+activities:
+  - activity_key: email_review
+    label: Email
+    enabled: true
+    order: 10
+    fresh_data_required: true
+    intro: We'll read your inbox as it is now.
+    steps:
+      - capability_key: admin
+        label: Admin
+        enabled: true
+        order: 10
+      - capability_key: financial_taxes
+        label: Financial/Taxes
+        enabled: true
+        order: 20
+
+  - activity_key: objectives_review
+    label: Objectives
+    enabled: true
+    order: 20
+    fresh_data_required: true
+    intro: We'll review your objectives.
+    steps:
+      - capability_key: quarterly_objectives
+        label: Quarterly objectives
+        enabled: true
+        order: 10
+
+  - activity_key: session_closeout
+    label: Closeout
+    enabled: true
+    order: 100
+    fresh_data_required: false
+    intro: We'll finish with what was decided and what Gmail confirmed.
+    steps:
+      - capability_key: session_summary
+        label: Session summary
+        enabled: true
+        order: 10

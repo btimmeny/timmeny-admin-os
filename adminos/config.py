@@ -12,6 +12,7 @@ GMAIL_CLIENT_SECRET_VARIABLE = "GMAIL_CLIENT_SECRET"
 GMAIL_REFRESH_TOKEN_VARIABLE = "GMAIL_REFRESH_TOKEN"
 GMAIL_WRITE_ENABLED_VARIABLE = "GMAIL_WRITE_ENABLED"
 CAPABILITIES_PATH_VARIABLE = "CAPABILITIES_PATH"
+PLAYBOOK_PATH_VARIABLE = "ASSISTANT_PLAYBOOK_PATH"
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -68,6 +69,11 @@ def get_gmail_credentials() -> GmailCredentials | None:
 def get_capabilities_path() -> str | None:
     """An override for the capability configuration file, mainly for tests."""
     return get_optional_setting(CAPABILITIES_PATH_VARIABLE)
+
+
+def get_playbook_path() -> str | None:
+    """An override for the playbook a fresh database is seeded from."""
+    return get_optional_setting(PLAYBOOK_PATH_VARIABLE)
 
 
 def is_gmail_write_enabled() -> bool:

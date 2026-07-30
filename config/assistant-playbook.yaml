@@ -1,0 +1,135 @@
+# The session playbook: what a session works through, and in what order.
+#
+# This file is the playbook Admin OS starts from. It is seeded into the
+# database the first time a session asks for it, and from then on the database
+# is the authority: Brian changes the playbook by asking, and every change is a
+# new revision with the old one kept. Editing this file changes what a fresh
+# database begins with, not what a running one is doing.
+#
+# Every `activity_key` and every `capability_key` must be something this
+# service implements. An unknown key makes the revision invalid, and an invalid
+# revision never becomes active — a playbook quietly missing a step is a
+# session quietly not doing something that was asked for.
+#
+# Activities that are known but not built yet — objectives, to-dos, calendar,
+# follow-ups — may sit here enabled. A session names them, says plainly that
+# they are not built, and moves on. That is deliberate: the playbook is Brian's
+# operating process, and the parts of it Admin OS cannot do yet are worth
+# saying out loud rather than hiding.
+
+schema_version: 1
+playbook_id: brian-default
+name: Brian's daily session
+
+session:
+  # The session states its plan and waits. Beginning without being told to is
+  # the one thing an assistant cannot take back.
+  opening_mode: propose_then_start
+  auto_start_first_activity: false
+  show_activity_sequence: true
+  show_subprocess_before_activity: true
+  finish_with_summary: true
+
+activities:
+  - activity_key: email_review
+    label: Email
+    enabled: true
+    order: 10
+    fresh_data_required: true
+    intro: >-
+      We'll read your inbox as it is now and work through it a group at a time.
+    steps:
+      - capability_key: admin
+        label: Admin
+        enabled: true
+        order: 10
+      - capability_key: financial_taxes
+        label: Financial/Taxes
+        enabled: true
+        order: 20
+      - capability_key: career_advisor_calls
+        label: Career - Advisory/Expert Calls
+        enabled: true
+        order: 30
+
+  - activity_key: objectives_review
+    label: Objectives
+    enabled: false
+    order: 20
+    fresh_data_required: true
+    intro: >-
+      We'll review your active objectives, what is at risk, and what has no
+      next action.
+    steps:
+      - capability_key: quarterly_objectives
+        label: Quarterly objectives
+        enabled: true
+        order: 10
+      - capability_key: at_risk_objectives
+        label: At-risk objectives
+        enabled: true
+        order: 20
+      - capability_key: objectives_without_next_actions
+        label: Objectives without next actions
+        enabled: true
+        order: 30
+
+  - activity_key: todo_review
+    label: To-Dos
+    enabled: false
+    order: 30
+    fresh_data_required: true
+    intro: >-
+      We'll review your open work, starting with what is late.
+    steps:
+      - capability_key: overdue_todos
+        label: Overdue
+        enabled: true
+        order: 10
+      - capability_key: due_today
+        label: Due today
+        enabled: true
+        order: 20
+      - capability_key: blocked_todos
+        label: Blocked
+        enabled: true
+        order: 30
+      - capability_key: waiting_todos
+        label: Waiting on others
+        enabled: true
+        order: 40
+
+  - activity_key: calendar_review
+    label: Calendar
+    enabled: false
+    order: 40
+    fresh_data_required: true
+    intro: >-
+      We'll review today's schedule, what clashes, and what needs preparing.
+    steps:
+      - capability_key: todays_calendar
+        label: Today
+        enabled: true
+        order: 10
+      - capability_key: calendar_conflicts
+        label: Conflicts
+        enabled: true
+        order: 20
+      - capability_key: meeting_preparation
+        label: Preparation needed
+        enabled: true
+        order: 30
+
+  - activity_key: session_closeout
+    label: Closeout
+    enabled: true
+    order: 100
+    fresh_data_required: false
+    intro: >-
+      We'll finish with what was decided, what Gmail confirmed, and what is
+      still owed.
+    steps:
+      - capability_key: session_summary
+        label: Session summary
+        enabled: true
+        order: 10

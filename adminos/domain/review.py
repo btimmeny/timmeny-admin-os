@@ -46,6 +46,7 @@ from adminos.domain.plan import (
     read_run_actions,
     read_run_items,
     review_summary,
+    settle_plan,
 )
 from adminos.domain.rules import LearnedRule, read_active_rules
 from adminos.domain.scopes import supersede_open_scopes
@@ -1250,6 +1251,7 @@ def refresh_states(
     if states and states == {GroupState.COMPLETED}:
         run.state = RunState.COMPLETED
         run.completed_at = run.completed_at or moment
+        settle_plan(session, plan, moment)
     elif not decided:
         run.state = RunState.NOT_STARTED
         run.completed_at = None

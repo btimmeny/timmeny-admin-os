@@ -343,6 +343,29 @@ def test_a_review_of_nothing_is_planned_and_finished(
     assert body["summary"]["standing"]["decided_not_executed"] == 0
 
 
+def test_a_review_of_nothing_does_not_ask_to_be_begun(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Completed, proposed, and "begin this plan?" is the review contradicting itself.
+
+    A snapshot of an empty mailbox is finished the moment it is taken. Asking
+    Brian to agree the plan of a morning with no work in it leaves him with a
+    question whose only honest answer changes nothing, and a review reporting
+    two states at once. The way to see mail that arrives later is a fresh
+    review, which is what the response offers instead.
+    """
+    mailbox(monkeypatch)
+
+    body = proposed(client)
+
+    assert body["status"] == "completed"
+    assert body["plan"]["status"] == "active"
+    assert body["prompt"] is None
+    assert body["current_group"] is None
+    assert body["restart_available"] is True
+    assert "Nothing to review" in body["plan"]["message"]
+
+
 def test_an_abandoned_review_takes_no_plan(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

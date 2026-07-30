@@ -1251,6 +1251,12 @@ def plan_message(
             f"{len(planned)} groups, in this order: {sizes}. {scope.describes()} "
             f"{NOTHING_HAPPENS_ON_APPROVAL} Begin this review plan?"
         )
+    if current is None and not any(group.items for group in planned):
+        return (
+            f"Nothing to review: this snapshot of the mailbox had no items in any "
+            f"of its {len(planned)} groups. {scope.describes()} Mail that arrives "
+            "later is seen by a fresh review, not by this one."
+        )
     if current is None:
         return f"Every planned group is finished with. {owed}"
     if not resumed:

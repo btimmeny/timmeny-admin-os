@@ -50,6 +50,17 @@ def read_contract() -> dict[str, object]:
     return yaml.safe_load(CONTRACT_PATH.read_text())
 
 
+def response_schema(document: dict, path: str, method: str) -> dict:
+    """The 200 schema, through the component where the response names one."""
+    schema = document["paths"][path][method]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    reference = schema.get("$ref")
+    if reference is None:
+        return schema
+    return document["components"]["schemas"][reference.rsplit("/", 1)[1]]
+
+
 def operations(paths: dict[str, dict[str, object]]) -> set[tuple[str, str]]:
     return {
         (path, method)
@@ -144,9 +155,8 @@ def test_the_contract_says_refreshing_mail_is_a_restart() -> None:
         assert phrase in restart.lower()
         assert phrase in instructions.lower()
     for response in ("/review/start", "/review/runs/{run_id}"):
-        properties = document["paths"][response][
-            "post" if response == "/review/start" else "get"
-        ]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
+        method = "post" if response == "/review/start" else "get"
+        properties = response_schema(document, response, method)["properties"]
         assert properties["restart_available"]["type"] == "boolean"
         assert (
             properties["restart_action"]["$ref"] == "#/components/schemas/RestartAction"
@@ -165,9 +175,8 @@ def test_the_contract_says_every_entry_reads_the_mailbox() -> None:
     assert "The only operation that resumes" in resume
     assert "Superseded" in schemas
     for response in ("/review/start", "/review/runs/{run_id}"):
-        properties = document["paths"][response][
-            "post" if response == "/review/start" else "get"
-        ]["responses"]["200"]["content"]["application/json"]["schema"]["properties"]
+        method = "post" if response == "/review/start" else "get"
+        properties = response_schema(document, response, method)["properties"]
         assert properties["snapshot_at"]["format"] == "date-time"
         assert properties["supersedes_review_id"]["type"] == "string"
         assert properties["superseded"]["$ref"] == "#/components/schemas/Superseded"
@@ -224,8 +233,7 @@ def test_the_contract_says_a_decision_is_not_a_done_thing() -> None:
         "message",
     }
 
-    start = document["paths"]["/review/start"]["post"]["responses"]["200"]
-    started = start["content"]["application/json"]["schema"]["properties"]
+    started = response_schema(document, "/review/start", "post")["properties"]
     assert "outstanding_execution" in started
 
     decisions = document["paths"]["/review/runs/{run_id}/groups/{capability_key}/decisions"]

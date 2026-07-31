@@ -45,6 +45,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0027 — A Rule Is Tried Before It Is Agreed To, and Trying It Changes Nothing](./ADR-0027-a-rule-is-tried-before-it-is-agreed-to.md)
 - [ADR-0028 — The Client Reads the Mailbox, Admin OS Owns the Process](./ADR-0028-the-client-reads-the-mailbox-and-admin-os-owns-the-process.md)
 - [ADR-0029 — The Monday Scope Is Configured by Asking, and Checked on the Board](./ADR-0029-the-monday-scope-is-configured-by-asking-and-checked-on-the-board.md)
+- [ADR-0030 — The Configuration Is Read From Monday, as the Board Holds It](./ADR-0030-the-configuration-is-read-from-monday-as-the-board-holds-it.md)
 
 ## Candidate Decisions
 

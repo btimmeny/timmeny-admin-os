@@ -1,4 +1,4 @@
-"""The five tools, and nothing behind them but the services they call.
+"""The tools, and nothing behind them but the services they call.
 
 Each one parses its arguments, opens a transaction, calls an application
 service and renders the answer. That is deliberately all: the same operations
@@ -10,15 +10,22 @@ client reads the Inbox through the Gmail app and submits what it made of it,
 and every tool here is about the process, not the mail.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session
 
+from adminos.adapters.monday import MondayError, open_monday_client
+from adminos.config import (
+    CONFIG_BOARD_ID_VARIABLE,
+    get_config_board_id,
+    get_monday_token,
+)
 from adminos.db.engine import DatabaseNotConfigured, session_scope
+from adminos.domain.configuration import ConfigurationUnavailable, read_configuration
 from adminos.domain.guided_review import (
     ASSISTANT_ACTOR,
     Completion,
@@ -79,10 +86,10 @@ class Tool(Generic[Arguments]):
     title: str
     description: str
     arguments: type[Arguments]
-    run: Callable[[Arguments], ToolResult]
+    run: Callable[[Arguments], Awaitable[ToolResult]]
 
-    def invoke(self, raw: dict[str, Any]) -> ToolResult:
-        return self.run(self.arguments.model_validate(raw))
+    async def invoke(self, raw: dict[str, Any]) -> ToolResult:
+        return await self.run(self.arguments.model_validate(raw))
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -125,13 +132,25 @@ class CompleteReviewPhaseArguments(BaseModel):
     phase_key: str = Field(default=EMAIL_REVIEW, min_length=1, max_length=255)
 
 
-def start_admin_review(arguments: StartAdminReviewArguments) -> ToolResult:
+class GetAdminOsConfigurationArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configuration_type: Literal["email"] = Field(
+        default="email",
+        description=(
+            "Always 'email'. To-do rules and reference data are on the board and "
+            "are not read here yet."
+        ),
+    )
+
+
+async def start_admin_review(arguments: StartAdminReviewArguments) -> ToolResult:
     with session_scope() as session:
         view = start_review_service(session, fresh=arguments.fresh, actor=ASSISTANT_ACTOR)
         return ToolResult(payload=review_payload(session, view))
 
 
-def read_admin_review(arguments: ReadAdminReviewArguments) -> ToolResult:
+async def read_admin_review(arguments: ReadAdminReviewArguments) -> ToolResult:
     with session_scope() as session:
         view = read_review_service(session, arguments.review_id)
         payload = review_payload(session, view)
@@ -141,7 +160,7 @@ def read_admin_review(arguments: ReadAdminReviewArguments) -> ToolResult:
         return ToolResult(payload=payload)
 
 
-def read_review_playbook(arguments: ReadReviewPlaybookArguments) -> ToolResult:
+async def read_review_playbook(arguments: ReadReviewPlaybookArguments) -> ToolResult:
     with session_scope() as session:
         view, phase = read_phase_playbook_service(
             session, arguments.review_id, arguments.phase_key
@@ -157,7 +176,7 @@ def read_review_playbook(arguments: ReadReviewPlaybookArguments) -> ToolResult:
         )
 
 
-def record_email_review(arguments: EmailReviewSubmission) -> ToolResult:
+async def record_email_review(arguments: EmailReviewSubmission) -> ToolResult:
     with session_scope() as session:
         outcome = record_email_review_service(session, arguments, actor=ASSISTANT_ACTOR)
         if isinstance(outcome, Refused):
@@ -165,12 +184,38 @@ def record_email_review(arguments: EmailReviewSubmission) -> ToolResult:
         return ToolResult(payload=recorded_payload(outcome))
 
 
-def complete_review_phase(arguments: CompleteReviewPhaseArguments) -> ToolResult:
+async def complete_review_phase(arguments: CompleteReviewPhaseArguments) -> ToolResult:
     with session_scope() as session:
         completion = complete_phase_service(
             session, arguments.review_id, arguments.phase_key, actor=ASSISTANT_ACTOR
         )
         return ToolResult(payload=completion_payload(completion))
+
+
+async def get_admin_os_configuration(
+    arguments: GetAdminOsConfigurationArguments,
+) -> ToolResult:
+    """Read the configuration board. Nothing is written, kept or cached."""
+    board_id = get_config_board_id()
+    if board_id is None:
+        raise ConfigurationUnavailable(
+            f"{CONFIG_BOARD_ID_VARIABLE} is not set, so Admin OS does not know which "
+            "Monday board carries the configuration. Reading a board nobody named "
+            "would be answering with somebody else's rules."
+        )
+
+    token = get_monday_token()
+    if token is None:
+        raise ConfigurationUnavailable(
+            "MONDAY_API_TOKEN is not configured, so the configuration board cannot "
+            "be read. A review run without it would be run on remembered rules."
+        )
+
+    async with open_monday_client(token) as client:
+        configuration = await read_configuration(
+            client, board_id, arguments.configuration_type
+        )
+    return ToolResult(payload=configuration.payload())
 
 
 TOOLS: tuple[Tool[Any], ...] = (
@@ -229,6 +274,17 @@ TOOLS: tuple[Tool[Any], ...] = (
         arguments=CompleteReviewPhaseArguments,
         run=complete_review_phase,
     ),
+    Tool(
+        name="get_admin_os_configuration",
+        title="Read the configuration Brian keeps in Monday",
+        description=(
+            "The active processes and email rules from Brian's Monday configuration "
+            "board, in Order. Read at the start of a review and follow them. Reads "
+            "Monday and changes nothing there."
+        ),
+        arguments=GetAdminOsConfigurationArguments,
+        run=get_admin_os_configuration,
+    ),
 )
 
 TOOL_NAMES = tuple(tool.name for tool in TOOLS)
@@ -240,7 +296,7 @@ def find(name: str) -> Tool[Any] | None:
     return BY_NAME.get(name)
 
 
-def call(name: str, arguments: dict[str, Any]) -> ToolResult:
+async def call(name: str, arguments: dict[str, Any]) -> ToolResult:
     """Run one tool, turning every refusal into something the caller can read."""
     tool = find(name)
     if tool is None:
@@ -250,7 +306,7 @@ def call(name: str, arguments: dict[str, Any]) -> ToolResult:
         )
 
     try:
-        return tool.invoke(arguments)
+        return await tool.invoke(arguments)
     except ValidationError as exc:
         return ToolResult(
             payload={
@@ -267,7 +323,9 @@ def call(name: str, arguments: dict[str, Any]) -> ToolResult:
             is_error=True,
         )
     except (
+        ConfigurationUnavailable,
         DatabaseNotConfigured,
+        MondayError,
         ReviewNotFound,
         ReviewRefused,
         ReviewPlaybookError,

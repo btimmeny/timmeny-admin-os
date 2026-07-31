@@ -63,16 +63,16 @@ class Request:
     is_notification: bool
 
 
-def handle_json(body: str, version: str) -> tuple[dict[str, Any] | None, str]:
+async def handle_json(body: str, version: str) -> tuple[dict[str, Any] | None, str]:
     """Read one JSON-RPC message and answer it. Returns the answer and version."""
     try:
         message = json.loads(body)
     except json.JSONDecodeError as exc:
         return error_response(None, PARSE_ERROR, f"The request is not valid JSON: {exc}"), version
-    return handle_message(message, version)
+    return await handle_message(message, version)
 
 
-def handle_message(
+async def handle_message(
     message: Any, version: str = PROTOCOL_VERSION
 ) -> tuple[dict[str, Any] | None, str]:
     if isinstance(message, list):
@@ -92,7 +92,7 @@ def handle_message(
         return error_response(identifier, exc.code, exc.message, exc.data), version
 
     try:
-        result, version = dispatch(request, version)
+        result, version = await dispatch(request, version)
     except JsonRpcError as exc:
         if request.is_notification:
             return None, version
@@ -135,7 +135,7 @@ def read_request(message: Any) -> Request:
     )
 
 
-def dispatch(request: Request, version: str) -> tuple[dict[str, Any], str]:
+async def dispatch(request: Request, version: str) -> tuple[dict[str, Any], str]:
     if request.method == "initialize":
         return initialize(request.params)
     if request.method.startswith("notifications/"):
@@ -145,7 +145,7 @@ def dispatch(request: Request, version: str) -> tuple[dict[str, Any], str]:
     if request.method == "tools/list":
         return list_tools(), version
     if request.method == "tools/call":
-        return call_tool(request.params), version
+        return await call_tool(request.params), version
     raise JsonRpcError(METHOD_NOT_FOUND, f"This server has no method {request.method!r}.")
 
 
@@ -172,7 +172,7 @@ def list_tools() -> dict[str, Any]:
     return {"tools": [tool.definition() for tool in tools.TOOLS]}
 
 
-def call_tool(params: dict[str, Any]) -> dict[str, Any]:
+async def call_tool(params: dict[str, Any]) -> dict[str, Any]:
     name = params.get("name")
     if not isinstance(name, str) or not name:
         raise JsonRpcError(INVALID_PARAMS, "A tool call must name a tool.")
@@ -184,7 +184,7 @@ def call_tool(params: dict[str, Any]) -> dict[str, Any]:
         raise JsonRpcError(INVALID_PARAMS, "Tool arguments must be an object.")
 
     try:
-        result = tools.call(name, arguments)
+        result = await tools.call(name, arguments)
     except tools.ToolError as exc:
         raise JsonRpcError(INVALID_PARAMS, str(exc)) from exc
 

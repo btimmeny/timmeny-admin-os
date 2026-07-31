@@ -48,7 +48,7 @@ async def call_mcp(
     """
     body = (await request.body()).decode("utf-8", errors="replace")
     asked = request.headers.get(PROTOCOL_VERSION_HEADER) or protocol.PROTOCOL_VERSION
-    answer, version = protocol.handle_json(body, asked)
+    answer, version = await protocol.handle_json(body, asked)
 
     if answer is None:
         return Response(status_code=ACCEPTED, headers={PROTOCOL_VERSION_HEADER: version})

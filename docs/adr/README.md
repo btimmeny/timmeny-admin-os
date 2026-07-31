@@ -42,6 +42,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0024 — A Monday Scope Is Exact, or the Review Does Not Look](./ADR-0024-a-monday-scope-is-exact-or-it-does-not-look.md)
 - [ADR-0025 — A Rule Matches on Fields Admin OS Can Answer For](./ADR-0025-a-rule-matches-on-fields-that-exist.md)
 - [ADR-0026 — A Rule Is a Record With Versions, and a Standing It Has to Earn](./ADR-0026-a-rule-is-a-record-with-versions.md)
+- [ADR-0027 — A Rule Is Tried Before It Is Agreed To, and Trying It Changes Nothing](./ADR-0027-a-rule-is-tried-before-it-is-agreed-to.md)
 
 ## Candidate Decisions
 

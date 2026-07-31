@@ -888,6 +888,53 @@ Both are unauthenticated, because ChatGPT's import sends no headers; neither sho
 
 `info.version` changes whenever a request body in the contract changes, which is the only thing that turns a stale import into a refused call. `request_shape` is a digest of every request body in the document, ignoring prose, and `tests/test_adminos_gpt_schema.py` records the fingerprint each published version carried: changing a shape without a new version fails there rather than in front of Brian.
 
+## The MCP server: the client reads the mailbox, Admin OS owns the process
+
+The review behind `/review/*` is built from mail Admin OS synced and classified by Gmail label. The review behind `/mcp` is the other way round: ChatGPT reads the Inbox through the Gmail app, classifies it against the playbook Admin OS publishes, and submits what it made of it. Admin OS validates, records, audits and moves the phase on, and never reads a mailbox. See [ADR-0028](./docs/adr/ADR-0028-the-client-reads-the-mailbox-and-admin-os-owns-the-process.md).
+
+`POST /mcp` speaks JSON-RPC over HTTP — `initialize`, `tools/list`, `tools/call`, `ping` — behind the same API key as everything else, with no session to keep. `GET /mcp/tools` reads the same tool list without JSON-RPC, for checking a deployment against the instructions. Five tools, each a thin adapter over `adminos/domain/guided_review.py`:
+
+- `start_admin_review` — always a fresh review of the mailbox as it is now, pinned to the playbook version in force. Any review still open is set aside and kept, named in `supersedes_review_id`.
+- `read_review_playbook` — the groups and their order, the fields every reviewed thread must state, how to present them, when the phase is finished, and the allowed dispositions and urgencies. Configuration, from `config/review-playbook.yaml`, versioned in the same table as the session playbook.
+- `read_admin_review` — where a review stands and what may be called next. No email content.
+- `record_email_review` — every Inbox thread, classified into exactly one group, with the count the client read and one recommended order over all of it.
+- `complete_review_phase` — finishes a phase whose result was accepted, and says what follows.
+
+A submission is refused whole or recorded whole. Wrong playbook version, wrong scope, an unknown group, a missing required field, the same thread twice, a count that disagrees with what was sent, an item missing from the recommended order or one that is not in the review: each is named, with a code and a path, and nothing is written. `source_snapshot.thread_count` is the client's own count of what it read, checked against what it sent — the only way this arrangement can notice a thread that was read and dropped.
+
+Gmail dispositions here are recommendations. Nothing in these tools archives, labels, trashes, replies or sends; executing anything remains the prepared-scope path above. Nothing keeps a message body, and `read_admin_review` returns no subject or sender.
+
+Monday reconciliation, the to-do review and the daily plan are named in every review and return `unavailable`. Completing the email phase leaves the review `partially_complete`, because three quarters of the process is not built.
+
+The instructions for the GPT that holds this connector and the Gmail app are `docs/gpt-admin-review-instructions.md`.
+
+### Connecting ChatGPT to it
+
+| | |
+| --- | --- |
+| URL | `https://timmeny-admin-os-production.up.railway.app/mcp` |
+| Transport | Streamable HTTP (`POST` for every message; no session id, no server-initiated stream) |
+| Authentication | The same API key as the rest of the service, as `Authorization: Bearer <TIMMENY_OS_API_KEY>` or `X-API-Key: <TIMMENY_OS_API_KEY>`. No OAuth: nothing here advertises an authorization server, and a `401` carries no `WWW-Authenticate`, so a client is not sent looking for one. |
+| Content types | Send `Accept: application/json, text/event-stream`. A client that accepts a stream is answered with one SSE `message` event; a client that asks only for JSON gets JSON. Both carry the same JSON-RPC body. |
+| Health | `GET /health`, which is not the MCP endpoint and is not authenticated. |
+
+This is an MCP connector rather than a GPT Action, so there is no OpenAPI document and no `servers:` block to fill in — the URL above goes in the connector's URL field. The Action contract at `/gpt/action-schema.yaml` is the other integration and is unrelated to this one.
+
+What the official MCP Python client sees when it connects:
+
+```text
+initialize:
+  protocolVersion: 2025-06-18
+  serverInfo: timmeny-admin-os 1.0.0
+  capabilities.tools: listChanged=False
+tools/list:
+  start_admin_review     required=[]
+  read_admin_review      required=['review_id']
+  read_review_playbook   required=['review_id']
+  record_email_review    required=['review_id', 'playbook_version_id', 'source_snapshot']
+  complete_review_phase  required=['review_id']
+```
+
 ## Learning
 
 A correction is evidence, not an instruction. Every decision that answers a recommendation is recorded as a learning event — with the metadata the decision turned on, the actor, the policy version, and the provenance, and never message content — and no event changes what the review recommends.
@@ -1062,6 +1109,7 @@ Set these environment variables:
 - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`: optional Gmail OAuth credentials. All three must be present; a partially configured environment counts as unconfigured. See `docs/77-First-Slice-Setup.md`.
 - `CAPABILITIES_PATH`: optional path to the capability configuration. Defaults to `config/capabilities.yaml`, which is what defines the Gmail labels in scope. See [Capabilities](#capabilities).
 - `ASSISTANT_PLAYBOOK_PATH`: optional path to the playbook a fresh database is seeded from. Defaults to `config/assistant-playbook.yaml`. Once seeded, the database is the playbook and this is not read again.
+- `REVIEW_PLAYBOOK_PATH`: optional path to the review playbook the MCP tools seed from. Defaults to `config/review-playbook.yaml`, and likewise is not read again once seeded.
 - `GMAIL_WRITE_ENABLED`: whether Gmail writes are permitted. Defaults to `false`.
 - `LOG_LEVEL`: optional log level for `adminos` loggers. Defaults to `INFO`.
 
@@ -1212,12 +1260,15 @@ The URL can be renamed later in Railway after the service/domain rename is compl
 - `adminos/capabilities/` loads and validates the capability configuration.
 - `config/capabilities.yaml` defines the capabilities the daily review presents.
 - `config/assistant-playbook.yaml` seeds the playbook a session runs, after which the database holds it.
+- `config/review-playbook.yaml` seeds the review playbook the MCP tools publish: the phases, the groups and their order, and what every reviewed thread must state.
+- `adminos/mcp/` is the MCP transport: JSON-RPC, tool schemas, and adapters that call the same services the API does.
 - `adminos/db/migrations/` contains the Alembic migration history.
 - `scripts/migrate.sh` applies migrations, and is Railway's pre-deploy command.
 - `requirements.txt` defines the Python dependencies.
 - `requirements-dev.txt` defines local test dependencies.
 - `railway.json` configures Railway deployment.
 - `docs/gpt-action-openapi.yaml` defines the GPT Action schema, served at `/gpt/action-schema.yaml`.
+- `docs/gpt-admin-review-instructions.md` instructs the GPT that holds the Gmail app and the Admin OS MCP connector.
 - `tests/` covers the current API surface.
 - `docs/charter.md` defines the initial scope, values, and near-term direction.
 - `docs/architecture.md` describes the target operating model.

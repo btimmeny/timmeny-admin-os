@@ -1,7 +1,9 @@
 # ADR-0001 — Admin OS Is the Coordination Layer
 
-**Status:** Accepted  
+**Status:** Accepted, amended by [ADR-0028](./ADR-0028-the-client-reads-the-mailbox-and-admin-os-owns-the-process.md)  
 **Date:** 2026-07-27
+
+> **Amendment.** ADR-0028 revises one line of this decision: an approved source app may gather evidence for the reasoning client. Admin OS publishes the workflow, operating model, durable state, configuration and constraints; ChatGPT reads approved sources, reasons over them according to the Admin OS playbook, and records structured decisions back. Coordination, writes, verification and audit remain here as described below.
 
 ## Context
 

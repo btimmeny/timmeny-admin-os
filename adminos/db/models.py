@@ -827,3 +827,171 @@ class RuleEvent(Base):
     actor: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
     detail: Mapped[JsonDocument | None] = mapped_column(JSON_TYPE)
     created_at: Mapped[datetime] = created_at_column()
+
+
+class GuidedReview(Base):
+    """A review Admin OS owns the process of and ChatGPT does the reading for.
+
+    Distinct from `review_runs`, which is a review Admin OS built itself out of
+    Gmail evidence it holds. This one holds no mail: ChatGPT reads the Inbox
+    through the Gmail app, classifies it against the playbook this review pins,
+    and submits the interpretation. What is kept here is the interpretation and
+    the thread ids it is about — never a message body.
+
+    `snapshot_at` is when the review was opened, which is the earliest the
+    mailbox could have been read for it. When the mailbox was actually read is
+    the snapshot's own `observed_at`, and the two are kept apart because only
+    one of them is evidence.
+    """
+
+    __tablename__ = "guided_reviews"
+    __table_args__ = (Index("ix_guided_reviews_date_status", "review_date", "status"),)
+
+    id: Mapped[str] = id_column()
+    review_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    playbook_id: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    playbook_revision_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("playbook_revisions.id"), nullable=False
+    )
+    """The revision this review is held to, for its whole life."""
+    current_phase_key: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    supersedes_review_id: Mapped[str | None] = mapped_column(
+        String(ID_LENGTH), ForeignKey("guided_reviews.id", ondelete="SET NULL")
+    )
+    """The review this one replaced, where starting fresh replaced one."""
+    started_at: Mapped[datetime] = created_at_column()
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = updated_at_column()
+
+
+class GuidedReviewPhase(Base):
+    """One phase of a review, and where it has got to.
+
+    A phase the playbook names and this service cannot run is `unavailable`
+    from the moment the review opens and stays that way. It is never completed,
+    because nothing was done.
+    """
+
+    __tablename__ = "guided_review_phases"
+    __table_args__ = (
+        UniqueConstraint("review_id", "phase_key", name="uq_guided_review_phase_key"),
+    )
+
+    id: Mapped[str] = id_column()
+    review_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("guided_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    phase_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_column()
+    updated_at: Mapped[datetime] = updated_at_column()
+
+
+class GuidedReviewSnapshot(Base):
+    """What the source looked like when it was read, as the reader reported it.
+
+    Kept because a review is of a mailbox at a moment, and the count it claims
+    to have read is what the submission is checked against. A later submission
+    writes a new snapshot rather than editing this one: the earlier reading
+    stays as the record of what was said at the time.
+    """
+
+    __tablename__ = "guided_review_snapshots"
+    __table_args__ = (Index("ix_guided_snapshots_phase", "phase_id", "recorded_at"),)
+
+    id: Mapped[str] = id_column()
+    review_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("guided_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    phase_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH),
+        ForeignKey("guided_review_phases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    mailbox_scope: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    thread_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime] = created_at_column()
+
+
+class GuidedReviewItem(Base):
+    """One Inbox thread as the review reads it, and what it recommends.
+
+    The recommendation lives on the item because there is exactly one per
+    thread in this milestone, and it is a recommendation: nothing here has
+    been done to Gmail, and nothing here can do anything to Gmail.
+    """
+
+    __tablename__ = "guided_review_items"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "source_thread_id", name="uq_guided_item_thread"),
+        Index("ix_guided_items_group", "snapshot_id", "group_key"),
+    )
+
+    id: Mapped[str] = id_column()
+    review_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("guided_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    phase_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH),
+        ForeignKey("guided_review_phases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH),
+        ForeignKey("guided_review_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_thread_id: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    group_key: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    position: Mapped[int | None] = mapped_column(Integer)
+    """Where this thread comes in the one recommended order across the review."""
+    subject: Mapped[str | None] = mapped_column(Text)
+    sender: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[str | None] = mapped_column(Text)
+    why_it_matters: Mapped[str | None] = mapped_column(Text)
+    recommended_next_action: Mapped[str | None] = mapped_column(Text)
+    recommended_disposition: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    task_required: Mapped[bool | None] = mapped_column(Boolean)
+    urgency: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    confidence: Mapped[float | None] = mapped_column(Float)
+    uncertainties: Mapped[list[str] | None] = mapped_column(JSON_TYPE)
+    created_at: Mapped[datetime] = created_at_column()
+
+
+class GuidedReviewEvent(Base):
+    """What happened to a review, in the order it happened.
+
+    Ordered by `sequence` rather than by time, because several events belong to
+    one request and a timestamp cannot separate them: Postgres gives every
+    statement in a transaction the same `now()`. An audit trail that reorders
+    itself is not one.
+    """
+
+    __tablename__ = "guided_review_events"
+    __table_args__ = (
+        UniqueConstraint("review_id", "sequence", name="uq_guided_event_sequence"),
+    )
+
+    id: Mapped[str] = id_column()
+    review_id: Mapped[str] = mapped_column(
+        String(ID_LENGTH), ForeignKey("guided_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    phase_key: Mapped[str | None] = mapped_column(String(SHORT_TEXT_LENGTH))
+    kind: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    actor: Mapped[str] = mapped_column(String(SHORT_TEXT_LENGTH), nullable=False)
+    detail: Mapped[JsonDocument | None] = mapped_column(JSON_TYPE)
+    created_at: Mapped[datetime] = created_at_column()

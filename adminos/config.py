@@ -13,6 +13,7 @@ GMAIL_REFRESH_TOKEN_VARIABLE = "GMAIL_REFRESH_TOKEN"
 GMAIL_WRITE_ENABLED_VARIABLE = "GMAIL_WRITE_ENABLED"
 CAPABILITIES_PATH_VARIABLE = "CAPABILITIES_PATH"
 PLAYBOOK_PATH_VARIABLE = "ASSISTANT_PLAYBOOK_PATH"
+REVIEW_PLAYBOOK_PATH_VARIABLE = "REVIEW_PLAYBOOK_PATH"
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
@@ -74,6 +75,11 @@ def get_capabilities_path() -> str | None:
 def get_playbook_path() -> str | None:
     """An override for the playbook a fresh database is seeded from."""
     return get_optional_setting(PLAYBOOK_PATH_VARIABLE)
+
+
+def get_review_playbook_path() -> str | None:
+    """An override for the review playbook a fresh database is seeded from."""
+    return get_optional_setting(REVIEW_PLAYBOOK_PATH_VARIABLE)
 
 
 def is_gmail_write_enabled() -> bool:

@@ -43,6 +43,7 @@ ADRs are append-only historical records. Superseded decisions are marked as supe
 - [ADR-0025 — A Rule Matches on Fields Admin OS Can Answer For](./ADR-0025-a-rule-matches-on-fields-that-exist.md)
 - [ADR-0026 — A Rule Is a Record With Versions, and a Standing It Has to Earn](./ADR-0026-a-rule-is-a-record-with-versions.md)
 - [ADR-0027 — A Rule Is Tried Before It Is Agreed To, and Trying It Changes Nothing](./ADR-0027-a-rule-is-tried-before-it-is-agreed-to.md)
+- [ADR-0028 — The Client Reads the Mailbox, Admin OS Owns the Process](./ADR-0028-the-client-reads-the-mailbox-and-admin-os-owns-the-process.md)
 
 ## Candidate Decisions
 

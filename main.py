@@ -6,11 +6,13 @@ from typing import Any
 
 import httpx
 from fastapi import Body, FastAPI, Header, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from adminos.api.actions import router as actions_router
 from adminos.api.admin import router as admin_router
 from adminos.api.learning import router as learning_router
+from adminos.api.mcp import router as mcp_router
 from adminos.api.playbook import router as playbook_router
 from adminos.api.review import router as review_router
 from adminos.api.rules import router as rules_router
@@ -36,6 +38,19 @@ KEY_INITIATIVES_GROUP_TITLE = "Key Initiatives"
 GS_KEY_INITIATIVES_GROUP_ID_VARIABLE = "GS_KEY_INITIATIVES_GROUP_ID"
 
 app = FastAPI(title="timmeny-admin-os", version="0.6.0")
+app.add_middleware(
+    CORSMiddleware,
+    # A browser MCP client — the Inspector, and whatever ChatGPT runs one day —
+    # cannot call an endpoint that answers no preflight. Any origin may ask,
+    # because asking is not being answered: every operation still needs the API
+    # key, and nothing here authenticates by cookie, so a page that does not
+    # hold the key learns nothing by sending the request from a browser.
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["MCP-Protocol-Version"],
+)
 app.include_router(admin_router)
 app.include_router(review_router)
 app.include_router(actions_router)
@@ -44,6 +59,7 @@ app.include_router(playbook_router)
 app.include_router(rules_router)
 app.include_router(session_router)
 app.include_router(schema_router)
+app.include_router(mcp_router)
 
 
 class TodoList(StrEnum):

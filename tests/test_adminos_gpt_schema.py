@@ -36,6 +36,7 @@ REQUEST_SHAPES: dict[str, str] = {
     "0.19.0": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
     "0.19.1": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
     "0.19.2": "878bfb8aaa7990be4c13368c5b07d82ee8bda9a10df319db5b54ba9bf03767c7",
+    "0.20.0": "ca81b5e87e3ea52ba755e30cccd1c47b9d9387e977c55990b5c257b8438dd001",
 }
 """Every version of the contract, and the request shapes it published.
 
@@ -47,6 +48,12 @@ editing the shape under an existing one is what this record makes visible.
 Two versions may share a shape — 0.12.1 shortened descriptions for ChatGPT's
 importer and asked for nothing new — but one shape must never be published
 under two versions with different content, which is what the mapping checks.
+
+Everything up to 0.19.2 was fingerprinted without resolving the components a
+body references, so those digests are a record of what was published rather
+than something recomputable from the document today. From 0.20.0 the
+referenced component is part of the shape, which is what it always was to a
+GPT reading the contract.
 """
 
 IMPORTER_PROSE_LIMIT = 300

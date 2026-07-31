@@ -449,9 +449,35 @@ class UpdateIntro(StrictModel):
     intro: str
 
 
-PlaybookChange = (
+class SetMondayScope(StrictModel):
+    """Which Monday items count as today's work, in board, column and label.
+
+    Every part is given. There is no default board and no default label,
+    because a filter that names something the board does not have matches
+    nothing, and matching nothing on a thousand-item board hands back the whole
+    board looking exactly like an answer.
+    """
+
+    operation: Literal["set_monday_scope"]
+    board_id: str = Field(pattern=r"^\d+$")
+    filters: list[ColumnFilterConfig] = Field(min_length=1)
+
+
+class ClearMondayScope(StrictModel):
+    """Stop reviewing Monday at all, rather than reviewing some of it."""
+
+    operation: Literal["clear_monday_scope"]
+
+
+ActivityChange = (
     EnableActivity | MoveActivity | EnableStep | MoveStep | AddStep | RemoveStep | UpdateIntro
 )
+"""A change to what a session works through, and in what order."""
+
+SourceChange = SetMondayScope | ClearMondayScope
+"""A change to what a session reads besides Gmail."""
+
+PlaybookChange = ActivityChange | SourceChange
 
 
 CHANGE_READER: TypeAdapter[PlaybookChange] = TypeAdapter(PlaybookChange)
@@ -509,6 +535,10 @@ def apply_change(
     working: dict[str, object], change: PlaybookChange, loaded: LoadedCapabilities
 ) -> tuple[dict[str, object], str]:
     document = PlaybookDocument.model_validate(working)
+    if isinstance(change, (SetMondayScope, ClearMondayScope)):
+        sources, said = rewrite_sources(document.sources, change)
+        return document.model_copy(update={"sources": sources}).model_dump(), said
+
     activities = [activity.model_copy(deep=True) for activity in document.ordered()]
     changed, said = rewrite(activities, change, loaded)
     return (
@@ -518,7 +548,7 @@ def apply_change(
 
 
 def rewrite(
-    activities: list[ActivityConfig], change: PlaybookChange, loaded: LoadedCapabilities
+    activities: list[ActivityConfig], change: ActivityChange, loaded: LoadedCapabilities
 ) -> tuple[list[ActivityConfig], str]:
     if isinstance(change, EnableActivity):
         return toggle_activity(activities, change)
@@ -533,6 +563,36 @@ def rewrite(
     if isinstance(change, RemoveStep):
         return remove_step(activities, change)
     return update_intro(activities, change)
+
+
+def rewrite_sources(
+    sources: SourcesConfig, change: SourceChange
+) -> tuple[SourcesConfig, str]:
+    """Name the Monday work in scope, or say there is none.
+
+    The sentence names the ids as given rather than the column titles: nothing
+    here has read the board, and a summary that called `color_mkq6wnv7` the
+    Cadence column would be reading back a guess to be confirmed.
+    """
+    if isinstance(change, ClearMondayScope):
+        if sources.monday is None:
+            raise ChangeRefused(
+                "No Monday board is in scope, so there is nothing to clear."
+            )
+        cleared = sources.model_copy(update={"monday": None})
+        return cleared, (
+            f"Monday board {sources.monday.board_id} is no longer reviewed, and no "
+            "Monday work is in scope."
+        )
+
+    scope = MondayScopeConfig(board_id=change.board_id, filters=change.filters)
+    clauses = " or ".join(
+        f"{filter.column_id} is " + " or ".join(repr(label) for label in filter.labels)
+        for filter in scope.filters
+    )
+    return sources.model_copy(update={"monday": scope}), (
+        f"Monday work in scope is items on board {scope.board_id} where {clauses}."
+    )
 
 
 def find(activities: list[ActivityConfig], key: str) -> ActivityConfig:

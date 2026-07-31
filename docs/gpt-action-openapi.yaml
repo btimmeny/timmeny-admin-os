@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Timmeny Admin OS
-  version: 0.19.2
+  version: 0.20.0
   description: >-
     Admin OS: the session, the playbook it runs, and the mailbox review.
     Served by the deployment that implements it, at /gpt/action-schema.yaml,
@@ -1125,6 +1125,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Playbook"
+  /admin/monday/scope:
+    get:
+      operationId: getMondayScope
+      summary: What the playbook's Monday scope resolves to on the live board
+      description: >-
+        For "is Monday set up?" and after a scope change. Read-only. Reports
+        the columns and labels found on the board and how many items are in
+        scope, or, where one is missing, what the board has instead. Nothing
+        is reviewed and nothing is written.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The scope, resolved or refused with the reason.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MondayScopeCheck"
   /playbook/revisions:
     get:
       operationId: listPlaybookRevisions
@@ -1625,6 +1647,8 @@ components:
           type: boolean
         finish_with_summary:
           type: boolean
+        monday_scope:
+          $ref: "#/components/schemas/MondayScope"
         activities:
           type: array
           items:
@@ -1714,6 +1738,8 @@ components:
               add_step,
               remove_step,
               update_intro,
+              set_monday_scope,
+              clear_monday_scope,
             ]
         activity_key:
           type: string
@@ -1732,6 +1758,93 @@ components:
           type: string
         intro:
           type: string
+        board_id:
+          type: string
+          description: The Monday board, for set_monday_scope. Digits only.
+        filters:
+          type: array
+          description: >-
+            For set_monday_scope: the columns and exact label texts that put an
+            item in today's work. An item qualifies on any one of them. Send
+            only ids and labels Brian gave; the board is checked before he is
+            asked to confirm.
+          items:
+            $ref: "#/components/schemas/MondayScopeFilter"
+    MondayScopeFilter:
+      type: object
+      description: One Monday column, and the labels on it that qualify an item.
+      required: [column_id, labels]
+      properties:
+        column_id:
+          type: string
+          description: Monday's column id, not its title.
+        labels:
+          type: array
+          minItems: 1
+          description: Exact label text. Nothing near enough counts.
+          items:
+            type: string
+    MondayScopeCheck:
+      type: object
+      description: >-
+        The configured scope, checked against the board itself. resolved false
+        with configured true means a column or label is not there: say what
+        detail says and change nothing. items is how many are in scope now.
+      properties:
+        configured:
+          type: boolean
+        resolved:
+          type: boolean
+        board_id:
+          type: string
+          nullable: true
+        board_name:
+          type: string
+          nullable: true
+        describes:
+          type: string
+          nullable: true
+          description: One sentence naming exactly which items are in scope.
+        items:
+          type: integer
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+          description: Why it does not resolve, and what the board has instead.
+        filters:
+          type: array
+          items:
+            type: object
+            properties:
+              column_id:
+                type: string
+              column_title:
+                type: string
+              labels:
+                type: array
+                items:
+                  type: string
+              indexes:
+                type: array
+                description: The label indexes Monday filters by.
+                items:
+                  type: integer
+    MondayScope:
+      type: object
+      description: >-
+        Which Monday items count as today's work, as the playbook names them.
+        Absent means none is configured, which is not the same as none matching.
+        Whether the board carries these is getMondayScope.
+      properties:
+        board_id:
+          type: string
+        match:
+          type: string
+        filters:
+          type: array
+          items:
+            $ref: "#/components/schemas/MondayScopeFilter"
     OutstandingExecution:
       type: object
       description: >-

@@ -14,18 +14,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from adminos.adapters.monday import MondayAuthError, MondayError, open_monday_client
 from adminos.api.deps import read_capability_config
 from adminos.api.security import require_api_key
 from adminos.capabilities.config import LoadedCapabilities
+from adminos.config import get_monday_token
 from adminos.db.engine import DatabaseNotConfigured, session_scope
 from adminos.db.models import PlaybookRevision
 from adminos.domain.activities import ACTIVITIES, Availability
+from adminos.domain.boards import BoardScopeUnresolved, resolve_board_scope
 from adminos.domain.playbook import (
     DEFAULT_PLAYBOOK_ID,
     ChangeRefused,
+    MondayScopeConfig,
     PlaybookChange,
     PlaybookDocument,
     PlaybookError,
+    SetMondayScope,
     ValidationReport,
     read_playbook,
     validate_playbook,
@@ -86,6 +91,23 @@ class ActivityResponse(BaseModel):
     steps: list[StepResponse]
 
 
+class ScopeFilterResponse(BaseModel):
+    column_id: str
+    labels: list[str]
+
+
+class MondayScopeResponse(BaseModel):
+    """Which Monday items count as today's work, as the playbook names them.
+
+    The ids and labels as configured, not as found on the board. Whether the
+    board actually carries them is `GET /admin/monday/scope`, which reads it.
+    """
+
+    board_id: str
+    match: str
+    filters: list[ScopeFilterResponse]
+
+
 class PlaybookDocumentResponse(BaseModel):
     schema_version: int
     playbook_id: str
@@ -93,6 +115,8 @@ class PlaybookDocumentResponse(BaseModel):
     auto_start_first_activity: bool
     finish_with_summary: bool
     activities: list[ActivityResponse]
+    monday_scope: MondayScopeResponse | None = None
+    """Absent means no Monday work is in scope, which is not the same as none."""
 
 
 class RevisionResponse(BaseModel):
@@ -218,7 +242,7 @@ def get_playbook_revision(
 
 
 @router.post("/propose", response_model=ProposalResponse)
-def propose_playbook_change(
+async def propose_playbook_change(
     request: ProposeChangeRequest,
     _: None = Depends(require_api_key),
 ) -> ProposalResponse:
@@ -228,6 +252,7 @@ def propose_playbook_change(
     before and the order after. Confirming is a separate request, because a
     persistent change to how every morning works should take two.
     """
+    await check_monday_scopes(request.changes)
     loaded = read_capability_config()
     with open_database() as session:
         active = load_active(session, loaded, request.playbook_id)
@@ -302,6 +327,46 @@ def activate(revision_id: str, request: ConfirmRequest) -> PlaybookResponse:
         except RevisionRefused as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return build_playbook_response(active)
+
+
+async def check_monday_scopes(changes: list[PlaybookChange]) -> None:
+    """Find a proposed Monday scope on the live board, or refuse to propose it.
+
+    Proposing is the moment a mistyped column or a label nobody created can
+    still be corrected, and the board is the only thing that knows. Monday
+    does not complain about a filter that names nothing: it matches nothing,
+    and a filter matching nothing on a thousand-item board hands back the whole
+    board looking exactly like today's work. So the check happens here rather
+    than at review time, and an unreachable Monday is a refusal too — a scope
+    nobody could check is not a scope Brian can confirm.
+    """
+    wanted = [change for change in changes if isinstance(change, SetMondayScope)]
+    if not wanted:
+        return
+
+    token = get_monday_token()
+    if token is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "MONDAY_API_TOKEN is not configured, so this scope cannot be "
+                "checked against the board. A scope nobody checked is a filter "
+                "that may match nothing and return the whole board."
+            ),
+        )
+
+    async with open_monday_client(token) as client:
+        for change in wanted:
+            config = MondayScopeConfig(board_id=change.board_id, filters=change.filters)
+            try:
+                await resolve_board_scope(client, config)
+            except BoardScopeUnresolved as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except MondayAuthError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
+            except MondayError as exc:
+                logger.error("monday scope check failed: %s", type(exc).__name__)
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @contextmanager
@@ -394,6 +459,22 @@ def build_document_response(document: PlaybookDocument) -> PlaybookDocumentRespo
                 ],
             )
             for activity in document.ordered()
+        ],
+        monday_scope=build_monday_scope_response(document.sources.monday),
+    )
+
+
+def build_monday_scope_response(
+    scope: MondayScopeConfig | None,
+) -> MondayScopeResponse | None:
+    if scope is None:
+        return None
+    return MondayScopeResponse(
+        board_id=scope.board_id,
+        match=scope.match,
+        filters=[
+            ScopeFilterResponse(column_id=filter.column_id, labels=list(filter.labels))
+            for filter in scope.filters
         ],
     )
 

@@ -1,0 +1,148 @@
+# The review playbook: the phases of an administrative review, and what the
+# email phase consists of.
+#
+# This is what a fresh database is seeded with. After that the database is the
+# authority, every change is a new revision, and a review pins the revision it
+# was started under — so editing this file changes what a new deployment
+# begins with, not what a review already under way is being worked against.
+#
+# It is deliberately separate from `assistant-playbook.yaml`. That playbook is
+# the session Admin OS runs itself, reading Gmail and classifying it. This one
+# is the process ChatGPT is handed: Admin OS says what the groups are, what
+# every reviewed thread must say, and when the phase is finished, and ChatGPT
+# reads the mailbox through the Gmail app and answers in those terms.
+#
+# Every `phase_key` must be one this service knows. Phases it knows and has
+# not built — Monday reconciliation, the to-do review, the daily plan — belong
+# here anyway: a review names them, says plainly that they are unavailable,
+# and never reports them as done.
+
+schema_version: 1
+playbook_id: brian-email-review
+name: Brian's administrative review
+
+phases:
+  - phase_key: email_review
+    label: Email review
+    order: 10
+    source:
+      app: gmail
+      mailbox_scope: inbox_only
+
+    # The groups a thread can be put in, and the order they are presented in.
+    # Configuration rather than code: changing how the morning is organised is
+    # a playbook revision, not a deployment.
+    groups:
+      - key: admin_cleanup
+        label: Admin cleanup
+        order: 10
+        purpose: >-
+          Routine administrative messages that can normally be filed,
+          archived, or moved to Trash.
+
+      - key: act_now
+        label: Act now
+        order: 20
+        purpose: Time-sensitive email requiring Brian's immediate action.
+
+      - key: decisions
+        label: Decisions
+        order: 30
+        purpose: Email requiring Brian to make a decision.
+
+      - key: legal
+        label: Legal
+        order: 40
+        purpose: >-
+          Legal, compliance, contractual, or formal-obligation matters.
+
+      - key: financial
+        label: Financial / Taxes
+        order: 50
+        purpose: >-
+          Banking, transfers, taxes, payments, accounts, or other financial
+          administration.
+
+      - key: career
+        label: Career / Advisory / Expert Calls
+        order: 60
+        purpose: >-
+          Career opportunities, recruiters, consulting, advisory, and
+          expert-network requests.
+
+      - key: awaiting_confirmation
+        label: Awaiting confirmation
+        order: 70
+        purpose: >-
+          Items waiting for receipt, completion, settlement, or another
+          confirmation.
+
+      - key: waiting_on_others
+        label: Waiting on others
+        order: 80
+        purpose: >-
+          Items whose next meaningful action belongs to another person or
+          organization.
+
+      - key: informational
+        label: Informational
+        order: 90
+        purpose: Relevant information that does not currently require action.
+
+      - key: archive_or_trash
+        label: Archive or Trash
+        order: 100
+        purpose: >-
+          Low-value or completed mail with no remaining operational need.
+
+      # Mandatory. Every Inbox thread is accounted for, and the honest place
+      # for one that does not clearly belong anywhere is a group that says so
+      # rather than the nearest plausible label.
+      - key: remaining_inbox
+        label: Remaining Inbox
+        order: 999
+        catch_all: true
+        purpose: >-
+          Any Inbox thread that cannot confidently be assigned elsewhere.
+
+    # What every reviewed thread must say. A submission missing one of these
+    # is refused: a review row without its reason is an instruction.
+    required_item_fields:
+      - source_thread_id
+      - subject
+      - sender
+      - received_at
+      - group_key
+      - summary
+      - why_it_matters
+      - recommended_next_action
+      - recommended_gmail_disposition
+      - task_required
+      - urgency
+      - confidence
+      - uncertainties
+
+    rendering:
+      show_empty_groups: false
+      show_group_counts: true
+      show_recommended_order: true
+
+    sorting:
+      within_group: urgency_then_received
+      recommended_order: required
+
+    completion_criteria:
+      every_source_item_classified_once: true
+      catch_all_required: true
+
+  - phase_key: monday_reconciliation
+    label: Monday reconciliation
+    order: 20
+
+  - phase_key: todo_review
+    label: To-do review
+    order: 30
+
+  - phase_key: daily_plan
+    label: Daily plan
+    order: 40

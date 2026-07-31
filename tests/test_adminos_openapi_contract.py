@@ -12,6 +12,7 @@ import yaml
 
 import main
 from adminos.api.review import RestartActionResponse
+from adminos.mcp.tools import TOOL_NAMES
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -151,8 +152,12 @@ def test_every_operation_a_response_offers_is_one_the_gpt_was_given() -> None:
     can name a tool the schema never published, and the GPT is left with a
     next step it cannot reach and a conversation that stalls in front of
     Brian. Every name the code hands out is checked against what is published.
+
+    There are two contracts to be published by now: the OpenAPI Action schema
+    and the MCP tool list. A next step is reachable if either one offers it,
+    and reachable by no other means.
     """
-    published = published_operations()
+    published = published_operations() | set(TOOL_NAMES)
     offered = {
         (source.relative_to(REPOSITORY_ROOT).as_posix(), name)
         for source in (REPOSITORY_ROOT / "adminos").rglob("*.py")
@@ -164,7 +169,7 @@ def test_every_operation_a_response_offers_is_one_the_gpt_was_given() -> None:
     assert offered, "No operation is offered anywhere, which cannot be right."
     unpublished = sorted(f"{where}: {name}" for where, name in offered if name not in published)
     assert not unpublished, (
-        f"These responses offer an operation the schema does not publish: {unpublished}. "
+        f"These responses offer an operation neither contract publishes: {unpublished}. "
         "Publish it, or stop offering it."
     )
     assert (restart.method, restart.path) in {

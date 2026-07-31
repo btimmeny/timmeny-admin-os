@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 from adminos.api.actions import router as actions_router
 from adminos.api.admin import router as admin_router
 from adminos.api.learning import router as learning_router
+from adminos.api.mcp import router as mcp_router
 from adminos.api.playbook import router as playbook_router
 from adminos.api.review import router as review_router
 from adminos.api.rules import router as rules_router
@@ -44,6 +45,7 @@ app.include_router(playbook_router)
 app.include_router(rules_router)
 app.include_router(session_router)
 app.include_router(schema_router)
+app.include_router(mcp_router)
 
 
 class TodoList(StrEnum):

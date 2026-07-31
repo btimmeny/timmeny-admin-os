@@ -175,7 +175,9 @@ def test_initialize_agrees_a_protocol_version_and_names_the_server(
     assert result["capabilities"]["tools"] == {"listChanged": False}
 
 
-def test_the_server_publishes_exactly_the_five_tools(client: TestClient) -> None:
+def test_the_server_publishes_exactly_the_tools_the_review_needs(
+    client: TestClient,
+) -> None:
     response = client.post(
         "/mcp", headers=AUTH, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
     )
@@ -186,6 +188,7 @@ def test_the_server_publishes_exactly_the_five_tools(client: TestClient) -> None
         "read_review_playbook",
         "record_email_review",
         "complete_review_phase",
+        "get_admin_os_configuration",
     ]
     assert published == list(TOOL_NAMES)
 
@@ -752,7 +755,7 @@ def test_the_published_tools_are_readable_without_json_rpc(client: TestClient) -
 def test_the_instructions_name_the_tools_that_exist_and_no_others() -> None:
     """A tool named in the instructions and absent from the server stalls a review."""
     instructions = INSTRUCTIONS_PATH.read_text()
-    named = set(re.findall(r"`([a-z_]+_(?:review|phase|playbook))`", instructions))
+    named = set(re.findall(r"`([a-z_]+_(?:review|phase|playbook|configuration))`", instructions))
 
     assert named == set(TOOL_NAMES), (
         f"The instructions call {sorted(named - set(TOOL_NAMES))} and never call "

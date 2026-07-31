@@ -6,6 +6,7 @@ from dataclasses import dataclass
 DATABASE_URL_VARIABLE = "DATABASE_URL"
 MONDAY_API_TOKEN_VARIABLE = "MONDAY_API_TOKEN"
 TODO_BOARD_ID_VARIABLE = "TODO_BOARD_ID"
+CONFIG_BOARD_ID_VARIABLE = "MONDAY_ADMIN_OS_CONFIG_BOARD_ID"
 TODO_GROUP_ID_VARIABLE = "TODO_GROUP_ID"
 GMAIL_CLIENT_ID_VARIABLE = "GMAIL_CLIENT_ID"
 GMAIL_CLIENT_SECRET_VARIABLE = "GMAIL_CLIENT_SECRET"
@@ -46,6 +47,15 @@ def get_todo_board_id() -> str | None:
 
 def get_todo_group_id() -> str | None:
     return get_optional_setting(TODO_GROUP_ID_VARIABLE)
+
+
+def get_config_board_id() -> str | None:
+    """The Monday board Brian writes the processes and email rules on.
+
+    Unset means unconfigured, and unconfigured is said rather than guessed:
+    reading the wrong board would answer with somebody's configuration.
+    """
+    return get_optional_setting(CONFIG_BOARD_ID_VARIABLE)
 
 
 def get_gmail_credentials() -> GmailCredentials | None:

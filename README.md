@@ -894,13 +894,17 @@ Both are unauthenticated, because ChatGPT's import sends no headers; neither sho
 
 The review behind `/review/*` is built from mail Admin OS synced and classified by Gmail label. The review behind `/mcp` is the other way round: ChatGPT reads the Inbox through the Gmail app, classifies it against the playbook Admin OS publishes, and submits what it made of it. Admin OS validates, records, audits and moves the phase on, and never reads a mailbox. See [ADR-0028](./docs/adr/ADR-0028-the-client-reads-the-mailbox-and-admin-os-owns-the-process.md).
 
-`POST /mcp` speaks JSON-RPC over HTTP — `initialize`, `tools/list`, `tools/call`, `ping` — behind the same API key as everything else, with no session to keep. `GET /mcp/tools` reads the same tool list without JSON-RPC, for checking a deployment against the instructions. Five tools, each a thin adapter over `adminos/domain/guided_review.py`:
+`POST /mcp` speaks JSON-RPC over HTTP — `initialize`, `tools/list`, `tools/call`, `ping` — behind the same API key as everything else, with no session to keep. `GET /mcp/tools` reads the same tool list without JSON-RPC, for checking a deployment against the instructions. Five tools are thin adapters over `adminos/domain/guided_review.py`:
 
 - `start_admin_review` — always a fresh review of the mailbox as it is now, pinned to the playbook version in force. Any review still open is set aside and kept, named in `supersedes_review_id`.
 - `read_review_playbook` — the groups and their order, the fields every reviewed thread must state, how to present them, when the phase is finished, and the allowed dispositions and urgencies. Configuration, from `config/review-playbook.yaml`, versioned in the same table as the session playbook.
 - `read_admin_review` — where a review stands and what may be called next. No email content.
 - `record_email_review` — every Inbox thread, classified into exactly one group, with the count the client read and one recommended order over all of it.
 - `complete_review_phase` — finishes a phase whose result was accepted, and says what follows.
+
+A sixth reads configuration rather than review state:
+
+- `get_admin_os_configuration` — the active processes and email rules from the Monday board named by `MONDAY_ADMIN_OS_CONFIG_BOARD_ID`, in `Order`. See [the configuration board](#the-configuration-board) below.
 
 A submission is refused whole or recorded whole. Wrong playbook version, wrong scope, an unknown group, a missing required field, the same thread twice, a count that disagrees with what was sent, an item missing from the recommended order or one that is not in the review: each is named, with a code and a path, and nothing is written. `source_snapshot.thread_count` is the client's own count of what it read, checked against what it sent — the only way this arrangement can notice a thread that was read and dropped.
 
@@ -920,6 +924,14 @@ The instructions for the GPT that holds this connector and the Gmail app are `do
 | Content types | Send `Accept: application/json, text/event-stream`. A client that accepts a stream is answered with one SSE `message` event; a client that asks only for JSON gets JSON. Both carry the same JSON-RPC body. |
 | Health | `GET /health`, which is not the MCP endpoint and is not authenticated. |
 
+### The configuration board
+
+Brian writes the processes and email rules on a Monday board, and `get_admin_os_configuration` reads them at the start of every review. The board is `MONDAY_ADMIN_OS_CONFIG_BOARD_ID`; the columns are found on it by title — `Configuration Type`, `Status`, `Trigger / Match`, `Instructions / Logic`, `Context Needed`, `Expected Output`, `Order`, `Notes / Guardrails` — because the board is configuration and the ids Monday generated for it are not something this repository can know.
+
+Only items whose `Status` is `Active` are read: `Draft` and `Inactive` are not configuration. `Configuration Type` splits them, `Process` into `processes` and `Email Rule` into `email_configurations`, each sorted by `Order` with an unordered item last. `To-Do Rule` and `Reference Data` items are on the board and are not read yet, and asking for any `configuration_type` other than `email` is refused rather than answered with the email ones.
+
+Everything that could quietly shorten the answer is a refusal instead, naming what the board has: a missing column, a `Status` column with no `Active` label, a `Configuration Type` column missing `Process` or `Email Rule`, and a status filter that came back carrying items it should have excluded. Nothing is written to Monday, and nothing is cached — the board is where Brian changes his mind, and a cached answer is a review run on what he used to think. Monday item ids are the stable references; the `key` on each entry is a slug of the name, for reading. See [ADR-0030](./docs/adr/ADR-0030-the-configuration-is-read-from-monday-as-the-board-holds-it.md).
+
 This is an MCP connector rather than a GPT Action, so there is no OpenAPI document and no `servers:` block to fill in — the URL above goes in the connector's URL field. The Action contract at `/gpt/action-schema.yaml` is the other integration and is unrelated to this one.
 
 What the official MCP Python client sees when it connects:
@@ -935,6 +947,7 @@ tools/list:
   read_review_playbook   required=['review_id']
   record_email_review    required=['review_id', 'playbook_version_id', 'source_snapshot']
   complete_review_phase  required=['review_id']
+  get_admin_os_configuration required=[]
 ```
 
 ## Learning
@@ -1104,6 +1117,7 @@ Set these environment variables:
 - `TIMMENY_OS_API_KEY`: optional shared API key for protected clients such as a GPT Action.
 - `TODO_BOARD_ID`: Monday.com board id for `To Do List`.
 - `TODO_GROUP_ID`: optional Monday.com group id for regular todos.
+- `MONDAY_ADMIN_OS_CONFIG_BOARD_ID`: Monday.com board id for `Admin OS Config`, the processes and email rules `get_admin_os_configuration` reads. Unset means the tool refuses rather than reading a board nobody named. See [the configuration board](#the-configuration-board).
 - `GS_TODO_BOARD_ID`: Monday.com board id for `GS | Initiatives & Action Items`.
 - `GS_TODO_GROUP_ID`: optional Monday.com group id for GS todos.
 - `GS_KEY_INITIATIVES_GROUP_ID`: optional Monday.com group id for `Key Initiatives`. If omitted, the service matches a group named `Key Initiatives`.

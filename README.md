@@ -908,6 +908,33 @@ Monday reconciliation, the to-do review and the daily plan are named in every re
 
 The instructions for the GPT that holds this connector and the Gmail app are `docs/gpt-admin-review-instructions.md`.
 
+### Connecting ChatGPT to it
+
+| | |
+| --- | --- |
+| URL | `https://timmeny-admin-os-production.up.railway.app/mcp` |
+| Transport | Streamable HTTP (`POST` for every message; no session id, no server-initiated stream) |
+| Authentication | The same API key as the rest of the service, as `Authorization: Bearer <TIMMENY_OS_API_KEY>` or `X-API-Key: <TIMMENY_OS_API_KEY>`. No OAuth: nothing here advertises an authorization server, and a `401` carries no `WWW-Authenticate`, so a client is not sent looking for one. |
+| Content types | Send `Accept: application/json, text/event-stream`. A client that accepts a stream is answered with one SSE `message` event; a client that asks only for JSON gets JSON. Both carry the same JSON-RPC body. |
+| Health | `GET /health`, which is not the MCP endpoint and is not authenticated. |
+
+This is an MCP connector rather than a GPT Action, so there is no OpenAPI document and no `servers:` block to fill in — the URL above goes in the connector's URL field. The Action contract at `/gpt/action-schema.yaml` is the other integration and is unrelated to this one.
+
+What the official MCP Python client sees when it connects:
+
+```text
+initialize:
+  protocolVersion: 2025-06-18
+  serverInfo: timmeny-admin-os 1.0.0
+  capabilities.tools: listChanged=False
+tools/list:
+  start_admin_review     required=[]
+  read_admin_review      required=['review_id']
+  read_review_playbook   required=['review_id']
+  record_email_review    required=['review_id', 'playbook_version_id', 'source_snapshot']
+  complete_review_phase  required=['review_id']
+```
+
 ## Learning
 
 A correction is evidence, not an instruction. Every decision that answers a recommendation is recorded as a learning event — with the metadata the decision turned on, the actor, the policy version, and the provenance, and never message content — and no event changes what the review recommends.

@@ -6,6 +6,7 @@ submission that is wrong in any way is refused whole, a phase cannot be
 completed on nothing, and a phase nobody built is never reported as done.
 """
 
+import json
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -214,6 +215,50 @@ def test_an_unknown_method_is_refused_rather_than_ignored(client: TestClient) ->
         "/mcp", headers=AUTH, json={"jsonrpc": "2.0", "id": 1, "method": "resources/list"}
     )
     assert response.json()["error"]["code"] == protocol.METHOD_NOT_FOUND
+
+
+def test_a_client_that_reads_a_stream_is_answered_with_one(client: TestClient) -> None:
+    """The remote MCP clients that matter send this Accept header and stream."""
+    response = client.post(
+        "/mcp",
+        headers={**AUTH, "Accept": "application/json, text/event-stream"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["MCP-Protocol-Version"] == protocol.PROTOCOL_VERSION
+    body = response.text
+    assert body.startswith("event: message\ndata: ")
+    answer = json.loads(body.split("data: ", 1)[1].strip())
+    assert [tool["name"] for tool in answer["result"]["tools"]] == list(TOOL_NAMES)
+
+
+def test_a_client_that_reads_json_is_answered_with_json(client: TestClient) -> None:
+    response = client.post(
+        "/mcp",
+        headers={**AUTH, "Accept": "application/json"},
+        json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+    )
+
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"jsonrpc": "2.0", "id": 1, "result": {}}
+
+
+def test_a_browser_client_is_told_it_may_call(client: TestClient) -> None:
+    """A preflight that goes unanswered is a connector that never connects."""
+    response = client.options(
+        "/mcp",
+        headers={
+            "Origin": "https://inspector.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type, authorization",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "*"
+    assert "POST" in response.headers["access-control-allow-methods"]
 
 
 def test_starting_admin_opens_a_review_pinned_to_a_playbook_version(

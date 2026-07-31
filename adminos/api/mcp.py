@@ -5,8 +5,14 @@ which is the arrangement this whole milestone needs — the client reads the
 mailbox, Admin OS owns the process. The OpenAPI Action contract is untouched
 and keeps working; this is a second door into the same building.
 
-Authenticated exactly like everything else that touches data, and stateless:
-no session header to keep, nothing for a redeploy to lose.
+Streamable HTTP: `POST /mcp` for every message, no session header, no
+server-initiated stream. A client that says it accepts `text/event-stream` is
+answered with one SSE event, because that is what the remote MCP clients in
+use are proven against; one that asks only for JSON gets JSON. Either way it
+is one request and one answer.
+
+Authenticated exactly like everything else that touches data — `X-API-Key` or
+`Authorization: Bearer` — and stateless: nothing for a redeploy to lose.
 """
 
 import json
@@ -26,7 +32,6 @@ MCP_PATH = "/mcp"
 PROTOCOL_VERSION_HEADER = "MCP-Protocol-Version"
 
 EVENT_STREAM = "text/event-stream"
-JSON_MEDIA_TYPE = "application/json"
 
 ACCEPTED = 202
 NOT_ALLOWED = 405
@@ -49,7 +54,7 @@ async def call_mcp(
         return Response(status_code=ACCEPTED, headers={PROTOCOL_VERSION_HEADER: version})
 
     headers = {PROTOCOL_VERSION_HEADER: version}
-    if wants_stream_only(request):
+    if accepts_stream(request):
         return Response(
             content=f"event: message\ndata: {json.dumps(answer)}\n\n",
             media_type=EVENT_STREAM,
@@ -103,10 +108,15 @@ async def published_tools(_: None = Depends(require_api_key)) -> dict[str, objec
     }
 
 
-def wants_stream_only(request: Request) -> bool:
-    """Only stream to a client that asked for a stream and nothing else."""
-    accept = request.headers.get("accept", "")
-    return EVENT_STREAM in accept and JSON_MEDIA_TYPE not in accept
+def accepts_stream(request: Request) -> bool:
+    """Answer as a stream whenever the client says it reads one.
+
+    The transport allows either, and a client that accepts both is entitled to
+    either — but the remote MCP clients this has to work with are proven
+    against servers that stream, and a working connector matters more here
+    than the simpler response.
+    """
+    return EVENT_STREAM in request.headers.get("accept", "")
 
 
 __all__ = ["router"]

@@ -3,6 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-08-12
 **Extends:** [ADR-0023](./ADR-0023-a-session-runs-a-playbook.md), the playbook as configuration; [ADR-0015](./ADR-0015-review-mailbox-scope.md), a review that says what it is of.
+**Extended by:** [ADR-0029](./ADR-0029-the-monday-scope-is-configured-by-asking-and-checked-on-the-board.md) — the labels described below as absent have since been created, and the scope is now configured by asking rather than only in a file.
 
 ## Context
 

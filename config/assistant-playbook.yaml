@@ -39,18 +39,22 @@ session:
 # review stop and say so, because a Monday rule that matches nothing does not
 # fail: it hands back the whole board looking like a filtered result.
 #
-# Left out on purpose until the board carries the labels the process means.
-# The shape it takes:
+# `color_mm5sa3g0` is the Cadence column and `status` is Status — Monday names
+# a column by an id that survives renaming, and both were read off the board
+# rather than typed from the titles.
 #
-# sources:
-#   monday:
-#     board_id: "8962223984"
-#     match: any            # an item qualifies on either column
-#     filters:
-#       - column_id: status
-#         labels: ["Working on it today"]
-#       - column_id: color_mkq6wnv7
-#         labels: ["Daily"]
+# This is what a fresh database starts with. Changing it on a running one is
+# proposePlaybookChange with set_monday_scope, which finds the columns and
+# labels on the board before Brian is asked to confirm anything.
+sources:
+  monday:
+    board_id: "8962223984"
+    match: any            # an item qualifies on either column
+    filters:
+      - column_id: status
+        labels: ["Working on it today"]
+      - column_id: color_mm5sa3g0
+        labels: ["Daily"]
 
 activities:
   - activity_key: email_review

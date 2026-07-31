@@ -489,7 +489,7 @@ A session keeps the revision it opened with. Confirming a change halfway through
 
 ### The Monday scope
 
-Which Monday items count as the day's work is `sources.monday` in the playbook: a board id, column ids, and the exact label texts that qualify an item. An item qualifies on any one of the filters. Nothing here has a default, and the section is absent until the board carries the labels the process means — an unconfigured scope reviews no Monday work and says so, rather than reviewing a guess. See [ADR-0024](docs/adr/ADR-0024-a-monday-scope-is-exact-or-it-does-not-look.md).
+Which Monday items count as the day's work is `sources.monday` in the playbook: a board id, column ids, and the exact label texts that qualify an item. An item qualifies on any one of the filters. Nothing here has a default, and an absent section reviews no Monday work and says so, rather than reviewing a guess. See [ADR-0024](docs/adr/ADR-0024-a-monday-scope-is-exact-or-it-does-not-look.md) and [ADR-0029](docs/adr/ADR-0029-the-monday-scope-is-configured-by-asking-and-checked-on-the-board.md).
 
 ```yaml
 sources:
@@ -499,9 +499,11 @@ sources:
     filters:
       - column_id: status
         labels: ["Working on it today"]
-      - column_id: color_mkq6wnv7
+      - column_id: color_mm5sa3g0   # Cadence; Monday names columns by id
         labels: ["Daily"]
 ```
+
+On a running database the scope is changed by asking, not by editing that file: `set_monday_scope` and `clear_monday_scope` are playbook changes, proposed and confirmed like any other, and the active playbook reports `monday_scope` so what is configured can be read back. Proposing a scope resolves it against the live board first and refuses with what the board has instead where a column or label is missing — the moment a mistyped id can still be corrected is before it is confirmed, not halfway through a morning. Without a Monday token there is no way to check, so there is no proposal either.
 
 The board is read before it is queried: every column id and every label is found on the live board first, and each label is resolved to the index Monday filters by. A missing column or label stops with what was looked for and what the board has instead. This is not defensiveness for its own sake — a Monday rule naming a column that is not there matches nothing, and a filter that matches nothing returns the whole board looking exactly like an answer. For the same reason, what comes back is checked against the labels that were asked for, and a read containing an item matching neither filter is refused rather than trimmed. Nothing widens: the outcomes are the exact items or a stop with the reason.
 

@@ -62,6 +62,11 @@ def request_shape_fingerprint(document: object) -> str:
     new field it has not been told about is a cosmetic problem; a GPT sending
     a request body the API no longer accepts is a refused execution, so it is
     request shapes that a version has to be honest about.
+
+    Components a body names are resolved into it. A body that says only
+    `$ref: PlaybookChange` has exactly the shape of whatever that component
+    says today, so hashing the reference rather than the thing referenced
+    would let a request shape change under a version that never moved.
     """
     shapes: dict[str, object] = {}
     if isinstance(document, dict):
@@ -76,9 +81,46 @@ def request_shape_fingerprint(document: object) -> str:
                     body = operation.get("requestBody")
                     if body is None:
                         continue
-                    shapes[f"{method.upper()} {path}"] = strip_prose(body)
+                    shapes[f"{method.upper()} {path}"] = strip_prose(
+                        inline(body, document, ())
+                    )
     canonical = json.dumps(shapes, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def inline(node: object, document: dict[str, object], seen: tuple[str, ...]) -> object:
+    """The node with every component reference replaced by the component.
+
+    A reference already being resolved is left as itself: a component that
+    contains itself would otherwise be inlined forever.
+    """
+    if isinstance(node, list):
+        return [inline(value, document, seen) for value in node]
+    if not isinstance(node, dict):
+        return node
+
+    reference = node.get("$ref")
+    if isinstance(reference, str):
+        if reference in seen:
+            return {"$ref": reference}
+        component = find_component(document, reference)
+        if component is None:
+            return {"$ref": reference}
+        return inline(component, document, (*seen, reference))
+
+    return {key: inline(value, document, seen) for key, value in node.items()}
+
+
+def find_component(document: dict[str, object], reference: str) -> object:
+    """The component a local reference names, or None where it names nothing."""
+    if not reference.startswith("#/"):
+        return None
+    found: object = document
+    for step in reference[2:].split("/"):
+        if not isinstance(found, dict):
+            return None
+        found = found.get(step)
+    return found
 
 
 def strip_prose(node: object) -> object:
